@@ -19,9 +19,16 @@ Guidance for Claude (and anyone) working in this repository. This repository hol
 - **Tests come from the specs.** Use the acceptance-test IDs (DM-, AU-, EC-, PB-, AD-, SEO-, MD-, ST-, AG-, RTL-) in test names. A spike is small and may be thrown away, but **its tests are kept**.
 - **Plain, simple English** in documents and messages. The founder's first language is not English.
 
-## Commands (to fill in during spike S1)
+## Commands
 
-`pnpm install`, `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test:pg` (PostgreSQL), `pnpm test:docker` (memory-cap and sandbox tests).
+`pnpm install`, then:
+
+- `pnpm ci`: everything below in one go (what CI runs)
+- `pnpm test`, `pnpm lint`, `pnpm format`, `pnpm typecheck`
+- `pnpm check:repo`: the repo checks in `scripts/checks/` (one copy of React, no `blocksToHtml`, product name only in `brand.json`)
+- `pnpm test:pg` and `pnpm test:docker`: placeholders until S2 and S5
+
+The product name lives in `brand.json`. Package scope is `@oks-page/*`.
 
 ## Conventions
 
