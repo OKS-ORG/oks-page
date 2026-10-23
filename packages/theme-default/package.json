@@ -1,0 +1,15 @@
+{
+  "name": "@oks-page/theme-default",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The default theme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

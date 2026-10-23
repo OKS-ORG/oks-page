@@ -1,0 +1,41 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/db"
+    },
+    {
+      "path": "packages/auth"
+    },
+    {
+      "path": "packages/media"
+    },
+    {
+      "path": "packages/admin"
+    },
+    {
+      "path": "packages/editor"
+    },
+    {
+      "path": "packages/renderer"
+    },
+    {
+      "path": "packages/seo"
+    },
+    {
+      "path": "packages/sdk"
+    },
+    {
+      "path": "packages/sandbox"
+    },
+    {
+      "path": "packages/cli"
+    },
+    {
+      "path": "packages/theme-default"
+    }
+  ]
+}
