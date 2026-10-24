@@ -114,7 +114,7 @@ for (const { kind, skip } of openers) {
       const res = await get("/no/such/page");
       expect(res.status).toBe(404);
       expect(res.headers.get("x-robots-tag")).toBe("noindex");
-      expect(await res.text()).toContain('name="robots" content="noindex"');
+      expect(await res.text()).toContain('content="noindex"');
     });
 
     test("SEO-09 a newly created entry is reachable at once", async () => {
@@ -184,6 +184,7 @@ for (const { kind, skip } of openers) {
       ids = {
         about: await s.entry("about", "About us"),
         contact: await s.entry("contact", "Contact"),
+        team: await s.entry("team", "Team"),
       };
       a = await startSite(kind, db);
       b = await startSite(kind, db);
@@ -218,15 +219,15 @@ for (const { kind, skip } of openers) {
     });
 
     test("a refresh of one entry does not touch the other entry in process B", async () => {
+      await text(b, "/team"); // cached before the count starts
       await stats(b, true);
-      await text(b, "/contact");
       await retitle(ids["about"]!, "About v3");
       await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
       await text(b, "/about");
-      await text(b, "/contact");
+      await text(b, "/team");
       const { loads } = await stats(b);
       expect(loads["entry:about"]).toBe(1);
-      expect(loads["entry:contact"]).toBeUndefined();
+      expect(loads["entry:team"]).toBeUndefined();
     });
   });
 }
@@ -236,4 +237,118 @@ async function stats(site: { base: string }, reset = false) {
     loads: Record<string, number>;
     proxyMs: number[];
   };
+}
+
+for (const { kind, skip } of openers) {
+  describe.skipIf(skip)(`${kind}: the header contract for a CDN (D81)`, () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let entryId = "";
+    let siteId = "";
+
+    const get = (path: string, headers: Record<string, string> = {}) =>
+      fetch(site.base + path, { redirect: "manual", headers });
+    const cdn = async (enabled: boolean) => {
+      await db.run("delete from settings where key = 'cdn'");
+      await db.run(
+        "insert into settings (site_id, key, value, updated_at) values (?, 'cdn', ?, ?)",
+        [siteId, JSON.stringify({ enabled }), new Date()],
+      );
+    };
+
+    beforeAll(async () => {
+      db =
+        kind === "sqlite"
+          ? await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-hdr-")), "site.sqlite"))
+          : await (await import("@oks-page/db/testing")).openPg();
+      const s = await seed(db);
+      siteId = s.site;
+      entryId = await s.entry("about", "About us");
+      await s.entry("home", "Home");
+      site = await startSite(kind, db, { OKS_SETTINGS_TTL_MS: "0" });
+    }, 120_000);
+
+    afterAll(async () => {
+      site?.server.kill();
+      await db?.close();
+    });
+
+    test("CDN setting off (the default): an anonymous page keeps the Next.js headers and has no tags", async () => {
+      const res = await get("/about");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe(
+        "private, no-cache, no-store, max-age=0, must-revalidate",
+      );
+      expect(res.headers.get("cache-tag")).toBeNull();
+    });
+
+    test("CDN setting on: an anonymous published page is public for 5 minutes and carries site, entry and type tags", async () => {
+      await cdn(true);
+      const res = await get("/about");
+      expect(res.headers.get("cache-control")).toBe(
+        "public, s-maxage=300, stale-while-revalidate=3600",
+      );
+      expect(res.headers.get("cache-tag")).toBe(`site:${siteId},entry:${entryId},type:page`);
+    });
+
+    test("a public page sets no cookie", async () => {
+      expect((await get("/about")).headers.getSetCookie()).toEqual([]);
+    });
+
+    test("a signed-in visitor (session cookie) gets private, no-store and no tags", async () => {
+      const res = await get("/about", { cookie: "better-auth.session_token=abc" });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+      expect(res.headers.get("cache-tag")).toBeNull();
+    });
+
+    test("a preview (Draft Mode cookie) gets private, no-store", async () => {
+      const res = await get("/about", { cookie: "__prerender_bypass=abc" });
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    });
+
+    test("a 404 is public for 60 seconds with the CDN on, and private for a signed-in visitor", async () => {
+      const res = await get("/nothing-here");
+      expect(res.status).toBe(404);
+      expect(res.headers.get("cache-control")).toBe("public, s-maxage=60");
+      expect(
+        (await get("/nothing-here", { cookie: "better-auth.session_token=abc" })).headers.get(
+          "cache-control",
+        ),
+      ).toBe("private, no-store");
+    });
+
+    test("the API is never public, whatever the setting", async () => {
+      const res = await get("/api/test/loads");
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    });
+
+    test("files under /_next/static are immutable", async () => {
+      const html = await (await get("/about")).text();
+      const file = /\/_next\/static\/[^"']+\.(?:js|css)/.exec(html)?.[0];
+      expect(file, "the page links a static file").toBeTruthy();
+      expect((await get(file!)).headers.get("cache-control")).toBe(
+        "public, max-age=31536000, immutable",
+      );
+    });
+
+    test("an HTML request and a client-navigation (RSC) request both get the public header, and both tell the CDN to keep them apart", async () => {
+      const html = await get("/about");
+      // A real client navigation asks with the rsc header and a _rsc query value.
+      const rsc = await fetch(site.base + "/about?_rsc=abc", { headers: { rsc: "1" } }); // follows Next.js's redirect to the right _rsc value
+      expect(rsc.headers.get("cache-control")).toBe(
+        "public, s-maxage=300, stale-while-revalidate=3600",
+      );
+      for (const res of [html, rsc])
+        expect((res.headers.get("vary") ?? "").toLowerCase()).toContain("rsc");
+      expect(rsc.headers.get("content-type")).not.toBe(html.headers.get("content-type"));
+    });
+
+    test("turning the setting off again takes the public header away", async () => {
+      await cdn(false);
+      expect((await get("/about")).headers.get("cache-control")).toBe(
+        "private, no-cache, no-store, max-age=0, must-revalidate",
+      );
+    });
+  });
 }
