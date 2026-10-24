@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { expect, test } from "vitest";
 import { checkBrandName } from "./brand-name.mjs";
+import { checkFieldQueries } from "./field-queries.mjs";
 import { checkNoBlocksToHtml } from "./no-blocks-to-html.mjs";
 import { checkOneReact } from "./one-react.mjs";
 
@@ -58,4 +59,19 @@ test("D84: the bare product name in code fails; the scope in an import passes", 
     "packages/cli/src/a.ts": 'import { x } from "@oks-page/core";\n',
   });
   expect(checkBrandName(ok)).toEqual([]);
+});
+
+test("DM-19: a raw JSON operator outside the field builder fails; inside it, and in a test, passes", () => {
+  const bad = fixture({
+    "packages/core/src/list.ts": "const q = `select * from entries order by fields ->> 'price'`;\n",
+  });
+  expect(checkFieldQueries(bad)).toHaveLength(1);
+  const bad2 = fixture({ "packages/core/src/list.ts": "sql`json_extract(fields, '$.price')`;\n" });
+  expect(checkFieldQueries(bad2)).toHaveLength(1);
+  const ok = fixture({
+    "packages/db/src/fields/expression.ts": "const e = `(\"fields\" ->> '$.x')`;\n",
+    "packages/db/src/fields/fields.test.ts": "json_extract(fields);\n",
+    "packages/core/src/list.ts": "export const a = 1;\n",
+  });
+  expect(checkFieldQueries(ok)).toEqual([]);
 });
