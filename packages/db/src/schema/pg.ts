@@ -1,4 +1,5 @@
 // GENERATED once from docs/specs/01-data-model.md (CMS-Docs), then maintained by hand.
+// Two property names follow Better Auth (credentialID, lastRequest); the column names are the spec's.
 // The parity test (DM-16) keeps this file and the other dialect equal.
 
 import {
@@ -172,7 +173,7 @@ export const passkeys = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name"),
     publicKey: text("public_key").notNull(),
-    credentialId: text("credential_id").notNull(),
+    credentialID: text("credential_id").notNull(),
     counter: integer("counter").notNull(),
     deviceType: text("device_type").notNull(),
     backedUp: boolean("backed_up").notNull(),
@@ -183,7 +184,7 @@ export const passkeys = pgTable(
   (t) => [
     check("ck_passkeys_id_ulid", sql`length(${t.id}) = 26`),
     check("ck_passkeys_user_id_ulid", sql`length(${t.userId}) = 26`),
-    unique("uq_passkeys_credential_id").on(t.credentialId),
+    unique("uq_passkeys_credential_id").on(t.credentialID),
   ],
 );
 
@@ -193,7 +194,7 @@ export const rateLimits = pgTable(
     id: text("id").primaryKey().notNull(),
     key: text("key").notNull(),
     count: integer("count").notNull(),
-    lastRequestMs: bigint("last_request_ms", { mode: "number" }).notNull(),
+    lastRequest: bigint("last_request_ms", { mode: "number" }).notNull(),
   },
   (t) => [
     check("ck_rate_limits_id_ulid", sql`length(${t.id}) = 26`),

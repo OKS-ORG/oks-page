@@ -10,12 +10,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/harness.d.ts",
+      "default": "./dist/testing/harness.js"
     }
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "ulidx": "^2.4.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
