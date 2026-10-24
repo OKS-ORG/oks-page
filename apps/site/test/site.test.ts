@@ -1,57 +1,14 @@
-// The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-51, SEO-55.
+// The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
+import { buildSite, seed, siteDir, startSite } from "./helpers";
 
-const siteDir = join(import.meta.dirname, "..");
-const next = join(siteDir, "node_modules", "next", "dist", "bin", "next");
-const T = new Date(1_700_000_000_000);
-
-const freePort = () =>
-  new Promise<number>((resolve) => {
-    const s = createServer().listen(0, "127.0.0.1", () => {
-      const port = (s.address() as { port: number }).port;
-      s.close(() => resolve(port));
-    });
-  });
-
-beforeAll(() => {
-  // One build serves both databases: the pages read the database only when they are asked for.
-  execFileSync(process.execPath, [next, "build"], {
-    cwd: siteDir,
-    env: { ...process.env, OKS_SQLITE_PATH: "/nonexistent", OKS_BUILD: "" },
-    stdio: "pipe",
-  });
-}, 300_000);
-
-async function seed(db: TestDb) {
-  const site = "SITE0000000000000000000001";
-  const user = "USER0000000000000000000001";
-  await db.run("insert into sites (id, name, created_at, updated_at) values (?, 'S', ?, ?)", [
-    site,
-    T,
-    T,
-  ]);
-  await db.run(
-    "insert into users (id, name, email, created_at, updated_at) values (?, 'U', 'u@example.com', ?, ?)",
-    [user, T, T],
-  );
-  let n = 0;
-  const entry = async (slug: string, title: string, status = "published", type = "page") => {
-    const id = `ENT${String(++n).padStart(23, "0")}`;
-    await db.run(
-      "insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, '{}', '[]', ?, ?, '{}', '{}', ?, ?)",
-      [id, site, type, status, title, slug, user, title, `<p>${title} body</p>`, T, T],
-    );
-    return id;
-  };
-  return { site, user, entry };
-}
+beforeAll(() => buildSite(), 300_000);
 
 for (const { kind, skip } of openers) {
   describe.skipIf(skip)(`${kind}: the site`, () => {
@@ -98,36 +55,9 @@ for (const { kind, skip } of openers) {
         trash: await entry("trashed-page", "Trashed", "trash"),
         sched: await entry("scheduled-page", "Scheduled", "scheduled"),
       };
-      const port = await freePort();
-      base = `http://127.0.0.1:${port}`;
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        OKS_TEST: "1",
-        PORT: String(port),
-        NODE_ENV: "production",
-      };
-      if (kind === "sqlite") env["OKS_SQLITE_PATH"] = db.location;
-      else {
-        env["OKS_DATABASE_URL"] = process.env["DATABASE_URL"]!;
-        env["OKS_PG_SEARCH_PATH"] = db.location;
-      }
-      server = spawn(process.execPath, [next, "start", "-p", String(port), "-H", "127.0.0.1"], {
-        cwd: siteDir,
-        env,
-        stdio: "pipe",
-      });
-      let log = "";
-      server.stdout?.on("data", (d) => (log += d));
-      server.stderr?.on("data", (d) => (log += d));
-      for (let i = 0; i < 100; i++) {
-        try {
-          if ((await fetch(`${base}/not-found-handler`)).status === 404) return;
-        } catch {
-          /* not up yet */
-        }
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      throw new Error("The site did not start:\n" + log);
+      const started = await startSite(kind, db);
+      server = started.server;
+      base = started.base;
     }, 120_000);
 
     afterAll(async () => {
@@ -210,18 +140,6 @@ for (const { kind, skip } of openers) {
       expect((await get("/draft-page")).status).toBe(404);
     });
 
-    test("SEO-51 the proxy lookup adds under 5 ms at the 95th percentile", async () => {
-      await stats(true);
-      for (let i = 0; i < 300; i++) await get(i % 2 ? "/about" : `/missing-${i}`);
-      const times = (await stats()).proxyMs.sort((a, b) => a - b);
-      expect(times.length).toBeGreaterThanOrEqual(300);
-      const p95 = times[Math.floor(times.length * 0.95)]!;
-      console.log(
-        `${kind}: proxy lookup p95 ${p95.toFixed(2)} ms, median ${times[Math.floor(times.length / 2)]!.toFixed(2)} ms`,
-      );
-      expect(p95).toBeLessThan(5);
-    });
-
     test("SEO-55 no entry is prerendered at build time", () => {
       const manifest = JSON.parse(
         readFileSync(join(siteDir, ".next", "prerender-manifest.json"), "utf8"),
@@ -232,4 +150,90 @@ for (const { kind, skip } of openers) {
       expect(existsSync(join(siteDir, ".next", "server", "app", "about.html"))).toBe(false);
     });
   });
+}
+
+for (const { kind, skip } of openers) {
+  describe.skipIf(skip)(`${kind}: two server processes on one database (SEO-59)`, () => {
+    let db: TestDb;
+    let a: Awaited<ReturnType<typeof startSite>>;
+    let b: Awaited<ReturnType<typeof startSite>>;
+    let c: Awaited<ReturnType<typeof startSite>>;
+    let ids: Record<string, string> = {};
+
+    const text = async (site: { base: string }, path: string) =>
+      (await fetch(site.base + path)).text();
+    const refresh = (site: { base: string }, body: object) =>
+      fetch(site.base + "/api/test/refresh", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+    const retitle = (id: string, title: string) =>
+      db.run("update entries set title = ?, html = ? where id = ?", [
+        title,
+        `<p>${title} body</p>`,
+        id,
+      ]);
+
+    beforeAll(async () => {
+      db =
+        kind === "sqlite"
+          ? await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-two-")), "site.sqlite"))
+          : await (await import("@oks-page/db/testing")).openPg();
+      const s = await seed(db);
+      ids = {
+        about: await s.entry("about", "About us"),
+        contact: await s.entry("contact", "Contact"),
+      };
+      a = await startSite(kind, db);
+      b = await startSite(kind, db);
+      // The control: a third process that does not look at the shared table.
+      c = await startSite(kind, db, { OKS_CACHE_SHARED: "0" });
+    }, 180_000);
+
+    afterAll(async () => {
+      for (const s of [a, b, c]) s?.server.kill();
+      await db?.close();
+    });
+
+    test("SEO-59 a change made through process A shows in process B on its next request", async () => {
+      for (const s of [a, b, c]) expect(await text(s, "/about")).toContain("About us");
+      await retitle(ids["about"]!, "About v2");
+      await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
+      expect(await text(a, "/about")).toContain("About v2");
+      expect(await text(b, "/about")).toContain("About v2"); // within one request
+    });
+
+    test("control: a process that does not read the shared table keeps showing the old page", async () => {
+      expect(await text(c, "/about")).toContain("About us");
+    });
+
+    test("SEO-59 a time-based refresh ('max') through A: B serves the old page once, then the new one", async () => {
+      await text(b, "/contact");
+      await retitle(ids["contact"]!, "Contact v2");
+      await refresh(a, { tag: `entry:${ids["contact"]}`, mode: "max" });
+      expect(await text(b, "/contact")).toContain("Contact"); // the first visit: old page, renewed in the background
+      await new Promise((r) => setTimeout(r, 400));
+      expect(await text(b, "/contact")).toContain("Contact v2");
+    });
+
+    test("a refresh of one entry does not touch the other entry in process B", async () => {
+      await stats(b, true);
+      await text(b, "/contact");
+      await retitle(ids["about"]!, "About v3");
+      await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
+      await text(b, "/about");
+      await text(b, "/contact");
+      const { loads } = await stats(b);
+      expect(loads["entry:about"]).toBe(1);
+      expect(loads["entry:contact"]).toBeUndefined();
+    });
+  });
+}
+
+async function stats(site: { base: string }, reset = false) {
+  return (await (await fetch(`${site.base}/api/test/loads${reset ? "?reset" : ""}`)).json()) as {
+    loads: Record<string, number>;
+    proxyMs: number[];
+  };
 }

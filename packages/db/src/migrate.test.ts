@@ -11,6 +11,9 @@ import { migratePg, migrateSqlite, readMigrations } from "./migrate.js";
 import { pgAvailable, pgUrl } from "./testing/harness.js";
 
 const real = (kind: "sqlite" | "pg") => join(import.meta.dirname, "..", "drizzle", kind);
+const realTags = (kind: "sqlite" | "pg") => readMigrations(real(kind)).map((m) => m.tag);
+const noteTag = (kind: "sqlite" | "pg") => `${String(realTags(kind).length).padStart(4, "0")}_note`;
+const allTags = (kind: "sqlite" | "pg") => [...realTags(kind), noteTag(kind)];
 
 /** A copy of the real migrations plus a second one that adds a column, as a later release would. */
 function withSecondMigration(kind: "sqlite" | "pg", extra = true): string {
@@ -19,16 +22,17 @@ function withSecondMigration(kind: "sqlite" | "pg", extra = true): string {
   if (extra) {
     const journalPath = join(dir, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+    const idx = journal.entries.length;
     journal.entries.push({
-      idx: 1,
+      idx,
       version: journal.entries[0].version,
       when: Date.now(),
-      tag: "0001_note",
+      tag: `${String(idx).padStart(4, "0")}_note`,
       breakpoints: true,
     });
     writeFileSync(journalPath, JSON.stringify(journal));
     writeFileSync(
-      join(dir, "0001_note.sql"),
+      join(dir, `${noteTag(kind)}.sql`),
       kind === "sqlite"
         ? "ALTER TABLE `sites` ADD `note` text;"
         : 'ALTER TABLE "sites" ADD COLUMN "note" text;',
@@ -59,15 +63,17 @@ describe("sqlite migrations", () => {
   test("a fresh install applies every migration and records it", () => {
     const db = open();
     const dir = withSecondMigration("sqlite");
-    expect(migrateSqlite(db, dir)).toEqual(["0000_init", "0001_note"]);
-    expect(db.prepare("select count(*) c from oks_migrations").get()).toEqual({ c: 2 });
+    expect(migrateSqlite(db, dir)).toEqual(allTags("sqlite"));
+    expect(db.prepare("select count(*) c from oks_migrations").get()).toEqual({
+      c: allTags("sqlite").length,
+    });
     expect(migrateSqlite(db, dir)).toEqual([]);
   });
 
   test("DM-21 an upgrade from the previous version ends with the same schema as a fresh install", () => {
     const dir = withSecondMigration("sqlite");
     const upgraded = open();
-    migrateSqlite(upgraded, dir, { upTo: 1 });
+    migrateSqlite(upgraded, dir, { upTo: realTags("sqlite").length });
     const before = sqliteShape(upgraded);
     migrateSqlite(upgraded, dir);
     expect(sqliteShape(upgraded)).not.toEqual(before);
@@ -99,7 +105,7 @@ describe("sqlite migrations", () => {
     const db = open();
     const dir = withSecondMigration("sqlite");
     writeFileSync(
-      join(dir, "0001_note.sql"),
+      join(dir, `${noteTag("sqlite")}.sql`),
       "ALTER TABLE `sites` ADD `note` text;--> statement-breakpoint\nthis is not sql;",
     );
     expect(() => migrateSqlite(db, dir)).toThrow();
@@ -133,8 +139,10 @@ describe("sqlite migrations", () => {
     expect(exited, "the second process must wait while the first holds the lock").toBe(false);
     holder.exec("COMMIT");
     expect(await done, err).toBe(0);
-    expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual(["0000_init", "0001_note"]);
-    expect(holder.prepare("select count(*) c from oks_migrations").get()).toEqual({ c: 2 });
+    expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual(allTags("sqlite"));
+    expect(holder.prepare("select count(*) c from oks_migrations").get()).toEqual({
+      c: allTags("sqlite").length,
+    });
   });
 
   test("DM-20 several processes started together migrate once", async () => {
@@ -157,11 +165,16 @@ describe("sqlite migrations", () => {
     const applied = results.map((r) => JSON.parse(r.out.trim().split("\n").pop()!) as string[]);
     expect(applied.filter((a) => a.length > 0)).toHaveLength(1);
     const check = open(file);
-    expect(check.prepare("select count(*) c from oks_migrations").get()).toEqual({ c: 2 });
+    expect(check.prepare("select count(*) c from oks_migrations").get()).toEqual({
+      c: allTags("sqlite").length,
+    });
   });
 
   test("the real migrations match what the journal lists", () => {
-    expect(readMigrations(real("sqlite")).map((m) => m.tag)).toEqual(["0000_init"]);
+    expect(readMigrations(real("sqlite")).map((m) => m.tag)).toEqual([
+      "0000_init",
+      "0001_cache_tags",
+    ]);
   });
 });
 
@@ -210,10 +223,10 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
     const schema = await freshSchema();
     const c = await client();
     const dir = withSecondMigration("pg");
-    expect(await migratePg(c, dir, { schema })).toEqual(["0000_init", "0001_note"]);
+    expect(await migratePg(c, dir, { schema })).toEqual(allTags("pg"));
     expect(
       (await c.query(`select count(*)::int c from "${schema}".oks_migrations`)).rows[0].c,
-    ).toBe(2);
+    ).toBe(allTags("pg").length);
     expect(await migratePg(c, dir, { schema })).toEqual([]);
   });
 
@@ -222,7 +235,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
     const a = await freshSchema();
     const b = await freshSchema();
     const c = await client();
-    await migratePg(c, dir, { schema: a, upTo: 1 });
+    await migratePg(c, dir, { schema: a, upTo: realTags("pg").length });
     await migratePg(c, dir, { schema: a });
     await migratePg(c, dir, { schema: b });
     const normalise = (s: string[]) => s.map((x) => x.replaceAll(a, "S").replaceAll(b, "S"));
@@ -250,7 +263,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
     const c = await client();
     const dir = withSecondMigration("pg");
     writeFileSync(
-      join(dir, "0001_note.sql"),
+      join(dir, `${noteTag("pg")}.sql`),
       'ALTER TABLE "sites" ADD COLUMN "note" text;--> statement-breakpoint\nthis is not sql;',
     );
     await expect(migratePg(c, dir, { schema })).rejects.toThrow();
@@ -275,7 +288,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
     await new Promise((r) => setTimeout(r, 800));
     expect(finished, "the second server must wait for the lock").toBe(false);
     await holder.query("select pg_advisory_unlock(7203104551)");
-    expect(await run).toEqual(["0000_init", "0001_note"]);
+    expect(await run).toEqual(allTags("pg"));
   });
 
   test("DM-20 several servers started together migrate once", async () => {
@@ -286,10 +299,10 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
     expect(results.filter((r) => r.length > 0)).toHaveLength(1);
     expect(
       (await cs[0]!.query(`select count(*)::int c from "${schema}".oks_migrations`)).rows[0].c,
-    ).toBe(2);
+    ).toBe(allTags("pg").length);
   });
 
   test("the real migrations match what the journal lists", () => {
-    expect(readMigrations(real("pg")).map((m) => m.tag)).toEqual(["0000_init"]);
+    expect(readMigrations(real("pg")).map((m) => m.tag)).toEqual(["0000_init", "0001_cache_tags"]);
   });
 });
