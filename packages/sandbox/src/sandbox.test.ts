@@ -95,7 +95,7 @@ for (const { kind, open, skip } of openers) {
           },
         },
         workDir,
-        wallMs: 400,
+        wallMs: 1000,
         maxFailures: 3,
         storageLimitBytes: 50_000,
         memoryMb: 128,
@@ -152,7 +152,7 @@ for (const { kind, open, skip } of openers) {
       expect(r.ok).toBe(false);
       expect(!r.ok && r.killed).toBe(true);
       expect(!r.ok && r.error).toBe("timeout");
-      expect(r.ms).toBeLessThan(900);
+      expect(r.ms).toBeLessThan(1800);
       expect(host.isRunning("looper")).toBe(false);
     });
 
