@@ -28,12 +28,13 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
   };
 }
 
-/** The cheap question the proxy asks on every request: is there a published entry at this address? */
-export async function publishedSlugExists(slug: string): Promise<boolean> {
+/** The cheap question the proxy asks on every request: is there a published entry at this address? Which one? */
+export async function findPublished(slug: string): Promise<{ id: string; type: string } | null> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
-    `select 1 as one from "entries" where "site_id" = ? and "slug" = ? and "status" = 'published' and "locale" = '' limit 1`,
+    `select "id", "type_key" from "entries" where "site_id" = ? and "slug" = ? and "status" = 'published' and "locale" = '' limit 1`,
     [siteId, slug],
   );
-  return rows.length > 0;
+  const r = rows[0];
+  return r ? { id: String(r["id"]), type: String(r["type_key"]) } : null;
 }

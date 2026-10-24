@@ -18,6 +18,13 @@ export default {
           default: fileURLToPath(new URL("./cache-handlers/shared-tags.cjs", import.meta.url)),
         },
       }),
+  // The admin and the API are for one person at a time: a CDN never stores them (decision D81).
+  async headers() {
+    return ["/admin/:path*", "/api/:path*"].map((source) => ({
+      source,
+      headers: [{ key: "Cache-Control", value: "private, no-store" }],
+    }));
+  },
   serverExternalPackages: ["better-sqlite3", "pg"],
   turbopack: {
     resolveAlias: { "@data": exportBuild ? "./src/data/export.ts" : "./src/data/server.ts" },
