@@ -38,3 +38,13 @@ export async function findPublished(slug: string): Promise<{ id: string; type: s
   const r = rows[0];
   return r ? { id: String(r["id"]), type: String(r["type_key"]) } : null;
 }
+
+/** Every published address, for the export build (static mode), which makes one file per page. */
+export async function listPublishedSlugs(): Promise<string[]> {
+  const siteId = await getSiteId();
+  const rows = await getRunner().all(
+    `select "slug" from "entries" where "site_id" = ? and "status" = 'published' and "locale" = '' order by "slug"`,
+    [siteId],
+  );
+  return rows.map((r) => String(r["slug"]));
+}

@@ -40,5 +40,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|favicon.ico).*)"],
+  matcher: [
+    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|test-form|favicon.ico).*)",
+  ],
 };

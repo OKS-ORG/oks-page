@@ -86,3 +86,36 @@ export async function seed(db: TestDb) {
   };
   return { site, user, entry };
 }
+
+/** The export build (static mode) of the site, written to `out`, reading the given database. */
+export function buildExport(
+  kind: string,
+  db: TestDb,
+  out: string,
+  extra: Record<string, string> = {},
+) {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  if (kind === "sqlite") env["OKS_SQLITE_PATH"] = db.location;
+  else {
+    env["OKS_DATABASE_URL"] = process.env["DATABASE_URL"]!;
+    env["OKS_PG_SEARCH_PATH"] = db.location;
+  }
+  execFileSync(process.execPath, [join(siteDir, "scripts", "build-export.mjs"), out], {
+    cwd: siteDir,
+    env,
+    stdio: "pipe",
+  });
+}
+
+/** A Chrome or Chromium to drive, or null. In CI one must exist. */
+export function findBrowser(): string | null {
+  const candidates = [
+    process.env["CHROMIUM_PATH"],
+    "/opt/pw-browsers/chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+  return candidates.find((p): p is string => typeof p === "string" && existsSync(p)) ?? null;
+}

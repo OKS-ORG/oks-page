@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
-import { buildSite, seed, siteDir, startSite } from "./helpers";
+import { chromium } from "playwright-core";
+import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
 beforeAll(() => buildSite(), 300_000);
 
@@ -109,6 +110,36 @@ for (const { kind, skip } of openers) {
       expect(loads["entry:about"]).toBe(1);
       expect(loads["entry:contact"]).toBeUndefined();
     });
+
+    test.skipIf(!findBrowser())(
+      "SEO-06 a Server Action that saves an entry and calls updateTag makes the next visit fresh",
+      async () => {
+        expect(await text("/contact")).toContain("<h1>Contact</h1>"); // cached
+        const browser = await chromium.launch({
+          executablePath: findBrowser()!,
+          args: ["--no-sandbox"],
+        });
+        try {
+          const page = await browser.newPage();
+          await page.goto(base + "/test-form");
+          await page.getByLabel("id").fill(ids["contact"]!);
+          await page.getByLabel("title").fill("Contact (saved by the action)");
+          await Promise.all([
+            page.waitForLoadState("networkidle"),
+            page.getByRole("button", { name: "Save" }).click(),
+          ]);
+        } finally {
+          await browser.close();
+        }
+        // Not "max": updateTag expires the entry at once, so the very next visit shows the new text.
+        expect(await text("/contact")).toContain("<h1>Contact (saved by the action)</h1>");
+        const row = (
+          await db.run("select revision from entries where id = ?", [ids["contact"]])
+        )[0]!;
+        expect(Number(row["revision"])).toBe(2);
+      },
+      60_000,
+    );
 
     test("SEO-07 an unknown address is a real 404 with noindex, from the proxy", async () => {
       const res = await get("/no/such/page");
@@ -349,6 +380,71 @@ for (const { kind, skip } of openers) {
       expect((await get("/about")).headers.get("cache-control")).toBe(
         "private, no-cache, no-store, max-age=0, must-revalidate",
       );
+    });
+  });
+}
+
+for (const { kind, skip } of openers) {
+  describe.skipIf(skip)(`${kind}: the export build against the server build (ST-01, ST-02)`, () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let out = "";
+    const SITE_URL = "https://example.test";
+
+    // What a visitor sees: the title, the canonical address and the page content, without the framework's own scripts.
+    const pick = (html: string) => ({
+      title: /<title>([^<]*)<\/title>/.exec(html)?.[1],
+      canonical: /<link rel="canonical" href="([^"]*)"/.exec(html)?.[1],
+      heading: /<h1>([^<]*)<\/h1>/.exec(html)?.[1],
+      article: /<article>(.*?)<\/article>/s.exec(html)?.[1],
+    });
+
+    beforeAll(async () => {
+      db =
+        kind === "sqlite"
+          ? await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-exp-")), "site.sqlite"))
+          : await (await import("@oks-page/db/testing")).openPg();
+      const s = await seed(db);
+      await s.entry("home", "Home");
+      await s.entry("about", "About us");
+      await s.entry("docs/intro", "Intro");
+      await s.entry("hidden", "Hidden", "draft");
+      await s.entry("secret", "Secret", "private");
+      site = await startSite(kind, db, { OKS_SITE_URL: SITE_URL });
+      out = mkdtempSync(join(tmpdir(), "oks-exp-out-"));
+      buildExport(kind, db, out, { OKS_SITE_URL: SITE_URL });
+    }, 400_000);
+
+    afterAll(async () => {
+      site?.server.kill();
+      await db?.close();
+    });
+
+    test("ST-01 each published page has the same title, content and canonical address in both builds", async () => {
+      for (const [path, file] of [
+        ["/", "index.html"],
+        ["/about", "about.html"],
+        ["/docs/intro", "docs/intro.html"],
+      ] as const) {
+        const served = pick(await (await fetch(site.base + path)).text());
+        const written = pick(readFileSync(join(out, file), "utf8"));
+        expect(written, path).toEqual(served);
+        expect(written.canonical, path).toBe(path === "/" ? `${SITE_URL}/` : `${SITE_URL}${path}`);
+      }
+    });
+
+    test("ST-02 the export holds only published pages, and a 404 page", () => {
+      expect(existsSync(join(out, "about.html"))).toBe(true);
+      expect(existsSync(join(out, "hidden.html"))).toBe(false);
+      expect(existsSync(join(out, "secret.html"))).toBe(false);
+      expect(existsSync(join(out, "404.html"))).toBe(true);
+    });
+
+    test("the export has no server parts: no API route, no proxy, no database settings", () => {
+      expect(existsSync(join(out, "api"))).toBe(false);
+      const all = readFileSync(join(out, "about.html"), "utf8");
+      expect(all).not.toContain("better-sqlite3");
+      expect(all).not.toContain("OKS_DATABASE_URL");
     });
   });
 }
