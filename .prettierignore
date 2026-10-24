@@ -4,3 +4,5 @@ dist
 pnpm-lock.yaml
 .changeset/*.md
 packages/db/drizzle
+apps/site/.export-build
+apps/site/out
