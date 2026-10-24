@@ -69,5 +69,5 @@ jobs:
           docker run --rm --privileged --network host \
             -v "$PWD:/work" -w /work \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
-            -e OKS_EXPECT_MEMORY_CAP=1 \
+            -e OKS_EXPECT_MEMORY_CAP=1 -e OKS_DEBUG_SANDBOX=1 \
             node:22 bash -c "corepack enable && pnpm install --frozen-lockfile && pnpm exec tsc -b && pnpm exec vitest run packages/sandbox"

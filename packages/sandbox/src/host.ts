@@ -243,6 +243,7 @@ export class SandboxHost {
       return { ...body, ms: ms() } as CallResult;
     } catch (e) {
       const timedOut = (e as Error).name === "TimeoutError" || (e as Error).name === "AbortError";
+      if (process.env.OKS_DEBUG_SANDBOX) console.error("[oks sandbox] call failed:", e);
       this.stop(p);
       await this.recordFailure(
         p,
