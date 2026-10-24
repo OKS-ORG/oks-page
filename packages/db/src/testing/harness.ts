@@ -4,9 +4,9 @@
 import Database from "better-sqlite3";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
+import { migratePg, migrateSqlite } from "../migrate.js";
 
 const root = join(import.meta.dirname, "..", "..", "drizzle");
 
@@ -27,20 +27,7 @@ export interface TestDb {
   close(): Promise<void>;
 }
 
-export function migrationFiles(kind: Kind): string[] {
-  const dir = join(root, kind === "sqlite" ? "sqlite" : "pg");
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((f) => readFileSync(join(dir, f), "utf8"));
-}
-
-export function statements(file: string): string[] {
-  return file
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+export const migrationsFolder = (kind: Kind) => join(root, kind === "sqlite" ? "sqlite" : "pg");
 
 export const pgUrl = process.env["DATABASE_URL"];
 export const pgAvailable = Boolean(pgUrl);
@@ -53,7 +40,7 @@ const toPg = (v: unknown) => (v instanceof Ms ? new Date(v.value) : v);
 export async function openSqlite(): Promise<TestDb> {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  for (const file of migrationFiles("sqlite")) for (const s of statements(file)) db.exec(s);
+  migrateSqlite(db, migrationsFolder("sqlite"));
   return {
     kind: "sqlite",
     async run(sql, params = []) {
@@ -75,9 +62,7 @@ export async function openPg(): Promise<TestDb> {
   const schema = `t_${process.pid}_${Date.now()}_${counter++}`;
   await client.query(`create schema "${schema}"`);
   await client.query(`set search_path to "${schema}"`);
-  // drizzle-kit writes "public"."table" in foreign keys; point it at this test's own schema.
-  for (const file of migrationFiles("postgres"))
-    for (const s of statements(file)) await client.query(s.replaceAll('"public".', `"${schema}".`));
+  await migratePg(client, migrationsFolder("postgres"), { schema });
   return {
     kind: "postgres",
     async run(sql, params = []) {
