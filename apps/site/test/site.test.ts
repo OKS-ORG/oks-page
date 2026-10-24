@@ -219,8 +219,8 @@ for (const { kind, skip } of openers) {
     });
 
     test("a refresh of one entry does not touch the other entry in process B", async () => {
+      await text(b, "/team"); // cached before the count starts
       await stats(b, true);
-      await text(b, "/team");
       await retitle(ids["about"]!, "About v3");
       await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
       await text(b, "/about");
