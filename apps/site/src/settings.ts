@@ -3,7 +3,9 @@ import { getRunner, getSiteId } from "./db";
 
 const TTL_MS = Number(process.env["OKS_SETTINGS_TTL_MS"] ?? 5000);
 // On globalThis like the database connection: the proxy and the pages are separate bundles in one process.
-const shared = globalThis as typeof globalThis & { __oksSettings?: Map<string, { value: unknown; at: number }> };
+const shared = globalThis as typeof globalThis & {
+  __oksSettings?: Map<string, { value: unknown; at: number }>;
+};
 const cache = (shared.__oksSettings ??= new Map());
 
 async function readSetting(key: string): Promise<unknown> {
