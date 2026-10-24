@@ -1,13 +1,7 @@
 // Spec 01, section 4: automatic indexes for custom fields. DM-17 (the index is used), DM-18 (create and
 // drop follow the field definition) and the builder rules, on SQLite and PostgreSQL.
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import {
-  buildEntryList,
-  fieldExpression,
-  fieldIndexName,
-  syncFieldIndexes,
-  type SqlRunner,
-} from "./index.js";
+import { buildEntryList, fieldExpression, fieldIndexName, syncFieldIndexes } from "./index.js";
 import { ms, openers, type TestDb } from "../testing/harness.js";
 
 let n = 0;
@@ -15,11 +9,7 @@ const id = (tag: string) =>
   `${tag.toUpperCase().padEnd(8, "0")}${String(++n).padStart(18, "0")}`.slice(0, 26);
 const T = ms(1_700_000_000_000);
 
-const runner = (db: TestDb): SqlRunner => ({
-  dialect: db.kind,
-  all: (sql, params) => db.run(sql, params),
-  exec: async (sql) => void (await db.run(sql)),
-});
+const runner = (db: TestDb) => db.runner;
 
 async function seed(db: TestDb) {
   const site = id("site");

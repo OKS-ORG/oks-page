@@ -7,6 +7,7 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { join } from "node:path";
 import pg from "pg";
 import { migratePg, migrateSqlite } from "../migrate.js";
+import { pgRunner, sqliteRunner, type SqlRunner } from "../runner.js";
 
 const root = join(import.meta.dirname, "..", "..", "drizzle");
 
@@ -22,6 +23,10 @@ export interface TestDb {
   kind: Kind;
   /** Run SQL written with `?` placeholders. Returns rows (empty for writes). */
   run(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+  /** The same connection as a database-neutral runner (placeholders `?`, transactions). */
+  runner: SqlRunner;
+  /** PostgreSQL only: a pool of connections on this test's schema, for tests that need real concurrency. Closed with the database. */
+  pool?: (size: number) => pg.Pool;
   /** A Drizzle client on the same connection. */
   drizzle(schema: Record<string, unknown>): unknown;
   close(): Promise<void>;
@@ -41,13 +46,11 @@ export async function openSqlite(): Promise<TestDb> {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
   migrateSqlite(db, migrationsFolder("sqlite"));
+  const runner = sqliteRunner(db);
   return {
     kind: "sqlite",
-    async run(sql, params = []) {
-      const stmt = db.prepare(sql);
-      const p = params.map(toSqlite);
-      return (stmt.reader ? stmt.all(...p) : (stmt.run(...p), [])) as Record<string, unknown>[];
-    },
+    runner,
+    run: (sql, params = []) => runner.all(sql, params.map(toSqlite)),
     drizzle: (schema) => drizzleSqlite(db, { schema }),
     close: async () => void db.close(),
   };
@@ -63,16 +66,24 @@ export async function openPg(): Promise<TestDb> {
   await client.query(`create schema "${schema}"`);
   await client.query(`set search_path to "${schema}"`);
   await migratePg(client, migrationsFolder("postgres"), { schema });
+  const runner = pgRunner(client);
+  const pools: pg.Pool[] = [];
   return {
     kind: "postgres",
-    async run(sql, params = []) {
-      let n = 0;
-      const text = sql.replace(/\?/g, () => `$${++n}`);
-      const res = await client.query(text, params.map(toPg));
-      return res.rows as Record<string, unknown>[];
+    runner,
+    run: (sql, params = []) => runner.all(sql, params.map(toPg)),
+    pool(size) {
+      const pool = new pg.Pool({
+        connectionString: pgUrl,
+        max: size,
+        options: `-c search_path=${schema}`,
+      });
+      pools.push(pool);
+      return pool;
     },
     drizzle: (s) => drizzlePg(client, { schema: s }),
     async close() {
+      await Promise.all(pools.map((p) => p.end()));
       await client.query(`drop schema "${schema}" cascade`);
       await client.end();
     },

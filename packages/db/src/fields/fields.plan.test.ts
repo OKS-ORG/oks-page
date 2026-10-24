@@ -1,7 +1,7 @@
 // DM-17 (a sort or filter on an indexed custom field uses the index, for any status filter) and
 // DM-27 (100,000 entries: listing 20 of a type sorted by an indexed field takes under 10 ms).
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { buildEntryList, fieldIndexName, syncFieldIndexes, type SqlRunner } from "./index.js";
+import { buildEntryList, fieldIndexName, syncFieldIndexes } from "./index.js";
 import { ms, openers, type TestDb } from "../testing/harness.js";
 
 const SITE = "SITE0000000000000000000001";
