@@ -15,11 +15,7 @@ const id = (tag: string) =>
   `${tag.toUpperCase().padEnd(8, "0")}${String(++n).padStart(18, "0")}`.slice(0, 26);
 const T = ms(1_700_000_000_000);
 
-const runner = (db: TestDb): SqlRunner => ({
-  dialect: db.kind,
-  all: (sql, params) => db.run(sql, params),
-  exec: async (sql) => void (await db.run(sql)),
-});
+const runner = (db: TestDb) => db.runner;
 
 async function seed(db: TestDb) {
   const site = id("site");

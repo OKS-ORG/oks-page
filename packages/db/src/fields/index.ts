@@ -1,3 +1,3 @@
 export * from "./expression.js";
 export * from "./query.js";
-export * from "./sync.js";
+export { syncFieldIndexes, type SyncResult } from "./sync.js";

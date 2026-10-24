@@ -4,6 +4,7 @@
 // `syncFieldIndexes` creates the missing ones and drops the extra ones, and does nothing when they match.
 // Run it after the migrations at startup, and whenever a field definition changes. A restored backup that
 // has the field definitions therefore gets the same indexes again.
+import type { SqlRunner } from "../runner.js";
 import {
   createFieldIndexSql,
   dropFieldIndexSql,
@@ -12,13 +13,6 @@ import {
   valueKind,
   type Dialect,
 } from "./expression.js";
-
-/** The little the sync needs from a database connection. */
-export interface SqlRunner {
-  dialect: Dialect;
-  all(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
-  exec(sql: string): Promise<void>;
-}
 
 export interface SyncResult {
   created: string[];
