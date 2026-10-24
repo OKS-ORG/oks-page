@@ -9,6 +9,10 @@ export type MemoryLimitSupport = "cgroup-v1" | "cgroup-v2" | "none";
 const V1 = "/sys/fs/cgroup/memory";
 const V2 = "/sys/fs/cgroup";
 
+// The group whose children get the memory controller (set by v2Ready). Caps live here, next to the leaf that holds the
+// processes, never inside the leaf: a leaf has no controller for its own children.
+let v2Base = "";
+
 export function detectMemoryLimit(): MemoryLimitSupport {
   if (process.platform !== "linux" || (process.getuid?.() ?? 1) !== 0) return "none";
   try {
@@ -57,6 +61,7 @@ function v2Ready(): boolean {
       }
     }
     writeFileSync(join(base, "cgroup.subtree_control"), "+memory");
+    v2Base = base;
     return true;
   } catch {
     return false;
@@ -89,13 +94,7 @@ export function createMemoryCap(
       remove: () => rmdirSync(dir),
     };
   }
-  const own =
-    readFileSync("/proc/self/cgroup", "utf8")
-      .trim()
-      .split("\n")
-      .find((l) => l.startsWith("0::"))
-      ?.slice(3) ?? "/";
-  const dir = join(V2, own, `oks_${name}`);
+  const dir = join(v2Base, `oks_${name}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "memory.max"), bytes);
   try {
