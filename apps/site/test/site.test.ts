@@ -184,6 +184,7 @@ for (const { kind, skip } of openers) {
       ids = {
         about: await s.entry("about", "About us"),
         contact: await s.entry("contact", "Contact"),
+        team: await s.entry("team", "Team"),
       };
       a = await startSite(kind, db);
       b = await startSite(kind, db);
@@ -219,14 +220,14 @@ for (const { kind, skip } of openers) {
 
     test("a refresh of one entry does not touch the other entry in process B", async () => {
       await stats(b, true);
-      await text(b, "/contact");
+      await text(b, "/team");
       await retitle(ids["about"]!, "About v3");
       await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
       await text(b, "/about");
-      await text(b, "/contact");
+      await text(b, "/team");
       const { loads } = await stats(b);
       expect(loads["entry:about"]).toBe(1);
-      expect(loads["entry:contact"]).toBeUndefined();
+      expect(loads["entry:team"]).toBeUndefined();
     });
   });
 }
