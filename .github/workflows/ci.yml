@@ -39,5 +39,8 @@ jobs:
       - run: pnpm format
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:perf
+        env:
+          OKS_REUSE_BUILD: "1"
       - run: pnpm check:repo
       - run: pnpm check:migrations
