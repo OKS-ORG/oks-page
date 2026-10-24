@@ -344,4 +344,12 @@ export async function seedEverything(db: TestDb): Promise<void> {
     created_at: T,
     last_used_at: T2,
   });
+  await ins(db, "cache_tags", {
+    site_id: site,
+    tag: "entry:" + parent,
+    stale_at: T,
+    expired_at: T2,
+    updated_at: T2,
+  });
+  await ins(db, "cache_tags", { site_id: site, tag: "slug:home", updated_at: T });
 }

@@ -822,6 +822,25 @@ export const apiKeys = sqliteTable(
   ],
 );
 
+/** Which cache tags changed and when (spec 01, decision D82). Every server process reads it before a request. */
+export const cacheTags = sqliteTable(
+  "cache_tags",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+    staleAt: integer("stale_at", { mode: "timestamp_ms" }),
+    expiredAt: integer("expired_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    check("ck_cache_tags_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    primaryKey({ columns: [t.siteId, t.tag] }),
+    index("ix_cache_tags_updated").on(t.siteId, t.updatedAt),
+  ],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -859,4 +878,5 @@ export const tableNames = [
   "jobs",
   "audit_log",
   "api_keys",
+  "cache_tags",
 ] as const;

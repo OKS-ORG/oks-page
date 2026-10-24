@@ -945,6 +945,29 @@ export const apiKeys = pgTable(
   ],
 );
 
+/** Which cache tags changed and when (spec 01, decision D82). Every server process reads it before a request. */
+export const cacheTags = pgTable(
+  "cache_tags",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+    staleAt: timestamp("stale_at", { withTimezone: true, precision: 3, mode: "date" }),
+    expiredAt: timestamp("expired_at", { withTimezone: true, precision: 3, mode: "date" }),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_cache_tags_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    primaryKey({ columns: [t.siteId, t.tag] }),
+    index("ix_cache_tags_updated").on(t.siteId, t.updatedAt),
+  ],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -982,4 +1005,5 @@ export const tableNames = [
   "jobs",
   "audit_log",
   "api_keys",
+  "cache_tags",
 ] as const;

@@ -23,7 +23,7 @@ describe("DM-26 export and import", () => {
     const dump = await exportData(db.runner);
     const empty = tablesInOrder().filter((t) => (dump.tables[t.name] ?? []).length === 0);
     expect(empty.map((t) => t.name)).toEqual([]);
-    expect(Object.keys(dump.tables)).toHaveLength(36);
+    expect(Object.keys(dump.tables)).toHaveLength(37);
   });
 
   test("an export imported into another SQLite database exports to the same data", async () => {
@@ -32,7 +32,7 @@ describe("DM-26 export and import", () => {
     const dump = viaFile(await exportData(a.runner));
     const b = await track(openSqlite());
     const { rows } = await importData(b.runner, dump);
-    expect(rows).toBeGreaterThan(36);
+    expect(rows).toBeGreaterThan(37);
     expect(await exportData(b.runner)).toEqual(dump);
   });
 
