@@ -25,6 +25,8 @@ export interface TestDb {
   run(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
   /** The same connection as a database-neutral runner (placeholders `?`, transactions). */
   runner: SqlRunner;
+  /** SQLite: the file; PostgreSQL: the schema this test uses. Lets a second process (a server) open the same data. */
+  location: string;
   /** PostgreSQL only: a pool of connections on this test's schema, for tests that need real concurrency. Closed with the database. */
   pool?: (size: number) => pg.Pool;
   /** A Drizzle client on the same connection. */
@@ -42,13 +44,14 @@ const toSqlite = (v: unknown) =>
   v instanceof Ms ? v.value : typeof v === "boolean" ? Number(v) : v;
 const toPg = (v: unknown) => (v instanceof Ms ? new Date(v.value) : v);
 
-export async function openSqlite(): Promise<TestDb> {
-  const db = new Database(":memory:");
+export async function openSqlite(file = ":memory:"): Promise<TestDb> {
+  const db = new Database(file);
   db.pragma("foreign_keys = ON");
   migrateSqlite(db, migrationsFolder("sqlite"));
   const runner = sqliteRunner(db);
   return {
     kind: "sqlite",
+    location: file,
     runner,
     run: (sql, params = []) => runner.all(sql, params.map(toSqlite)),
     drizzle: (schema) => drizzleSqlite(db, { schema }),
@@ -70,6 +73,7 @@ export async function openPg(): Promise<TestDb> {
   const pools: pg.Pool[] = [];
   return {
     kind: "postgres",
+    location: schema,
     runner,
     run: (sql, params = []) => runner.all(sql, params.map(toPg)),
     pool(size) {
