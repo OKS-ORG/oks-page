@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkBrandName } from "./brand-name.mjs";
+import { checkFieldQueries } from "./field-queries.mjs";
 import { checkNoBlocksToHtml } from "./no-blocks-to-html.mjs";
 import { checkOneReact } from "./one-react.mjs";
 
@@ -8,6 +9,7 @@ export const checks = {
   "one copy of React (AD-47)": checkOneReact,
   "no blocksToHtml in product code (EC-32)": checkNoBlocksToHtml,
   "product name only in brand.json (D84)": checkBrandName,
+  "custom field queries only through the builder (DM-19)": checkFieldQueries,
   // The schema parity check (DM-16) is added in S2, when the two schemas exist.
 };
 
