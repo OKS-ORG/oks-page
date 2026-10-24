@@ -1,12 +1,14 @@
 import { getPublishedEntry, slugOf } from "@data";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { canonicalFor } from "../../site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const entry = await getPublishedEntry(slugOf((await params).slug));
-  return entry ? { title: entry.title } : {};
+  const slug = slugOf((await params).slug);
+  const entry = await getPublishedEntry(slug);
+  return entry ? { title: entry.title, alternates: { canonical: canonicalFor(slug) } } : {};
 }
 
 export default async function Page({ params }: Props) {
