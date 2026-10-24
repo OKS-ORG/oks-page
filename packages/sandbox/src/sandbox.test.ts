@@ -206,6 +206,7 @@ for (const { kind, open, skip } of openers) {
 
     test("PL-11 plugin storage stops at its limit with a storage_limit error", async () => {
       const r = await hook("storer", "content:afterSave", {});
+      if (!r.ok) console.log("storer failed:", JSON.stringify(r));
       const out = r.ok ? (r.result as { stoppedAfter: number; code?: string }) : null;
       expect(out?.code).toBe("storage_limit");
       expect(out!.stoppedAfter).toBeGreaterThan(10);

@@ -55,7 +55,7 @@ export const PLUGINS: Record<string, TestPlugin> = {
     manifest: { id: "storer", version: "1.0.0", permissions: [] },
     code: `export default { hooks: { "content:afterSave": async (e, ctx) => {
   let n = 0;
-  try { for (;;) { await ctx.storage.set("c", "k" + n, "x".repeat(1000)); n++; if (n > 500) break; } }
+  try { for (;;) { await ctx.storage.set("c", "k" + n, "x".repeat(4000)); n++; if (n > 500) break; } }
   catch (er) { return { stoppedAfter: n, code: er.code }; }
   return { stoppedAfter: n };
 } } };`,
