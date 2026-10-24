@@ -3,3 +3,4 @@ dist
 .turbo
 pnpm-lock.yaml
 .changeset/*.md
+packages/db/drizzle

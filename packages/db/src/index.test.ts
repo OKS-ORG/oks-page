@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
-import * as m from "./index.js";
+import { pgSchema, sqliteSchema, tableNames } from "./index.js";
 
-test("db package loads", () => {
-  expect(m.packageName).toBe("db");
+test("db package exports both schemas and the same table list", () => {
+  expect(pgSchema.tableNames).toEqual(sqliteSchema.tableNames);
+  expect(tableNames).toHaveLength(36);
 });
