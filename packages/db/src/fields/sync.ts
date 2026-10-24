@@ -11,7 +11,6 @@ import {
   FIELD_INDEX_PREFIX,
   fieldIndexName,
   valueKind,
-  type Dialect,
 } from "./expression.js";
 
 export interface SyncResult {

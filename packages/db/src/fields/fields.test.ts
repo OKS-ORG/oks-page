@@ -1,13 +1,7 @@
 // Spec 01, section 4: automatic indexes for custom fields. DM-17 (the index is used), DM-18 (create and
 // drop follow the field definition) and the builder rules, on SQLite and PostgreSQL.
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import {
-  buildEntryList,
-  fieldExpression,
-  fieldIndexName,
-  syncFieldIndexes,
-  type SqlRunner,
-} from "./index.js";
+import { buildEntryList, fieldExpression, fieldIndexName, syncFieldIndexes } from "./index.js";
 import { ms, openers, type TestDb } from "../testing/harness.js";
 
 let n = 0;
