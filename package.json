@@ -16,7 +16,8 @@
     "check:repo": "node scripts/checks/run-all.mjs",
     "test:pg": "echo 'PostgreSQL tests start in S2'",
     "test:docker": "echo 'Docker tests start in S5'",
-    "ci": "pnpm lint && pnpm format && pnpm typecheck && pnpm test && pnpm check:repo"
+    "ci": "pnpm lint && pnpm format && pnpm typecheck && pnpm test && pnpm check:repo && pnpm check:migrations",
+    "check:migrations": "node scripts/check-migrations.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
