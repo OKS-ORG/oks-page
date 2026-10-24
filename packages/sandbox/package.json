@@ -11,5 +11,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "workerd": "1.20261021.1",
+    "@oks-page/db": "workspace:*"
   }
 }
