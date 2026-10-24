@@ -37,6 +37,7 @@ function writable(dir: string): boolean {
 
 /** In version 2, the memory controller must be switched on for the children of our group, and a group that has children must hold no processes itself. */
 function v2Ready(): boolean {
+  if (v2Base) return true; // already done: our own group is now the leaf, so reading it again would nest one level deeper
   try {
     const own =
       readFileSync("/proc/self/cgroup", "utf8")
