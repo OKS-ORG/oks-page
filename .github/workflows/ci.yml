@@ -44,3 +44,30 @@ jobs:
           OKS_REUSE_BUILD: "1"
       - run: pnpm check:repo
       - run: pnpm check:migrations
+
+  # The plugin memory cap needs control groups and rights that the normal runner step does not have, so the sandbox
+  # tests run again here in a container that may manage them (spec 04, PL-10 and PL-31).
+  sandbox-memory:
+    name: Plugin memory cap (Docker)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the sandbox tests as root with a memory cap
+        run: |
+          docker run --rm --privileged --network host \
+            -v "$PWD:/work" -w /work \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
+            -e OKS_EXPECT_MEMORY_CAP=1 \
+            node:22 bash -c "corepack enable && pnpm install --frozen-lockfile && pnpm exec tsc -b && pnpm exec vitest run packages/sandbox"
