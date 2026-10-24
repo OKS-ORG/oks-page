@@ -1,0 +1,15 @@
+{
+  "name": "@oks-page/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Content engine: types, entries, revisions, taxonomies, menus, settings, hooks, permissions, jobs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}
