@@ -35,6 +35,15 @@ export const PLUGINS: Record<string, TestPlugin> = {
   draft: await ctx.content.get("draft1").then(() => "READ", (er) => er.code),
 }) } };`,
   },
+  "hostile-block": {
+    manifest: { id: "hostile-block", version: "1.0.0", permissions: [] },
+    code: `export default { blocks: { "hostile-block": { render: async () => ({
+  type: "image",
+  props: { src: "javascript:alert(1)", color: "red\\" onmouseover=\\"alert(1)" },
+  content: [{ type: "link", href: "javascript:alert(1)", content: [{ type: "text", text: "x" }] }],
+  children: [],
+}) } } };`,
+  },
   looper: {
     manifest: { id: "looper", version: "1.0.0", permissions: [] },
     code: `export default { hooks: { "content:beforeSave": async (e) => { if (e.title === "LOOP") for (;;) {} return e; } } };`,

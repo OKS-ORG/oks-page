@@ -298,6 +298,21 @@ export async function seedEverything(db: TestDb): Promise<void> {
     size_bytes: 7,
     updated_at: T,
   });
+  await ins(db, "extension_pending_updates", {
+    extension_id: ext,
+    version: "1.3.0",
+    code: "export default {};",
+    integrity: "h",
+    new_permissions: JSON.stringify(["entries.write"]),
+    created_at: T,
+  });
+  await ins(db, "extension_previous_versions", {
+    extension_id: ext,
+    version: "1.2.2",
+    code: "export default {};",
+    integrity: "h",
+    replaced_at: T,
+  });
   await ins(db, "redirects", {
     id: id(28),
     site_id: site,

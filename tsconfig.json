@@ -20,6 +20,9 @@
       "path": "packages/editor"
     },
     {
+      "path": "packages/content-safety"
+    },
+    {
       "path": "packages/renderer"
     },
     {

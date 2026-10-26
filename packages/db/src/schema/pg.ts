@@ -746,6 +746,10 @@ export const extensions = pgTable(
     tier: text("tier").notNull(),
     status: text("status").notNull().default("enabled"),
     licenseKeyHash: text("license_key_hash"),
+    // The running bundle (spec 04, section 10). Null for rows older than this column, and for
+    // tests that only need the row to exist, not a real plugin to start.
+    code: text("code"),
+    integrity: text("integrity"),
     installedAt: timestamp("installed_at", {
       withTimezone: true,
       precision: 3,
@@ -759,6 +763,54 @@ export const extensions = pgTable(
     check("ck_extensions_tier", sql`${t.tier} in ('runtime', 'build')`),
     check("ck_extensions_status", sql`${t.status} in ('enabled', 'disabled', 'switched_off')`),
     unique("uq_extensions_site_id_key").on(t.siteId, t.key),
+  ],
+);
+
+// An update is stored here instead of applied when it asks for a permission the owner has not
+// already granted (spec 04, section 10, rule 5). At most one pending update per extension: a
+// second update before the first is approved replaces it.
+export const extensionPendingUpdates = pgTable(
+  "extension_pending_updates",
+  {
+    extensionId: text("extension_id")
+      .primaryKey()
+      .notNull()
+      .references(() => extensions.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    code: text("code").notNull(),
+    integrity: text("integrity").notNull(),
+    newPermissions: jsonb("new_permissions").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_extension_pending_updates_extension_id_ulid", sql`length(${t.extensionId}) = 26`),
+  ],
+);
+
+// The bundle an update replaced, kept so rollback can start it again (spec 04, section 10,
+// rule 6). At most one previous version per extension: a later update replaces this row too.
+export const extensionPreviousVersions = pgTable(
+  "extension_previous_versions",
+  {
+    extensionId: text("extension_id")
+      .primaryKey()
+      .notNull()
+      .references(() => extensions.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    code: text("code").notNull(),
+    integrity: text("integrity").notNull(),
+    replacedAt: timestamp("replaced_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_extension_previous_versions_extension_id_ulid", sql`length(${t.extensionId}) = 26`),
   ],
 );
 
@@ -998,6 +1050,8 @@ export const tableNames = [
   "themes",
   "theme_overrides",
   "extensions",
+  "extension_pending_updates",
+  "extension_previous_versions",
   "extension_permissions",
   "extension_storage",
   "redirects",

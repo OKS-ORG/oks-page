@@ -1,0 +1,15 @@
+{
+  "name": "@oks-page/content-safety",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The block checks: every save, import, API call and plugin write is repaired and reported here before it reaches the database (spec 03, section 4; ADR 0019)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

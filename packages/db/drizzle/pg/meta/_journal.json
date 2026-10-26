@@ -15,6 +15,13 @@
       "when": 1792830921388,
       "tag": "0001_cache_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793440000000,
+      "tag": "0002_extension_updates_and_rollback",
+      "breakpoints": true
     }
   ]
 }

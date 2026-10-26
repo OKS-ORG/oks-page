@@ -114,6 +114,8 @@ importers:
 
   packages/cli: {}
 
+  packages/content-safety: {}
+
   packages/core: {}
 
   packages/db:
@@ -155,6 +157,10 @@ importers:
       workerd:
         specifier: 1.20261021.1
         version: 1.20261021.1
+    devDependencies:
+      '@oks-page/content-safety':
+        specifier: workspace:*
+        version: link:../content-safety
 
   packages/sdk: {}
 
