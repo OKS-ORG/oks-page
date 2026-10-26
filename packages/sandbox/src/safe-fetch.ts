@@ -53,6 +53,10 @@ export interface SafeFetchOptions {
   allowPrivateForTests?: boolean;
   timeoutMs?: number;
   maxBytes?: number;
+  /** Tests only: replaces the DNS lookup, so a test can prove the connection uses the address
+   * that was checked even when a second lookup of the same name would answer differently
+   * (PL-30, a DNS-rebinding trick). */
+  resolve?: (hostname: string) => Promise<{ address: string; family: number }[]>;
 }
 
 export async function safeFetch(
@@ -63,9 +67,10 @@ export async function safeFetch(
   if (url.protocol !== "https:" && !(allowPrivate && url.protocol === "http:"))
     throw new FetchRefused("Only https addresses are allowed", "scheme");
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const resolve = options.resolve ?? ((h: string) => dns.lookup(h, { all: true }));
   const addresses = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
-    : await dns.lookup(hostname, { all: true });
+    : await resolve(hostname);
   if (addresses.length === 0) throw new FetchRefused("The name has no address", "dns");
   if (!allowPrivate && addresses.some((a) => isBlockedAddress(a.address)))
     throw new FetchRefused("The address is private or reserved", "ssrf");
@@ -80,6 +85,10 @@ export async function safeFetch(
         method: "GET",
         timeout: timeoutMs,
         // The connection goes to the address checked above, whatever the name would say now.
+        // Happy Eyeballs (on by default since Node 20) calls a custom `lookup` expecting an
+        // array of addresses to race between; since exactly one address was already chosen and
+        // checked, that behaviour is turned off so the old, simpler callback form is used.
+        autoSelectFamily: false,
         lookup: (_name, _opts, callback) => callback(null, chosen.address, chosen.family),
       } as http.RequestOptions,
       (res) => {
