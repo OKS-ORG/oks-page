@@ -282,6 +282,20 @@ for (const { kind, open, skip } of openers) {
       expect(block.id.length).toBeGreaterThan(0);
     });
 
+    test("PL-37 a plugin's content write passes the block checks, in the same call that writes it", async () => {
+      const r = await hook("block-writer", "content:afterSave", {});
+      expect(r.ok).toBe(true);
+      const stored = content.get("e1")!.body!;
+      expect(stored.blocks).toHaveLength(1);
+      const block = stored.blocks[0] as { props: Record<string, unknown>; content: unknown };
+      // The same repairs as PL-20: the unsafe src, color and link never reach the stored entry.
+      expect(block.props["src"]).toBeUndefined();
+      expect(block.props["color"]).toBeUndefined();
+      expect(block.content).toEqual([{ type: "text", text: "x" }]);
+      const rows = await audit("content.write_repaired");
+      expect(rows.some((row) => row.plugin === "block-writer")).toBe(true);
+    });
+
     describe("update and rollback", () => {
       const install = () => createInstallService(db.runner, host);
       const newCode = PLUGINS["reading-time"]!.code.replace(
