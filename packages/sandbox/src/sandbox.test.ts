@@ -1,5 +1,6 @@
 // Spec 04 acceptance tests PL-01 to PL-29 and PL-32, PL-35 on the real sandbox host (workerd, one process per
 // plugin), with storage and the audit trail in SQLite and in PostgreSQL.
+import { checkBlocks } from "@oks-page/content-safety";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync } from "node:fs";
@@ -112,6 +113,8 @@ for (const { kind, open, skip } of openers) {
     });
 
     const hook = (id: string, name: string, event: unknown) => host.call(id, "hook", name, event);
+    const blockCall = (id: string, name: string, props: unknown) =>
+      host.call(id, "block", name, props);
 
     test("PL-01 a filter hook changes the entry (reading time)", async () => {
       const r = await hook("reading-time", "content:beforeSave", entry());
@@ -236,6 +239,35 @@ for (const { kind, open, skip } of openers) {
       expect(o["not approved host"]).toBe("host_denied");
       expect(o["redirect"]).toBe("redirect");
       expect(o["file scheme"]).toBe("host_denied"); // no host in the address: not an approved host
+    });
+
+    test("PL-20 a hostile plugin block tree is repaired by the block checks (4 repairs)", async () => {
+      const r = await blockCall("hostile-block", "hostile-block", {});
+      expect(r.ok).toBe(true);
+      const { body, repairs } = checkBlocks({ blocks: [r.ok ? r.result : null] });
+      expect(body.blocks).toHaveLength(1);
+      const block = body.blocks[0]!;
+      expect(block.props.src).toBeUndefined();
+      expect(block.props.color).toBeUndefined();
+      expect(block.content).toEqual([{ type: "text", text: "x" }]);
+      expect(repairs.sort()).toEqual(
+        ["filled_missing_fields", "removed_color", "removed_link", "removed_url"].sort(),
+      );
+    });
+
+    test("PL-21 a normal plugin block tree passes; only the missing block ID is added by the core", async () => {
+      const r = await blockCall("reading-time", "reading-time", { minutes: 3 });
+      expect(r.ok).toBe(true);
+      const raw = r.ok ? r.result : null;
+      const { body, repairs } = checkBlocks({ blocks: [raw] });
+      expect(repairs).toEqual(["filled_missing_fields"]);
+      expect(body.blocks).toHaveLength(1);
+      const block = body.blocks[0]!;
+      expect(block.type).toBe("paragraph");
+      expect(block.props).toEqual({});
+      expect(block.content).toEqual([{ type: "text", text: "3 min read" }]);
+      expect(block.children).toEqual([]);
+      expect(block.id.length).toBeGreaterThan(0);
     });
 
     describe("a hostile plugin", () => {
