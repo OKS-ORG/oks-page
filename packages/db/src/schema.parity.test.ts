@@ -124,10 +124,10 @@ const sqliteTables = Object.values(sqliteSchema).filter((v): v is SQLiteTable =>
 );
 
 describe("DM-16 schema parity", () => {
-  test("both schemas define the same 37 tables", () => {
+  test("both schemas define the same 39 tables", () => {
     const a = pgTables.map((t) => getPg(t).name).sort();
     const b = sqliteTables.map((t) => getSqlite(t).name).sort();
-    expect(a).toHaveLength(37);
+    expect(a).toHaveLength(39);
     expect(a).toEqual(b);
   });
 

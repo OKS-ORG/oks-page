@@ -174,6 +174,7 @@ describe("sqlite migrations", () => {
     expect(readMigrations(real("sqlite")).map((m) => m.tag)).toEqual([
       "0000_init",
       "0001_cache_tags",
+      "0002_extension_updates_and_rollback",
     ]);
   });
 });
@@ -303,6 +304,10 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
   });
 
   test("the real migrations match what the journal lists", () => {
-    expect(readMigrations(real("pg")).map((m) => m.tag)).toEqual(["0000_init", "0001_cache_tags"]);
+    expect(readMigrations(real("pg")).map((m) => m.tag)).toEqual([
+      "0000_init",
+      "0001_cache_tags",
+      "0002_extension_updates_and_rollback",
+    ]);
   });
 });

@@ -136,8 +136,12 @@ export class SandboxHost {
     );
   }
 
-  /** Make a plugin known. `extensionId` is its row in the `extensions` table (its storage belongs to that row). */
+  /** Make a plugin known. `extensionId` is its row in the `extensions` table (its storage belongs to that row).
+   * Calling this again for the same plugin id (an update or a rollback) stops the running process first, so
+   * the old one is never left behind. */
   load(manifest: PluginManifest, code: string, extensionId: string): void {
+    const existing = this.plugins.get(manifest.id);
+    if (existing) this.stop(existing);
     const tokenBuf = randomBytes(16);
     const p: Loaded = {
       manifest,

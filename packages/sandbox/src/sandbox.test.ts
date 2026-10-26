@@ -2,6 +2,7 @@
 // plugin), with storage and the audit trail in SQLite and in PostgreSQL.
 import { checkBlocks } from "@oks-page/content-safety";
 import { openers, type TestDb } from "@oks-page/db/testing";
+import { createInstallService } from "./install.js";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,6 +41,7 @@ for (const { kind, open, skip } of openers) {
       ],
     ]);
     const SITE = "SITE0000000000000000000001";
+    const OWNER = `USR${"owner".toUpperCase().padEnd(23, "0")}`;
     const extId = (key: string) =>
       `EXT${key
         .toUpperCase()
@@ -67,11 +69,21 @@ for (const { kind, open, skip } of openers) {
         T,
         T,
       ]);
-      for (const key of Object.keys(PLUGINS)) {
+      await db.run(
+        "insert into users (id, name, email, created_at, updated_at) values (?, 'Owner', 'owner@example.com', ?, ?)",
+        [OWNER, T, T],
+      );
+      for (const [key, p] of Object.entries(PLUGINS)) {
         await db.run(
           "insert into extensions (id, site_id, key, kind, version, tier, installed_at) values (?, ?, ?, 'plugin', '1.0.0', 'runtime', ?)",
           [extId(key), SITE, key, T],
         );
+        // Installing a plugin grants the permissions it asked for at that time (spec 04, section 10, rule 1).
+        for (const permission of p.manifest.permissions)
+          await db.run(
+            `insert into "extension_permissions" ("extension_id", "permission", "granted_by", "granted_at") values (?, ?, ?, ?)`,
+            [extId(key), permission, OWNER, T],
+          );
       }
       external = createServer((q, s) => {
         if (q.url === "/redirect") {
@@ -268,6 +280,134 @@ for (const { kind, open, skip } of openers) {
       expect(block.content).toEqual([{ type: "text", text: "3 min read" }]);
       expect(block.children).toEqual([]);
       expect(block.id.length).toBeGreaterThan(0);
+    });
+
+    describe("update and rollback", () => {
+      const install = () => createInstallService(db.runner, host);
+      const newCode = PLUGINS["reading-time"]!.code.replace(
+        "Math.round(words / 200)",
+        "Math.round(words / 100)",
+      );
+
+      test("PL-33 an update with a new permission is not applied until the owner approves", async () => {
+        const extensionId = extId("reading-time");
+        const svc = install();
+
+        // Captured rather than assumed, so this test does not depend on what ran before it.
+        const before = await hook("reading-time", "content:beforeSave", entry());
+        const beforeTime =
+          before.ok && (before.result as { meta: { readingTime: number } }).meta.readingTime;
+
+        const result = await svc.update({
+          extensionId,
+          pluginId: "reading-time",
+          version: "1.1.0",
+          code: newCode,
+          permissions: ["content:read", "content:write", "content:read_drafts"],
+        });
+        expect(result).toEqual({ applied: false, newPermissions: ["content:read_drafts"] });
+
+        // The old code is still the one that runs: the result has not changed.
+        const stillOld = await hook("reading-time", "content:beforeSave", entry());
+        expect(
+          stillOld.ok && (stillOld.result as { meta: { readingTime: number } }).meta.readingTime,
+        ).toBe(beforeTime);
+
+        const approved = await svc.approveUpdate({
+          extensionId,
+          pluginId: "reading-time",
+          grantedBy: OWNER,
+        });
+        expect(approved).toBe(true);
+
+        const after = await hook("reading-time", "content:beforeSave", entry());
+        expect(
+          after.ok && (after.result as { meta: { readingTime: number } }).meta.readingTime,
+        ).toBe(5);
+
+        const granted = await db.run(
+          `select "permission" from "extension_permissions" where "extension_id" = ? order by "permission"`,
+          [extensionId],
+        );
+        expect(granted.map((r) => r["permission"])).toEqual([
+          "content:read",
+          "content:read_drafts",
+          "content:write",
+        ]);
+      });
+
+      test("PL-34 rollback starts the previous bundle and keeps the plugin's data", async () => {
+        // Runs its own two updates, so it does not depend on what PL-33 left behind: rollback
+        // must restore the version right before the last one, whatever that happened to be.
+        const extensionId = extId("reading-time");
+        const svc = install();
+        const codeA = PLUGINS["reading-time"]!.code.replace(
+          "Math.round(words / 200)",
+          "Math.round(words / 150)",
+        );
+        const codeB = PLUGINS["reading-time"]!.code.replace(
+          "Math.round(words / 200)",
+          "Math.round(words / 50)",
+        );
+        const permissions = ["content:read", "content:write"];
+
+        const first = await svc.update({
+          extensionId,
+          pluginId: "reading-time",
+          version: "2.0.0",
+          code: codeA,
+          permissions,
+        });
+        expect(first.applied).toBe(true);
+        const afterA = await hook("reading-time", "content:beforeSave", entry());
+        expect(
+          afterA.ok && (afterA.result as { meta: { readingTime: number } }).meta.readingTime,
+        ).toBe(3);
+
+        const second = await svc.update({
+          extensionId,
+          pluginId: "reading-time",
+          version: "2.1.0",
+          code: codeB,
+          permissions,
+        });
+        expect(second.applied).toBe(true);
+
+        await db.run(
+          `insert into "extension_storage" ("extension_id", "collection", "key", "value", "size_bytes", "updated_at")
+           values (?, 'notes', 'k', '"kept across rollback"', 23, ?)
+           on conflict ("extension_id", "collection", "key") do nothing`,
+          [extensionId, T],
+        );
+
+        const afterB = await hook("reading-time", "content:beforeSave", entry());
+        expect(
+          afterB.ok && (afterB.result as { meta: { readingTime: number } }).meta.readingTime,
+        ).toBe(9);
+
+        const result = await svc.rollback({ extensionId, pluginId: "reading-time" });
+        expect(result).toEqual({ ok: true });
+
+        const rolledBack = await hook("reading-time", "content:beforeSave", entry());
+        expect(
+          rolledBack.ok &&
+            (rolledBack.result as { meta: { readingTime: number } }).meta.readingTime,
+        ).toBe(3);
+
+        const storage = await db.run(
+          `select "value" from "extension_storage" where "extension_id" = ? and "collection" = 'notes' and "key" = 'k'`,
+          [extensionId],
+        );
+        expect(storage).toHaveLength(1);
+      });
+
+      test("rollback with nothing to roll back to says so", async () => {
+        const result = await install().rollback({
+          extensionId: extId("no-write"),
+          pluginId: "no-write",
+        });
+        expect(result).toEqual({ ok: false, reason: "no_previous_version" });
+      });
     });
 
     describe("a hostile plugin", () => {
