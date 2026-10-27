@@ -1,5 +1,6 @@
 // The sandbox host (spec 04, section 5): one workerd process per plugin, a host API they call with their own token,
 // a watchdog that kills a stuck plugin, and a count of failures that switches a plugin off.
+import { checkBlocks } from "@oks-page/content-safety";
 import { newId, type SqlRunner } from "@oks-page/db";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -436,6 +437,13 @@ const config :Workerd.Config = (
           const raw = (body["patch"] ?? {}) as Record<string, unknown>;
           const patch: Record<string, unknown> = {};
           for (const key of ["title", "meta"]) if (key in raw) patch[key] = raw[key];
+          // The block checks run here, before the write reaches the content service, so a
+          // hostile or careless plugin can never store an unsafe block tree (PL-37).
+          if ("body" in raw) {
+            const { body: checked, repairs } = checkBlocks(raw["body"]);
+            patch["body"] = checked;
+            if (repairs.length > 0) await this.audit(p, "content.write_repaired", { repairs });
+          }
           const entry = await this.o.content.update(String(body["id"]), patch);
           return entry ? send(200, { result: entry }) : send(404, { error: "not found" });
         }

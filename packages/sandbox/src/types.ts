@@ -15,15 +15,18 @@ export interface ContentEntry {
   title: string;
   plainText?: string;
   meta?: Record<string, unknown>;
+  /** The block tree (spec 03). Reaches this interface only after the host has run it through the block checks (PL-37). */
+  body?: { version: number; blocks: unknown[] };
 }
 
 /** What a plugin may reach inside the site. The core provides it; the sandbox only calls it after the permission check. */
 export interface ContentService {
   get(id: string): Promise<ContentEntry | null>;
-  /** Only `title` and `meta` can change through a plugin; the host filters the patch before this is called. */
+  /** Only `title`, `meta` and `body` can change through a plugin; the host filters the patch before this is called,
+   * and `body` has already passed the block checks (PL-37) by the time it arrives here. */
   update(
     id: string,
-    patch: Partial<Pick<ContentEntry, "title" | "meta">>,
+    patch: Partial<Pick<ContentEntry, "title" | "meta" | "body">>,
   ): Promise<ContentEntry | null>;
 }
 

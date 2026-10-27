@@ -44,6 +44,13 @@ export const PLUGINS: Record<string, TestPlugin> = {
   children: [],
 }) } } };`,
   },
+  "block-writer": {
+    manifest: { id: "block-writer", version: "1.0.0", permissions: ["content:write"] },
+    code: `export default { hooks: { "content:afterSave": async (e, ctx) => ctx.content.update("e1", { body: {
+  version: 1,
+  blocks: [{ type: "image", props: { src: "javascript:alert(1)", color: "red\\" onmouseover=\\"alert(1)" }, content: [{ type: "link", href: "javascript:alert(1)", content: [{ type: "text", text: "x" }] }], children: [] }],
+} }) } };`,
+  },
   looper: {
     manifest: { id: "looper", version: "1.0.0", permissions: [] },
     code: `export default { hooks: { "content:beforeSave": async (e) => { if (e.title === "LOOP") for (;;) {} return e; } } };`,
