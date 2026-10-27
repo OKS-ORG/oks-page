@@ -3,12 +3,12 @@
 // host into a call of the plugin's function.
 export const WRAPPER_SOURCE = `import plugin from "plugin.js";
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } });
-function makeCtx(env) {
+function makeCtx(env, callId) {
   const call = async (p, data) => {
-    const r = await fetch("http://host" + p, { method: "POST", headers: { "x-plugin-token": env.TOKEN, "content-type": "application/json" }, body: JSON.stringify(data ?? {}) });
+    const r = await fetch("http://host" + p, { method: "POST", headers: { "x-plugin-token": env.TOKEN, "x-oks-call": String(callId || ""), "content-type": "application/json" }, body: JSON.stringify(data ?? {}) });
     let j;
     try { j = await r.json(); } catch { j = { error: "bad host answer" }; }
-    if (!r.ok) { const e = new Error(j.error || "host refused"); e.code = j.code; throw e; }
+    if (!r.ok) { const e = new Error((j.error || "host refused") + (j.fix ? ". " + j.fix : "")); e.code = j.code; throw e; }
     return j.result;
   };
   return {
@@ -23,7 +23,7 @@ export default {
   async fetch(req, env) {
     const u = new URL(req.url);
     const body = await req.json().catch(() => ({}));
-    const ctx = makeCtx(env);
+    const ctx = makeCtx(env, body.callId);
     try {
       if (u.pathname.startsWith("/hook/")) {
         const fn = plugin.hooks?.[decodeURIComponent(u.pathname.slice(6))];

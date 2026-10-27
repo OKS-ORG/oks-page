@@ -35,6 +35,24 @@ export const PLUGINS: Record<string, TestPlugin> = {
   draft: await ctx.content.get("draft1").then(() => "READ", (er) => er.code),
 }) } };`,
   },
+  // Built for PL-36: it uses permissions it was not given, in three ways: it does not catch the refusal, it catches it,
+  // and it throws an error that only pretends to be one.
+  limited: {
+    manifest: {
+      id: "limited",
+      displayName: "Limited",
+      version: "1.0.0",
+      permissions: ["content:read"],
+    },
+    code: `export default { hooks: {
+  "content:beforeSave": async (e, ctx) => { await ctx.content.update("e1", { title: "nope" }); return e; },
+  "content:afterSave": async (e, ctx) => {
+    const code = (p) => p.then(() => "allowed", (er) => er.code);
+    return { write: await code(ctx.content.update("e1", { title: "nope" })), draft: await code(ctx.content.get("draft1")) };
+  },
+  "user:afterLogin": async () => { throw Object.assign(new Error("pretend"), { code: "permission_denied" }); },
+} };`,
+  },
   "hostile-block": {
     manifest: { id: "hostile-block", version: "1.0.0", permissions: [] },
     code: `export default { blocks: { "hostile-block": { render: async () => ({
