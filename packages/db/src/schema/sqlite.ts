@@ -749,6 +749,25 @@ export const extensionStorage = sqliteTable(
   ],
 );
 
+// A plugin's settings (spec 04, section 9). A secret setting holds only its sealed value, never the plain secret (PL-39).
+export const extensionSettings = sqliteTable(
+  "extension_settings",
+  {
+    extensionId: text("extension_id")
+      .notNull()
+      .references(() => extensions.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: text("value", { mode: "json" }).notNull(),
+    isSecret: integer("is_secret", { mode: "boolean" }).notNull().default(false),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    check("ck_extension_settings_extension_id_ulid", sql`length(${t.extensionId}) = 26`),
+    check("ck_extension_settings_value_json", sql`json_valid(${t.value})`),
+    primaryKey({ columns: [t.extensionId, t.key] }),
+  ],
+);
+
 export const redirects = sqliteTable(
   "redirects",
   {
@@ -923,6 +942,7 @@ export const tableNames = [
   "extension_previous_versions",
   "extension_permissions",
   "extension_storage",
+  "extension_settings",
   "redirects",
   "not_found_log",
   "jobs",
