@@ -238,6 +238,22 @@ export class SandboxHost {
 
   // ---- calls into a plugin ----
 
+  /** The hooks and blocks the plugin's code really has, read by starting it. `oks check` compares this with the
+   * manifest (spec 04, section 11). Null for a plugin that is not loaded. */
+  async describe(id: string): Promise<{ hooks: string[]; blocks: string[] } | null> {
+    const p = this.plugins.get(id);
+    if (!p) return null;
+    await this.start(p);
+    this.touch(p);
+    const response = await fetch(`http://127.0.0.1:${p.port}/describe`, {
+      method: "POST",
+      body: "{}",
+      signal: AbortSignal.timeout(this.o.wallMs),
+    });
+    const body = (await response.json()) as { result?: { hooks: string[]; blocks: string[] } };
+    return body.result ?? null;
+  }
+
   async call(
     id: string,
     kind: CallKind,

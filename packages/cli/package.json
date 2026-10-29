@@ -6,10 +6,18 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "oks": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@oks-page/db": "workspace:*",
+    "@oks-page/sandbox": "workspace:*",
+    "esbuild": "^0.28.2"
   }
 }
