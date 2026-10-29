@@ -160,6 +160,10 @@ importers:
       workerd:
         specifier: 1.20261021.1
         version: 1.20261021.1
+    devDependencies:
+      '@oks-page/auth':
+        specifier: workspace:*
+        version: link:../auth
 
   packages/sdk: {}
 

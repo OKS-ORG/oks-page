@@ -1,5 +1,6 @@
-// Spec 04 acceptance tests PL-01 to PL-29 and PL-32, PL-35 on the real sandbox host (workerd, one process per
+// Spec 04 acceptance tests PL-01 to PL-29, PL-32, PL-35 to PL-38 on the real sandbox host (workerd, one process per
 // plugin), with storage and the audit trail in SQLite and in PostgreSQL.
+import { capabilitiesOf } from "@oks-page/auth";
 import { checkBlocks } from "@oks-page/content-safety";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { createInstallService } from "./install.js";
@@ -12,7 +13,7 @@ import { SandboxHost } from "./host.js";
 import { developerMessage, ownerSentence, permissionWords } from "./permission-text.js";
 import { isBlockedAddress } from "./safe-fetch.js";
 import { PLUGINS } from "./testing/plugins.js";
-import type { ContentEntry, DeveloperNote } from "./types.js";
+import type { ActingUser, ContentEntry, DeveloperNote } from "./types.js";
 
 const T = new Date(1_700_000_000_000);
 const entry = (o: Record<string, unknown> = {}) => ({
@@ -674,6 +675,187 @@ for (const { kind, open, skip } of openers) {
         expect((await limitedNotes()).map((n) => n.permission)).toEqual(["content:read_drafts"]);
         host.load(manifest, code, extId("limited"));
         expect(await limitedNotes()).toHaveLength(2);
+      });
+    });
+
+    describe("PL-38 a plugin acting for a person may do only what both the plugin and the person may (spec 02, section 8)", () => {
+      const user = (key: string) => `USR${key.toUpperCase().padEnd(23, "0")}`;
+      const role = (key: string) => `ROL${key.toUpperCase().padEnd(23, "0")}`;
+      const [AUTHOR, EDITOR, RECIPES, ADMIN, STRANGER, WRITER] = [
+        "author",
+        "editor",
+        "recipes",
+        "admin",
+        "stranger",
+        "writer",
+      ].map(user) as [string, string, string, string, string, string];
+      let as: Record<"author" | "editor" | "recipes" | "admin" | "stranger", ActingUser>;
+      const act = (actingFor: ActingUser | undefined, event: Record<string, string>) =>
+        host.call("acts-for", "hook", "content:afterSave", event, actingFor ? { actingFor } : {});
+
+      beforeAll(async () => {
+        for (const [id, name] of [
+          [AUTHOR, "Author"],
+          [EDITOR, "Editor"],
+          [RECIPES, "Recipes"],
+          [ADMIN, "Admin"],
+          [STRANGER, "Stranger"],
+          [WRITER, "Writer"],
+        ])
+          await db.run(
+            "insert into users (id, name, email, created_at, updated_at) values (?, ?, ?, ?, ?)",
+            [id, name, `${name.toLowerCase()}@example.com`, T, T],
+          );
+        const caps: Record<string, (string | [string, string])[]> = {
+          author: ["content.create", "content.edit_own", "content.publish_own"],
+          editor: ["content.edit_any", "content.read_private", "content.publish_any"],
+          recipes: [["content.edit_any", "recipe"]],
+          administrator: [],
+        };
+        let n = 0;
+        for (const [key, list] of Object.entries(caps)) {
+          await db.run(
+            "insert into roles (id, site_id, key, label, is_system, created_at) values (?, ?, ?, ?, ?, ?)",
+            [role(key), SITE, key, key, true, T],
+          );
+          for (const c of list) {
+            const [capability, scope] = Array.isArray(c) ? c : [c, ""];
+            await db.run(
+              "insert into role_capabilities (id, role_id, capability, scope_type_key) values (?, ?, ?, ?)",
+              [`CAP${String(++n).padStart(23, "0")}`, role(key), capability, scope],
+            );
+          }
+        }
+        for (const [id, key] of [
+          [AUTHOR, "author"],
+          [EDITOR, "editor"],
+          [RECIPES, "recipes"],
+          [ADMIN, "administrator"],
+        ])
+          await db.run(
+            "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+            [SITE, id, role(key!), T],
+          );
+        // The real lookup from the database, as the core will use it.
+        as = {
+          author: await capabilitiesOf(db.runner, SITE, AUTHOR),
+          editor: await capabilitiesOf(db.runner, SITE, EDITOR),
+          recipes: await capabilitiesOf(db.runner, SITE, RECIPES),
+          admin: await capabilitiesOf(db.runner, SITE, ADMIN),
+          stranger: await capabilitiesOf(db.runner, SITE, STRANGER),
+        };
+        const put = (e: ContentEntry) => content.set(e.id, e);
+        put({
+          id: "mine",
+          status: "draft",
+          title: "Mine",
+          authorId: AUTHOR,
+          typeKey: "post",
+          meta: {},
+        });
+        put({
+          id: "theirs",
+          status: "draft",
+          title: "Theirs",
+          authorId: WRITER,
+          typeKey: "post",
+          meta: {},
+        });
+        put({
+          id: "pub-theirs",
+          status: "published",
+          title: "Their post",
+          authorId: WRITER,
+          typeKey: "post",
+          meta: {},
+        });
+        put({
+          id: "recipe1",
+          status: "published",
+          title: "Their recipe",
+          authorId: WRITER,
+          typeKey: "recipe",
+          meta: {},
+        });
+      });
+
+      test("PL-38 for an Author: their own draft may be read and changed", async () => {
+        const r = await act(as.author, { read: "mine", write: "mine" });
+        expect(r.ok && r.result).toEqual({ read: "allowed", write: "allowed" });
+      });
+
+      test("PL-38 for an Author: someone else's draft cannot be read and their post cannot be changed; the data is unchanged", async () => {
+        const r = await act(as.author, { read: "theirs", write: "pub-theirs" });
+        expect(r.ok && r.result).toEqual({ read: "user_denied", write: "user_denied" });
+        expect(content.get("pub-theirs")!.title).toBe("Their post");
+        expect(r.permissionRefusals?.map((x) => [x.code, x.permission])).toEqual([
+          ["user_denied", "content.read_private"],
+          ["user_denied", "content.edit_any"],
+        ]);
+        expect(r.permissionRefusals?.[0]?.message).toMatch(/never gets more power than the person/);
+      });
+
+      test("PL-38 for an Editor: anyone's entries may be read and changed", async () => {
+        const r = await act(as.editor, { read: "theirs", write: "pub-theirs" });
+        expect(r.ok && r.result).toEqual({ read: "allowed", write: "allowed" });
+        content.get("pub-theirs")!.title = "Their post";
+      });
+
+      test("PL-38 a role limited to recipes changes recipes, not posts", async () => {
+        const ok = await act(as.recipes, { write: "recipe1" });
+        expect(ok.ok && ok.result).toEqual({ write: "allowed" });
+        const r = await act(as.recipes, { write: "pub-theirs" });
+        expect(r.ok && r.result).toEqual({ write: "user_denied" });
+      });
+
+      test("PL-38 someone who is not a member may let the plugin read what is published, and nothing more", async () => {
+        const r = await act(as.stranger, { read: "pub-theirs", write: "pub-theirs" });
+        expect(r.ok && r.result).toEqual({ read: "allowed", write: "user_denied" });
+        const d = await act(as.stranger, { read: "mine" });
+        expect(d.ok && d.result).toEqual({ read: "user_denied" });
+      });
+
+      test("PL-38 a person's power never extends the plugin's: acting for an Administrator, a plugin without the permission is still refused", async () => {
+        const r = await host.call(
+          "limited",
+          "hook",
+          "content:afterSave",
+          {},
+          { actingFor: as.admin },
+        );
+        expect(r.ok && r.result).toEqual({
+          write: "permission_denied",
+          draft: "permission_denied",
+        });
+      });
+
+      test("PL-38 acting alone (a job, no person), only the plugin's own permissions apply", async () => {
+        const r = await act(undefined, { read: "theirs", write: "pub-theirs" });
+        expect(r.ok && r.result).toEqual({ read: "allowed", write: "allowed" });
+        content.get("pub-theirs")!.title = "Their post";
+      });
+
+      test("PL-38 a person's refusal is no failure and no note for the owner, and it is in the audit trail", async () => {
+        for (let i = 0; i < 4; i++) {
+          const r = await host.call(
+            "acts-for",
+            "hook",
+            "content:beforeSave",
+            { write: "pub-theirs" },
+            { actingFor: as.author },
+          );
+          expect(r.ok).toBe(false);
+          expect(!r.ok && r.code).toBe("user_denied");
+        }
+        expect(host.status("acts-for")).toBe("enabled");
+        expect((await host.permissionNotes()).some((n) => n.pluginId === "acts-for")).toBe(false);
+        const rows = (await audit("host.denied_user")).filter((a) => a.plugin === "acts-for");
+        expect(rows.length).toBeGreaterThanOrEqual(4);
+        expect(rows.every((a) => a.detail["user"] !== undefined)).toBe(true);
+        expect(
+          rows.some((a) => a.detail["user"] === AUTHOR && a.detail["need"] === "content.edit_any"),
+        ).toBe(true);
+        expect(content.get("pub-theirs")!.title).toBe("Their post");
       });
     });
   });

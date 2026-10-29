@@ -18,7 +18,9 @@ import {
 import { developerMessage, ownerSentence } from "./permission-text.js";
 import { FetchRefused, safeFetch } from "./safe-fetch.js";
 import type {
+  ActingUser,
   CallKind,
+  CallOptions,
   CallResult,
   ContentService,
   DeveloperNote,
@@ -75,6 +77,8 @@ interface ActiveCall {
   kind: CallKind;
   name: string;
   refusals: PermissionRefusal[];
+  /** The person the call acts for, if any (PL-38). */
+  actingFor?: ActingUser;
 }
 
 interface Loaded {
@@ -207,7 +211,13 @@ export class SandboxHost {
 
   // ---- calls into a plugin ----
 
-  async call(id: string, kind: CallKind, name: string, payload: unknown): Promise<CallResult> {
+  async call(
+    id: string,
+    kind: CallKind,
+    name: string,
+    payload: unknown,
+    options: CallOptions = {},
+  ): Promise<CallResult> {
     const started = performance.now();
     const ms = () => Math.round((performance.now() - started) * 100) / 100;
     const p = this.plugins.get(id);
@@ -242,7 +252,12 @@ export class SandboxHost {
     }
     // The plugin sends this id with each call it makes to the host, so a refusal can name the hook it happened in.
     const callId = randomBytes(8).toString("hex");
-    const active: ActiveCall = { kind, name, refusals: [] };
+    const active: ActiveCall = {
+      kind,
+      name,
+      refusals: [],
+      ...(options.actingFor ? { actingFor: options.actingFor } : {}),
+    };
     p.active.set(callId, active);
     const refusals = () =>
       active.refusals.length > 0 ? { permissionRefusals: [...active.refusals] } : {};
@@ -528,6 +543,29 @@ const config :Workerd.Config = (
     };
     if (need && need !== "network:fetch" && !granted.includes(need))
       return refuse(need, "permission_denied", `permission "${need}" was not approved`);
+    /** A call that acts for a person may not do what that person may not (spec 02, section 8, rule 1; PL-38). This is
+     * not the plugin's fault, so it is no failure and no note for the owner; it is kept in the audit trail. */
+    const userRefuse = async (capability: string, entryId: string) => {
+      await this.audit(p, "host.denied_user", {
+        route,
+        need: capability,
+        user: during?.actingFor?.userId,
+        entry: entryId,
+        ...(during ? { kind: during.kind, name: during.name } : {}),
+      });
+      const message = `The person this ${during?.kind ?? "call"} acts for may not do this ("${capability}"). A plugin never gets more power than the person it acts for.`;
+      if (
+        during &&
+        !during.refusals.some((r) => r.code === "user_denied" && r.permission === capability)
+      )
+        during.refusals.push({ permission: capability, code: "user_denied", message });
+      return send(403, { error: message, code: "user_denied" });
+    };
+    const actingFor = during?.actingFor;
+    const own = (entry: { authorId?: string }) =>
+      actingFor !== undefined &&
+      entry.authorId !== undefined &&
+      entry.authorId === actingFor.userId;
     try {
       await this.audit(p, `host${route.replace("/", ".")}`, { route });
       switch (route) {
@@ -540,9 +578,27 @@ const config :Workerd.Config = (
               "permission_denied",
               'permission "content:read_drafts" was not approved',
             );
+          // Anyone may read what is published; anything else only a person who may see it (PL-38).
+          if (
+            actingFor &&
+            entry.status !== "published" &&
+            !actingFor.can("content.read_private", entry.typeKey) &&
+            !actingFor.can("content.edit_any", entry.typeKey) &&
+            !(own(entry) && actingFor.can("content.edit_own", entry.typeKey))
+          )
+            return userRefuse(own(entry) ? "content.edit_own" : "content.read_private", entry.id);
           return send(200, { result: entry });
         }
         case "/content/update": {
+          if (actingFor) {
+            const current = await this.o.content.get(String(body["id"]));
+            if (!current) return send(404, { error: "not found" });
+            if (
+              !actingFor.can("content.edit_any", current.typeKey) &&
+              !(own(current) && actingFor.can("content.edit_own", current.typeKey))
+            )
+              return userRefuse(own(current) ? "content.edit_own" : "content.edit_any", current.id);
+          }
           const raw = (body["patch"] ?? {}) as Record<string, unknown>;
           const patch: Record<string, unknown> = {};
           for (const key of ["title", "meta"]) if (key in raw) patch[key] = raw[key];
