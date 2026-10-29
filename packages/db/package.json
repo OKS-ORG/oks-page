@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "default": "./dist/memory.js"
+    },
     "./testing": {
       "types": "./dist/testing/harness.d.ts",
       "default": "./dist/testing/harness.js"
