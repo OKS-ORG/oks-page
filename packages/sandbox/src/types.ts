@@ -32,7 +32,24 @@ export interface ContentService {
 
 export type CallKind = "hook" | "block";
 
-export type CallResult =
+/** A call the host refused because the plugin lacks a permission (spec 04, section 4.1, rule 1; ADR 0036). */
+export interface PermissionRefusal {
+  /** The exact permission the plugin needs, for example "content:write" or "network:fetch:api.example.com". */
+  permission: string;
+  /** `permission_denied`, or `host_denied` for a network host that was not approved. */
+  code: "permission_denied" | "host_denied";
+  /** For the developer: the hook or block, the exact permission, and how to fix it. */
+  message: string;
+}
+
+/** A refusal with the plugin and the call it happened in, for the developer console. */
+export interface DeveloperNote extends PermissionRefusal {
+  pluginId: string;
+  /** Not set when the plugin's call was already over (a late call from the plugin). */
+  call?: { kind: CallKind; name: string };
+}
+
+export type CallResult = (
   | { ok: true; result: unknown; skipped?: false; ms: number }
   | { ok: true; skipped: true; result?: undefined; ms: number }
   | {
@@ -43,7 +60,11 @@ export type CallResult =
       skipped?: boolean;
       reason?: string;
       ms: number;
-    };
+    }
+) & {
+  /** Every permission the plugin was refused during this call, once each. A refusal is not a failure (ADR 0036). */
+  permissionRefusals?: PermissionRefusal[];
+};
 
 export type PluginStatus = "enabled" | "disabled" | "switched_off";
 
@@ -51,4 +72,20 @@ export interface OwnerNotice {
   pluginId: string;
   message: string;
   at: number;
+}
+
+/** What the owner is told about a permission a plugin was refused: one note for each plugin and permission,
+ * however many times it happened (ADR 0036). */
+export interface PermissionNote {
+  pluginId: string;
+  /** The exact permission. */
+  permission: string;
+  /** The plain sentence for the owner. */
+  message: string;
+  /** The hooks and blocks that were refused, in the order they first were. */
+  calls: { kind: CallKind; name: string }[];
+  count: number;
+  /** When it first and last happened, in milliseconds. */
+  firstAt: number;
+  lastAt: number;
 }

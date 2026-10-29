@@ -9,9 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { SandboxHost } from "./host.js";
+import { developerMessage, ownerSentence, permissionWords } from "./permission-text.js";
 import { isBlockedAddress } from "./safe-fetch.js";
 import { PLUGINS } from "./testing/plugins.js";
-import type { ContentEntry } from "./types.js";
+import type { ContentEntry, DeveloperNote } from "./types.js";
 
 const T = new Date(1_700_000_000_000);
 const entry = (o: Record<string, unknown> = {}) => ({
@@ -30,6 +31,7 @@ for (const { kind, open, skip } of openers) {
     let base = "";
     let externalPort = 0;
     const workDir = mkdtempSync(join(tmpdir(), "oks-sandbox-"));
+    const developerNotes: DeveloperNote[] = [];
     const content = new Map<string, ContentEntry>([
       [
         "e1",
@@ -113,6 +115,7 @@ for (const { kind, open, skip } of openers) {
         storageLimitBytes: 50_000,
         memoryMb: 128,
         allowPrivateForTests: true,
+        onDeveloperNote: (n) => developerNotes.push(n),
       });
       await host.listen();
       for (const [key, p] of Object.entries(PLUGINS)) host.load(p.manifest, p.code, extId(key));
@@ -532,8 +535,172 @@ for (const { kind, open, skip } of openers) {
       expect(none.limitsNote()).toMatch(/cannot limit the memory/);
       expect(none.limitsNote()).toMatch(/built into the site/);
     });
+
+    describe("PL-36 a permission refusal is not a failure; the owner and the developer are told (ADR 0036)", () => {
+      const limitedNotes = async () =>
+        (await host.permissionNotes()).filter((n) => n.pluginId === "limited");
+      const failures = async (plugin: string) =>
+        (await audit("runner.failure")).filter((a) => a.plugin === plugin);
+
+      test("PL-36a the owner gets one note for each plugin and permission, however many refusals, and it survives a restart", async () => {
+        for (let i = 0; i < 3; i++) await hook("limited", "content:beforeSave", entry());
+        await hook("limited", "content:afterSave", entry());
+
+        const notes = await limitedNotes();
+        expect(notes.map((n) => n.permission).sort()).toEqual([
+          "content:read_drafts",
+          "content:write",
+        ]);
+        const write = notes.find((n) => n.permission === "content:write")!;
+        expect(write.message).toBe(
+          "Limited needs the permission 'Change posts and pages when they are saved' but does not have it, so part of it does not work. Ask the author for an update.",
+        );
+        expect(write.count).toBe(4);
+        expect(write.calls).toEqual([
+          { kind: "hook", name: "content:beforeSave" },
+          { kind: "hook", name: "content:afterSave" },
+        ]);
+        expect(write.firstAt).toBeGreaterThan(0);
+        expect(write.firstAt).toBeLessThanOrEqual(write.lastAt);
+        const drafts = notes.find((n) => n.permission === "content:read_drafts")!;
+        expect(drafts.message).toMatch(/'Read your drafts and private content'/);
+        expect(drafts.count).toBe(1);
+
+        // The notes come from the audit trail, so a host that has just started shows the same ones.
+        const restarted = new SandboxHost({
+          runner: db.runner,
+          siteId: SITE,
+          content: undefined as never,
+          workDir,
+        });
+        const again = (await restarted.permissionNotes()).filter((n) => n.pluginId === "limited");
+        expect(again.map((n) => [n.permission, n.count]).sort()).toEqual(
+          notes.map((n) => [n.permission, n.count]).sort(),
+        );
+      });
+
+      test("PL-36a a network host that was not approved is a note too, shown by name", async () => {
+        await hook("netter", "content:afterSave", { base });
+        const notes = (await host.permissionNotes()).filter((n) => n.pluginId === "netter");
+        // The address with no host name (file:///...) is refused but is not about a permission: no note for it.
+        expect(notes.map((n) => n.permission)).toEqual(["network:fetch:localhost"]);
+        // This plugin has no display name, so its id is used.
+        expect(notes[0]!.message).toMatch(/^netter needs the permission 'Connect to localhost'/);
+      });
+
+      test("PL-36b the developer message has the hook, the exact permission and the fix", async () => {
+        const seen = developerNotes.length;
+        const message =
+          'Hook "content:beforeSave" needs "content:write". Add it to "permissions" in the manifest.';
+        const r = await hook("limited", "content:beforeSave", entry());
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.code).toBe("permission_denied");
+        expect(!r.ok && r.error).toContain('permission "content:write" was not approved');
+        expect(!r.ok && r.error).toContain(message);
+        expect(r.permissionRefusals).toEqual([
+          { permission: "content:write", code: "permission_denied", message },
+        ]);
+        expect(developerNotes.slice(seen)).toEqual([
+          {
+            pluginId: "limited",
+            permission: "content:write",
+            code: "permission_denied",
+            message,
+            call: { kind: "hook", name: "content:beforeSave" },
+          },
+        ]);
+      });
+
+      test("PL-36b a refusal the plugin catches is reported too, once for each permission", async () => {
+        const r = await hook("limited", "content:afterSave", entry());
+        expect(r.ok && r.result).toEqual({
+          write: "permission_denied",
+          draft: "permission_denied",
+        });
+        expect(r.permissionRefusals?.map((x) => x.permission)).toEqual([
+          "content:write",
+          "content:read_drafts",
+        ]);
+        expect(r.permissionRefusals?.[1]?.message).toBe(
+          'Hook "content:afterSave" needs "content:read_drafts". Add it to "permissions" in the manifest.',
+        );
+      });
+
+      test("PL-36c refusals do not switch the plugin off, and it keeps running", async () => {
+        for (let i = 0; i < 4; i++) {
+          const r = await hook("limited", "content:beforeSave", entry());
+          expect(!r.ok && r.code).toBe("permission_denied");
+        }
+        expect(host.status("limited")).toBe("enabled");
+        expect(await failures("limited")).toHaveLength(0);
+        expect(host.notices.some((n) => n.pluginId === "limited")).toBe(false);
+        expect((await hook("limited", "content:afterSave", entry())).ok).toBe(true);
+      });
+
+      test("PL-36c an error that only pretends to be a refusal still counts as a failure (three errors switch off: PL-09)", async () => {
+        const r = await hook("limited", "user:afterLogin", {});
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.code).toBe("permission_denied");
+        expect(r.permissionRefusals).toBeUndefined();
+        expect(await failures("limited")).toHaveLength(1);
+      });
+
+      test("PL-36d PL-04 and PL-05 still hold: the hook runs, the write is refused, the data is unchanged", async () => {
+        const r = await hook("no-write", "content:beforeSave", entry());
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.error).toMatch(/content:write/);
+        expect(!r.ok && r.code).toBe("permission_denied");
+        expect(content.get("e1")!.title).toBe("Hello");
+        const d = await hook("drafts", "content:afterSave", {});
+        expect(d.ok && d.result).toEqual({ pub: "Hello", draft: "permission_denied" });
+        expect(host.status("no-write")).toBe("enabled");
+        expect(host.status("drafts")).toBe("enabled");
+        const notes = await host.permissionNotes();
+        expect(
+          notes.some((n) => n.pluginId === "no-write" && n.permission === "content:write"),
+        ).toBe(true);
+        expect(
+          notes.some((n) => n.pluginId === "drafts" && n.permission === "content:read_drafts"),
+        ).toBe(true);
+      });
+
+      test("PL-36a once the owner approves the permission (an update), its note goes", async () => {
+        const { manifest, code } = PLUGINS["limited"]!;
+        host.load(
+          { ...manifest, permissions: [...manifest.permissions, "content:write"] },
+          code,
+          extId("limited"),
+        );
+        expect((await limitedNotes()).map((n) => n.permission)).toEqual(["content:read_drafts"]);
+        host.load(manifest, code, extId("limited"));
+        expect(await limitedNotes()).toHaveLength(2);
+      });
+    });
   });
 }
+
+describe("PL-36 the words for a refused permission", () => {
+  test("the owner reads the plain sentence from spec 04, section 4.2; a host is shown by name", () => {
+    expect(permissionWords("content:write")).toBe("Change posts and pages when they are saved");
+    expect(permissionWords("comments:moderate")).toBe("Read or moderate comments");
+    expect(permissionWords("network:fetch:api.example.com")).toBe("Connect to api.example.com");
+    expect(permissionWords("something:new")).toBe("something:new");
+    expect(ownerSentence("Reading Time", "content:write")).toBe(
+      "Reading Time needs the permission 'Change posts and pages when they are saved' but does not have it, so part of it does not work. Ask the author for an update.",
+    );
+  });
+  test("the developer message says Hook or Block, and still reads well when the call is over", () => {
+    expect(developerMessage({ kind: "hook", name: "content:beforeSave" }, "content:write")).toBe(
+      'Hook "content:beforeSave" needs "content:write". Add it to "permissions" in the manifest.',
+    );
+    expect(developerMessage({ kind: "block", name: "reading-time" }, "content:read")).toBe(
+      'Block "reading-time" needs "content:read". Add it to "permissions" in the manifest.',
+    );
+    expect(developerMessage(undefined, "content:read")).toBe(
+      'This call needs "content:read". Add it to "permissions" in the manifest.',
+    );
+  });
+});
 
 describe("PL-29 addresses a plugin may not reach", () => {
   test.each([

@@ -15,12 +15,16 @@ import {
   type MemoryCap,
   type MemoryLimitSupport,
 } from "./cgroup.js";
+import { developerMessage, ownerSentence } from "./permission-text.js";
 import { FetchRefused, safeFetch } from "./safe-fetch.js";
 import type {
   CallKind,
   CallResult,
   ContentService,
+  DeveloperNote,
   OwnerNotice,
+  PermissionNote,
+  PermissionRefusal,
   PluginManifest,
   PluginStatus,
 } from "./types.js";
@@ -58,10 +62,19 @@ export interface HostOptions {
   memoryMb?: number;
   /** A process that has had no call for this long is stopped (it starts again on the next call). 0: never. */
   idleMs?: number;
+  /** Where the message for the developer goes when a plugin is refused a permission (ADR 0036). Default: the server log. */
+  onDeveloperNote?: (note: DeveloperNote) => void;
   /** Tests only. */
   allowPrivateForTests?: boolean;
   /** Tests only: pretend the system cannot cap memory. */
   pretendNoMemoryLimit?: boolean;
+}
+
+/** One call into a plugin that is still running; the plugin's calls to the host name it, so a refusal can say which hook it was. */
+interface ActiveCall {
+  kind: CallKind;
+  name: string;
+  refusals: PermissionRefusal[];
 }
 
 interface Loaded {
@@ -75,6 +88,7 @@ interface Loaded {
   proc: ChildProcess | null;
   cap: MemoryCap | null;
   failures: number[];
+  active: Map<string, ActiveCall>;
   status: PluginStatus;
   startedMs: number;
   idleTimer: NodeJS.Timeout | null;
@@ -96,9 +110,9 @@ export class SandboxHost {
   private server: Server | null = null;
   private hostPort = 0;
   private readonly o: Required<
-    Omit<HostOptions, "settings" | "runner" | "siteId" | "content" | "workDir">
+    Omit<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">
   > &
-    Pick<HostOptions, "settings" | "runner" | "siteId" | "content" | "workDir">;
+    Pick<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">;
 
   constructor(options: HostOptions) {
     this.o = {
@@ -155,6 +169,7 @@ export class SandboxHost {
       proc: null,
       cap: null,
       failures: [],
+      active: new Map(),
       status: "enabled",
       startedMs: 0,
       idleTimer: null,
@@ -225,6 +240,12 @@ export class SandboxHost {
         ms: ms(),
       };
     }
+    // The plugin sends this id with each call it makes to the host, so a refusal can name the hook it happened in.
+    const callId = randomBytes(8).toString("hex");
+    const active: ActiveCall = { kind, name, refusals: [] };
+    p.active.set(callId, active);
+    const refusals = () =>
+      active.refusals.length > 0 ? { permissionRefusals: [...active.refusals] } : {};
     try {
       await this.start(p);
       this.touch(p);
@@ -232,7 +253,9 @@ export class SandboxHost {
         `http://127.0.0.1:${p.port}/${kind}/${encodeURIComponent(name)}`,
         {
           method: "POST",
-          body: JSON.stringify(kind === "hook" ? { event: payload } : { props: payload }),
+          body: JSON.stringify(
+            kind === "hook" ? { event: payload, callId } : { props: payload, callId },
+          ),
           signal: AbortSignal.timeout(this.o.wallMs),
         },
       );
@@ -243,9 +266,12 @@ export class SandboxHost {
         error?: string;
         code?: string;
       };
-      if (!body.ok && !body.skipped)
+      // A refusal for a missing permission is not a failure (ADR 0036): the plugin is built wrong, it is not crashing.
+      // Only a refusal the host really made in this call is excused, so a plugin cannot pass an error off as one.
+      const refused = body.code !== undefined && active.refusals.some((r) => r.code === body.code);
+      if (!body.ok && !body.skipped && !refused)
         await this.recordFailure(p, `error: ${body.error ?? "unknown"}`);
-      return { ...body, ms: ms() } as CallResult;
+      return { ...body, ms: ms(), ...refusals() } as CallResult;
     } catch (e) {
       const timedOut = (e as Error).name === "TimeoutError" || (e as Error).name === "AbortError";
       if (process.env.OKS_DEBUG_SANDBOX) console.error("[oks sandbox] call failed:", e);
@@ -254,8 +280,64 @@ export class SandboxHost {
         p,
         timedOut ? "timeout" : `crash: ${String((e as Error).message).slice(0, 60)}`,
       );
-      return { ok: false, error: timedOut ? "timeout" : "crashed", killed: true, ms: ms() };
+      return {
+        ok: false,
+        error: timedOut ? "timeout" : "crashed",
+        killed: true,
+        ms: ms(),
+        ...refusals(),
+      };
+    } finally {
+      p.active.delete(callId);
     }
+  }
+
+  /** What the owner should be told about permissions the plugins were refused (spec 04, section 7; ADR 0036): one
+   * note for each plugin and permission, however many times it happened. Built from the `host.denied` audit rows, so it
+   * survives a restart and needs no table of its own. A permission the owner has approved since is not listed. */
+  async permissionNotes(): Promise<PermissionNote[]> {
+    const rows = await this.o.runner.all(
+      `select "actor_id", "detail", "created_at" from "audit_log" where "site_id" = ? and "actor_type" = 'plugin' and "action" = 'host.denied' order by "created_at"`,
+      [this.o.siteId],
+    );
+    const notes = new Map<string, PermissionNote>();
+    for (const row of rows) {
+      const raw = row["detail"];
+      const detail = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, unknown>;
+      // A refusal that is not about a permission (a blocked address, for example) has no `need`.
+      if (typeof detail["need"] !== "string") continue;
+      const need = detail["need"];
+      const pluginId = String(row["actor_id"]);
+      const loaded = this.plugins.get(pluginId);
+      if (loaded?.manifest.permissions.includes(need)) continue;
+      const at =
+        row["created_at"] instanceof Date ? row["created_at"].getTime() : Number(row["created_at"]);
+      const key = `${pluginId}\n${need}`;
+      let note = notes.get(key);
+      if (!note) {
+        note = {
+          pluginId,
+          permission: need,
+          message: ownerSentence(loaded?.manifest.displayName ?? pluginId, need),
+          calls: [],
+          count: 0,
+          firstAt: at,
+          lastAt: at,
+        };
+        notes.set(key, note);
+      }
+      note.count++;
+      note.firstAt = Math.min(note.firstAt, at);
+      note.lastAt = Math.max(note.lastAt, at);
+      const kind = detail["kind"] === "block" ? "block" : "hook";
+      const callName = detail["name"];
+      if (
+        typeof callName === "string" &&
+        !note.calls.some((c) => c.kind === kind && c.name === callName)
+      )
+        note.calls.push({ kind, name: callName });
+    }
+    return [...notes.values()].sort((a, b) => b.lastAt - a.lastAt);
   }
 
   private touch(p: Loaded) {
@@ -411,26 +493,53 @@ const config :Workerd.Config = (
     }
     const need = ROUTE_PERMISSION[route];
     const granted = p.manifest.permissions;
-    if (need && need !== "network:fetch" && !granted.includes(need)) {
-      await this.audit(p, "host.denied", { route, need });
-      return send(403, {
-        error: `permission "${need}" was not approved`,
-        code: "permission_denied",
+    // The call this one belongs to. The plugin sends the id, so it is only used to look up the host's own record of
+    // that call (to name the hook); an id the plugin made up, or a call that is over, finds nothing.
+    const during = p.active.get(String(req.headers["x-oks-call"] ?? ""));
+    /** The one answer to a call that needs a permission the plugin does not have (spec 04, section 4.1, rule 1; ADR 0036):
+     * keep it in the audit trail (the owner's note is built from there), tell the developer which hook needs which
+     * permission, and refuse with the fix in the answer. */
+    const refuse = async (
+      permission: string,
+      code: PermissionRefusal["code"],
+      error: string,
+      detail: Record<string, unknown> = {},
+    ) => {
+      await this.audit(p, "host.denied", {
+        route,
+        need: permission,
+        ...detail,
+        ...(during ? { kind: during.kind, name: during.name } : {}),
       });
-    }
+      const message = developerMessage(during, permission);
+      if (!during || !during.refusals.some((r) => r.permission === permission)) {
+        during?.refusals.push({ permission, code, message });
+        const note: DeveloperNote = {
+          pluginId: p.manifest.id,
+          permission,
+          code,
+          message,
+          ...(during ? { call: { kind: during.kind, name: during.name } } : {}),
+        };
+        if (this.o.onDeveloperNote) this.o.onDeveloperNote(note);
+        else console.warn(`[plugin ${note.pluginId}] ${message}`);
+      }
+      return send(403, { error, code, fix: message });
+    };
+    if (need && need !== "network:fetch" && !granted.includes(need))
+      return refuse(need, "permission_denied", `permission "${need}" was not approved`);
     try {
       await this.audit(p, `host${route.replace("/", ".")}`, { route });
       switch (route) {
         case "/content/get": {
           const entry = await this.o.content.get(String(body["id"]));
           if (!entry) return send(404, { error: "not found" });
-          if (entry.status !== "published" && !granted.includes("content:read_drafts")) {
-            await this.audit(p, "host.denied", { route, need: "content:read_drafts" });
-            return send(403, {
-              error: 'permission "content:read_drafts" was not approved',
-              code: "permission_denied",
-            });
-          }
+          if (entry.status !== "published" && !granted.includes("content:read_drafts"))
+            return refuse(
+              "content:read_drafts",
+              "permission_denied",
+              'permission "content:read_drafts" was not approved',
+            );
           return send(200, { result: entry });
         }
         case "/content/update": {
@@ -504,13 +613,18 @@ const config :Workerd.Config = (
           } catch {
             return send(400, { error: "bad url", code: "bad_url" });
           }
-          if (!granted.includes(`network:fetch:${url.hostname}`)) {
-            await this.audit(p, "host.denied", { route, host: url.hostname });
-            return send(403, {
-              error: `host "${url.hostname}" was not approved`,
-              code: "host_denied",
-            });
+          if (!url.hostname) {
+            // An address with no host (file:///...) is refused, but it is not a permission the owner could approve.
+            await this.audit(p, "host.denied", { route, host: "", why: "no_host" });
+            return send(403, { error: "the address has no host name", code: "host_denied" });
           }
+          if (!granted.includes(`network:fetch:${url.hostname}`))
+            return refuse(
+              `network:fetch:${url.hostname}`,
+              "host_denied",
+              `host "${url.hostname}" was not approved`,
+              { host: url.hostname },
+            );
           try {
             const r = await safeFetch(url, { allowPrivateForTests: this.o.allowPrivateForTests });
             return send(200, { result: r });
