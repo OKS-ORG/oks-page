@@ -219,6 +219,20 @@ export class SandboxHost {
     this.plugins.get(id)!.code = newCode;
   }
 
+  /** True when the plugin is loaded, on, and has been approved for `permission`. */
+  isAllowed(id: string, permission: string): boolean {
+    const p = this.plugins.get(id);
+    return p !== undefined && p.status === "enabled" && p.manifest.permissions.includes(permission);
+  }
+
+  /** Switches a plugin off by hand (the owner does this from the admin). It is not run and not asked again. */
+  disable(id: string): void {
+    const p = this.plugins.get(id);
+    if (!p) return;
+    p.status = "disabled";
+    this.stop(p);
+  }
+
   status(id: string): PluginStatus | "unknown" {
     return this.plugins.get(id)?.status ?? "unknown";
   }
