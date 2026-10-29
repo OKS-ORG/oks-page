@@ -175,6 +175,7 @@ describe("sqlite migrations", () => {
       "0000_init",
       "0001_cache_tags",
       "0002_extension_updates_and_rollback",
+      "0003_extension_settings",
     ]);
   });
 });
@@ -308,6 +309,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0000_init",
       "0001_cache_tags",
       "0002_extension_updates_and_rollback",
+      "0003_extension_settings",
     ]);
   });
 });

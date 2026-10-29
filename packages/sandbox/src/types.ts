@@ -7,7 +7,17 @@ export interface PluginManifest {
   permissions: string[];
   /** sha256 of the bundle, set at install; checked on every start (spec 04, PL-23). */
   integrity?: string;
+  /** The settings the owner fills in (spec 04, section 9). */
+  settings?: SettingsSchema;
 }
+
+/** One setting a plugin declares. A `secret` (an API key) is sealed at rest and never shown in full again (PL-39). */
+export interface SettingField {
+  type: "text" | "number" | "boolean" | "secret";
+  label?: string;
+}
+
+export type SettingsSchema = Record<string, SettingField>;
 
 export interface ContentEntry {
   id: string;
