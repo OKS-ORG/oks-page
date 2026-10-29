@@ -9,6 +9,8 @@ export interface PluginManifest {
   integrity?: string;
   /** The settings the owner fills in (spec 04, section 9). */
   settings?: SettingsSchema;
+  /** Filters run by priority, lowest first, then in install order (spec 04, section 7). Default 10. */
+  priority?: number;
 }
 
 /** One setting a plugin declares. A `secret` (an API key) is sealed at rest and never shown in full again (PL-39). */
@@ -54,6 +56,8 @@ export interface ActingUser {
 }
 
 export interface CallOptions {
+  /** A time limit for this call instead of the host's usual one (spec 04, section 5.3: publish hooks get 5 seconds). */
+  timeoutMs?: number;
   /** Set when a person's action started the call (they saved a post): the plugin may then do only what both its own
    * permissions and this person's capabilities allow. Not set for a job or a hook with no person: then only the
    * plugin's permissions apply. */
@@ -97,6 +101,25 @@ export type CallResult = (
 };
 
 export type PluginStatus = "enabled" | "disabled" | "switched_off";
+
+/** The answer to "may this be published?" (spec 04, section 5.3; PL-40). Only an explicit refusal from a plugin that
+ * worked blocks publishing. A plugin that failed, crashed or took too long is skipped, and the owner is told. */
+export interface PublishCheck {
+  allowed: boolean;
+  /** When not allowed: the plugin that refused and its message for the author. */
+  refusal?: { pluginId: string; message: string };
+  /** Plugins that could not check, so publishing went ahead without them. */
+  skipped: { pluginId: string; why: "timeout" | "failed"; message: string }[];
+}
+
+/** One note for the owner per plugin whose before-publish check could not run (PL-40), built from the audit trail. */
+export interface PublishCheckNote {
+  pluginId: string;
+  message: string;
+  count: number;
+  firstAt: number;
+  lastAt: number;
+}
 
 export interface OwnerNotice {
   pluginId: string;

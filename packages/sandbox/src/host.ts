@@ -30,6 +30,8 @@ import type {
   PermissionRefusal,
   PluginManifest,
   PluginStatus,
+  PublishCheck,
+  PublishCheckNote,
 } from "./types.js";
 import { WRAPPER_SOURCE } from "./wrapper.js";
 
@@ -68,6 +70,8 @@ export interface HostOptions {
   memoryMb?: number;
   /** A process that has had no call for this long is stopped (it starts again on the next call). 0: never. */
   idleMs?: number;
+  /** The time limit for a before-publish check (spec 04, section 5.3: 5 seconds). */
+  publishWallMs?: number;
   /** Where the message for the developer goes when a plugin is refused a permission (ADR 0036). Default: the server log. */
   onDeveloperNote?: (note: DeveloperNote) => void;
   /** Tests only. */
@@ -148,6 +152,7 @@ export class SandboxHost {
       storageLimitBytes: 10_000_000,
       memoryMb: 0,
       idleMs: 0,
+      publishWallMs: 5000,
       allowPrivateForTests: false,
       pretendNoMemoryLimit: false,
       ...options,
@@ -293,7 +298,7 @@ export class SandboxHost {
           body: JSON.stringify(
             kind === "hook" ? { event: payload, callId } : { props: payload, callId },
           ),
-          signal: AbortSignal.timeout(this.o.wallMs),
+          signal: AbortSignal.timeout(options.timeoutMs ?? this.o.wallMs),
         },
       );
       const body = (await response.json()) as {
@@ -327,6 +332,82 @@ export class SandboxHost {
     } finally {
       p.active.delete(callId);
     }
+  }
+
+  /** May `entry` be published? Runs every enabled plugin's `content:beforePublish` hook, by priority and then install
+   * order (spec 04, section 7). Only an explicit refusal (`{ refuse: "Add a featured image first" }`) from a plugin
+   * that worked blocks publishing, and the first one stops the check. A plugin that fails, crashes, gives an answer of
+   * the wrong shape or takes longer than the publish time limit is skipped: publishing goes ahead without it and the
+   * owner is told (spec 04, section 5.3, "Fail open"; PL-40). */
+  async beforePublish(entry: unknown, options: CallOptions = {}): Promise<PublishCheck> {
+    const entryId = String((entry as { id?: unknown } | null)?.id ?? "");
+    const order = [...this.plugins.values()]
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => p.status === "enabled")
+      .sort((a, b) => (a.p.manifest.priority ?? 10) - (b.p.manifest.priority ?? 10) || a.i - b.i);
+    const skipped: PublishCheck["skipped"] = [];
+    for (const { p } of order) {
+      const r = await this.call(p.manifest.id, "hook", "content:beforePublish", entry, {
+        ...options,
+        timeoutMs: options.timeoutMs ?? this.o.publishWallMs,
+      });
+      if (r.ok && r.skipped) continue; // the plugin has no before-publish hook
+      const name = p.manifest.displayName ?? p.manifest.id;
+      const refuse = r.ok
+        ? (r.result as { refuse?: unknown } | null | undefined)?.refuse
+        : undefined;
+      if (r.ok && refuse === undefined) continue;
+      if (r.ok && typeof refuse === "string" && refuse.trim() !== "") {
+        const message = refuse.trim().slice(0, 300);
+        await this.audit(p, "publish.refused", { entry: entryId, message });
+        return { allowed: false, refusal: { pluginId: p.manifest.id, message }, skipped };
+      }
+      // Failed, crashed, too slow, or an answer of the wrong shape: skip it, publish anyway, tell the owner.
+      const why: "timeout" | "failed" = !r.ok && r.error === "timeout" ? "timeout" : "failed";
+      const message =
+        why === "timeout"
+          ? `${name} took too long to check this before it was published, so it was published without that check.`
+          : `${name} could not check this before it was published, so it was published without that check.`;
+      skipped.push({ pluginId: p.manifest.id, why, message });
+      await this.audit(p, "publish.check_failed", {
+        entry: entryId,
+        why,
+        error: r.ok ? "an answer of the wrong shape" : r.error,
+      });
+    }
+    return { allowed: true, skipped };
+  }
+
+  /** One note for the owner per plugin whose before-publish check could not run (PL-40), however often it happened.
+   * Built from the audit trail, so it survives a restart. */
+  async publishCheckNotes(): Promise<PublishCheckNote[]> {
+    const rows = await this.o.runner.all(
+      `select "actor_id", "created_at" from "audit_log" where "site_id" = ? and "actor_type" = 'plugin' and "action" = 'publish.check_failed' order by "created_at"`,
+      [this.o.siteId],
+    );
+    const notes = new Map<string, PublishCheckNote>();
+    for (const row of rows) {
+      const pluginId = String(row["actor_id"]);
+      const at = new Date(row["created_at"] as string | number | Date).getTime();
+      const note = notes.get(pluginId);
+      if (note) {
+        note.count++;
+        note.lastAt = at;
+        continue;
+      }
+      const name = this.plugins.get(pluginId)?.manifest.displayName ?? pluginId;
+      notes.set(pluginId, {
+        pluginId,
+        message: `${name} could not check some posts before they were published. They were published without that check.`,
+        count: 1,
+        firstAt: at,
+        lastAt: at,
+      });
+    }
+    for (const note of notes.values())
+      if (note.count > 1)
+        note.message = `${this.plugins.get(note.pluginId)?.manifest.displayName ?? note.pluginId} could not check posts before they were published ${note.count} times. They were published without that check.`;
+    return [...notes.values()];
   }
 
   /** What the owner should be told about permissions the plugins were refused (spec 04, section 7; ADR 0036): one
