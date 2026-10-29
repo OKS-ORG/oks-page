@@ -22,6 +22,13 @@
       "when": 1793440000000,
       "tag": "0002_extension_updates_and_rollback",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793246850430,
+      "tag": "0003_extension_settings",
+      "breakpoints": true
     }
   ]
 }

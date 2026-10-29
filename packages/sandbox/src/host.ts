@@ -17,6 +17,7 @@ import {
 } from "./cgroup.js";
 import { developerMessage, ownerSentence } from "./permission-text.js";
 import { FetchRefused, safeFetch } from "./safe-fetch.js";
+import type { PluginSettings } from "./settings.js";
 import type {
   ActingUser,
   CallKind,
@@ -51,6 +52,9 @@ export interface HostOptions {
   siteId: string;
   content: ContentService;
   settings?: (pluginId: string, key: string) => Promise<unknown>;
+  /** The plugins' saved settings (PL-39). When set, a plugin reads its own settings from here, secrets in full; it can
+   * never name another plugin, because the host looks them up by the calling plugin's own extension. */
+  pluginSettings?: PluginSettings;
   /** A folder for each plugin's files. */
   workDir: string;
   /** A call that takes longer than this is stopped and the process killed. */
@@ -114,9 +118,27 @@ export class SandboxHost {
   private server: Server | null = null;
   private hostPort = 0;
   private readonly o: Required<
-    Omit<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">
+    Omit<
+      HostOptions,
+      | "settings"
+      | "pluginSettings"
+      | "onDeveloperNote"
+      | "runner"
+      | "siteId"
+      | "content"
+      | "workDir"
+    >
   > &
-    Pick<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">;
+    Pick<
+      HostOptions,
+      | "settings"
+      | "pluginSettings"
+      | "onDeveloperNote"
+      | "runner"
+      | "siteId"
+      | "content"
+      | "workDir"
+    >;
 
   constructor(options: HostOptions) {
     this.o = {
@@ -657,7 +679,10 @@ const config :Workerd.Config = (
         }
         case "/settings/get":
           return send(200, {
-            result: (await this.o.settings?.(p.manifest.id, String(body["k"]))) ?? null,
+            result:
+              (this.o.pluginSettings
+                ? await this.o.pluginSettings.forPlugin(p.extensionId, String(body["k"]))
+                : await this.o.settings?.(p.manifest.id, String(body["k"]))) ?? null,
           });
         case "/log":
           console.log(`[plugin ${p.manifest.id}] ${String(body["m"]).slice(0, 500)}`);
