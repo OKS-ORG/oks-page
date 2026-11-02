@@ -42,17 +42,17 @@ describe.skipIf(!browserPath)("the admin shell", () => {
   test("AD-02: the sidebar shows at 1025 px and above; a Menu button below", async () => {
     const wide = await site.open(1025);
     expect(await wide.page.locator("aside nav").count()).toBe(1);
-    expect(await wide.page.getByRole("button", { name: "Menu" }).count()).toBe(0);
+    expect(await wide.page.getByRole("button", { name: "Menu", exact: true }).count()).toBe(0);
     await wide.page.close();
     const narrow = await site.open(1024);
     expect(await narrow.page.locator("aside").count()).toBe(0);
-    expect(await narrow.page.getByRole("button", { name: "Menu" }).count()).toBe(1);
+    expect(await narrow.page.getByRole("button", { name: "Menu", exact: true }).count()).toBe(1);
     await narrow.page.close();
   });
 
   test("AD-04, AD-05: the drawer is a dialog with the menu, and Escape returns focus to the Menu button", async () => {
     const { page } = await site.open(390);
-    await page.getByRole("button", { name: "Menu" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
     expect(await dialog.getByRole("link", { name: "Dashboard" }).count()).toBe(1);

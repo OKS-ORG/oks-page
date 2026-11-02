@@ -1,27 +1,24 @@
 // The admin shell (spec 07, section 3): sidebar on wide screens, drawer below 1025 px, header with breadcrumbs and search,
 // a "Skip to content" link, and one main area with the screen's single h1.
+import { Sidebar, SidebarMenu, type ShellNavItem } from "./sidebar.js";
 import {
   Breadcrumbs,
   BreadcrumbItem,
   Button,
   CommandPalette,
   Drawer,
-  Nav,
   useCommandPalette,
   useMediaQuery,
   type CommandPaletteItem,
 } from "oks-ui";
 import { useRef, useState, type ReactNode } from "react";
 
-export interface ShellNavItem {
-  key: string;
-  label: string;
-  href: string;
-}
-
 export interface ShellProps {
   /** The main menu. A count such as "2 new" belongs in the label: oks-ui's `badge` fails axe (work list). */
   nav: ShellNavItem[];
+  /** The sidebar starts as the icon rail. The caller remembers the choice for each user (D110). */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
   selectedKey: string;
   /** The screen's title: the one h1 of the page. */
   title: string;
@@ -39,6 +36,8 @@ export const SIDEBAR_QUERY = "(min-width: 1025px)";
 
 export function Shell({
   nav,
+  collapsed: collapsedProp = false,
+  onCollapsedChange,
   selectedKey,
   title,
   breadcrumbs = [],
@@ -51,19 +50,24 @@ export function Shell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const palette = useCommandPalette({ hotkey: "mod+k" });
-  const menu = (
-    <Nav
-      aria-label="Main menu"
-      items={nav.map(({ key, label, href }) => ({ key, label, href }))}
-      selectedKey={selectedKey}
-    />
-  );
+  const [collapsed, setCollapsed] = useState(collapsedProp);
+  const menu = <SidebarMenu nav={nav} selectedKey={selectedKey} collapsed={false} />;
   return (
     <div className="oks-shell" dir={dir}>
       <a className="oks-skip" href="#main">
         Skip to content
       </a>
-      {wide ? <aside className="oks-sidebar">{menu}</aside> : null}
+      {wide ? (
+        <Sidebar
+          nav={nav}
+          selectedKey={selectedKey}
+          collapsed={collapsed}
+          onCollapsedChange={(next) => {
+            setCollapsed(next);
+            onCollapsedChange?.(next);
+          }}
+        />
+      ) : null}
       <div className="oks-shell-body">
         <header className="oks-header">
           {wide ? null : (

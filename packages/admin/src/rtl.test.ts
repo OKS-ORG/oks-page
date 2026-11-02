@@ -63,7 +63,7 @@ describe.skipIf(!browserPath)("the admin shell in right-to-left", () => {
   test("the drawer opens on the right in right-to-left and on the left in left-to-right, with no sideways scroll", async () => {
     for (const dir of ["ltr", "rtl"] as const) {
       const { page } = await site.open(390, "light", `?dir=${dir}`);
-      await page.getByRole("button", { name: "Menu" }).click();
+      await page.getByRole("button", { name: "Menu", exact: true }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       // The drawer slides in, so wait until it has stopped moving.

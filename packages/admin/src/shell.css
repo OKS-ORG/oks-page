@@ -49,3 +49,95 @@
 .oks-list-scroll td {
   white-space: nowrap;
 }
+
+/* The side menu: expanded, and the icon rail (D110). */
+.oks-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oks-sidebar[data-collapsed="true"] {
+  flex-basis: 64px;
+  padding-inline: 8px;
+}
+.oks-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.oks-menu-link,
+.oks-menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oks-menu-link[aria-current="page"],
+.oks-submenu a[aria-current="page"],
+.oks-flyout a[aria-current="page"] {
+  font-weight: 700;
+  background: var(--oks-color-primary-100, transparent);
+  color: var(--oks-color-primary-900, inherit);
+}
+.oks-menu-icon {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 24px;
+}
+.oks-menu-group {
+  margin-top: 8px;
+  border-top: 1px solid var(--oks-color-border, currentColor);
+}
+.oks-menu-heading {
+  display: block;
+  padding: 12px 8px 4px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+.oks-menu-rule {
+  margin: 8px 0;
+  border-top: 1px solid var(--oks-color-border, currentColor);
+}
+.oks-submenu a,
+.oks-flyout a {
+  display: block;
+  padding: 6px 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.oks-submenu {
+  padding-inline-start: 34px !important;
+}
+.oks-menu-item {
+  position: relative;
+}
+.oks-flyout {
+  position: absolute;
+  inset-inline-start: 100%;
+  top: 0;
+  min-width: 180px;
+  padding: 8px !important;
+  background: var(--oks-color-surface);
+  border: 1px solid var(--oks-color-border, currentColor);
+  border-radius: 6px;
+  z-index: 20;
+}
+.oks-flyout[hidden],
+.oks-submenu[hidden] {
+  display: none;
+}
+.oks-flyout-title {
+  padding: 4px 8px;
+  font-weight: 700;
+}
