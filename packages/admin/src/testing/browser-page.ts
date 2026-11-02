@@ -19,7 +19,11 @@ export interface TestSite {
   base: string;
   browser: Browser;
   /** A page at the given width (and colour scheme), already loaded and showing an h1. */
-  open(width: number, colorScheme?: "light" | "dark"): Promise<{ page: Page; errors: string[] }>;
+  open(
+    width: number,
+    colorScheme?: "light" | "dark",
+    search?: string,
+  ): Promise<{ page: Page; errors: string[] }>;
   close(): Promise<void>;
 }
 
@@ -75,11 +79,11 @@ ${entryBody}`,
   return {
     base,
     browser,
-    async open(width, colorScheme = "light") {
+    async open(width, colorScheme = "light", search = "") {
       const page = await browser.newPage({ viewport: { width, height: 800 }, colorScheme });
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(e.message));
-      await page.goto(base);
+      await page.goto(base + search);
       await page.waitForSelector("h1");
       // oks-ui switches to dark through this attribute, not through the browser setting.
       if (colorScheme === "dark")

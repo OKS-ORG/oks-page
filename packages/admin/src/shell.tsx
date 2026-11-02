@@ -29,6 +29,8 @@ export interface ShellProps {
   /** What Ctrl+K (or ⌘K) can jump to. */
   searchItems?: CommandPaletteItem[];
   onNavigate?: (href: string) => void;
+  /** The reading direction of the admin's language. The drawer opens on the start side (oks-ui's own `start` is not built yet). */
+  dir?: "ltr" | "rtl";
   children: ReactNode;
 }
 
@@ -42,6 +44,7 @@ export function Shell({
   breadcrumbs = [],
   searchItems = [],
   onNavigate,
+  dir = "ltr",
   children,
 }: ShellProps) {
   const wide = useMediaQuery(SIDEBAR_QUERY);
@@ -56,7 +59,7 @@ export function Shell({
     />
   );
   return (
-    <div className="oks-shell">
+    <div className="oks-shell" dir={dir}>
       <a className="oks-skip" href="#main">
         Skip to content
       </a>
@@ -90,6 +93,7 @@ export function Shell({
             menuButton.current?.focus();
           }}
           title="Menu"
+          position={dir === "rtl" ? "right" : "left"}
         >
           {menu}
         </Drawer>
