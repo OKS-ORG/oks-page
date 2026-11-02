@@ -2,7 +2,7 @@
 import { buildRedirectFiles, type Redirect, type RefusedRedirect } from "@oks-page/seo";
 import * as pagefind from "pagefind";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkExport, type ExportCheckOptions, type ExportCheckResult } from "./export-check.js";
@@ -14,6 +14,8 @@ export interface ExportOptions extends ExportCheckOptions {
   redirects?: Redirect[];
   /** Builds the pages into `out`. The default runs the site's own `scripts/build-export.mjs`. Tests pass their own. */
   build?: (siteDir: string, out: string) => Promise<void>;
+  /** The folder of uploaded files and their sizes, copied as it is to `uploads` in the export. */
+  uploads?: string;
   /** Makes the search index in `out`. The default runs Pagefind. Tests pass their own. */
   search?: (out: string) => Promise<void>;
 }
@@ -90,6 +92,12 @@ export async function exportSite(
   // The finished export must have a home page and a 404 page, or the host shows its own error pages.
   for (const file of ["index.html", "404.html"])
     if (!existsSync(join(out, file))) result.problems.push(`The export has no ${file}.`);
+
+  if (options.uploads) {
+    if (existsSync(options.uploads))
+      cpSync(options.uploads, join(out, "uploads"), { recursive: true });
+    else result.problems.push(`The uploads folder ${options.uploads} was not found.`);
+  }
 
   try {
     await (options.search ?? runPagefind)(out);

@@ -10,7 +10,8 @@ export default {
   // New projects should turn cacheComponents and partialPrefetching on together (Next.js 16.4 notice).
   ...(exportBuild ? {} : { cacheComponents: true, partialPrefetching: true }),
   poweredByHeader: false,
-  ...(exportBuild ? { output: "export" } : {}),
+  // A static host has no image optimizer: images are plain files made at upload (spec 09, ST-07).
+  ...(exportBuild ? { output: "export", images: { unoptimized: true } } : {}),
   // Pages are kept in each process; "which tags changed" is shared through the database (decision D82).
   ...(exportBuild
     ? {}

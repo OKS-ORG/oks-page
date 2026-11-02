@@ -110,4 +110,29 @@ describe("oks export", () => {
     expect(result.ok).toBe(false);
     expect(result.problems[0]).toContain("search index could not be made: no room");
   });
+
+  test("ST-07: uploaded files are copied into the export as plain files", async () => {
+    const site = tmp({ "up/2026/photo-800.webp": "bytes" });
+    const out = join(site, "out");
+    const result = await exportSite(site, {
+      out,
+      build: goodBuild,
+      search: async () => {},
+      uploads: join(site, "up"),
+    });
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(out, "uploads", "2026", "photo-800.webp"), "utf8")).toBe("bytes");
+  });
+
+  test("a missing uploads folder is reported", async () => {
+    const site = tmp();
+    const result = await exportSite(site, {
+      out: join(site, "out"),
+      build: goodBuild,
+      search: async () => {},
+      uploads: join(site, "nope"),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.problems[0]).toContain("uploads folder");
+  });
 });

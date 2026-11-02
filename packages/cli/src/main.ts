@@ -1,4 +1,4 @@
-// The `oks` command line: `oks check [folder]` and `oks export [folder] [--check] [--out folder] [--redirects file.json]`.
+// The `oks` command line: `oks check [folder]` and `oks export [folder] [--check] [--out folder] [--redirects file.json] [--uploads folder]`.
 import { readFileSync } from "node:fs";
 import { checkPlugin, formatCheck } from "./check.js";
 import { exportSite } from "./export.js";
@@ -7,7 +7,7 @@ import type { Redirect } from "@oks-page/seo";
 
 const USAGE = [
   "Usage: oks check [folder]   Check a plugin before you publish it.",
-  "       oks export [folder] [--check] [--out folder] [--redirects file.json]",
+  "       oks export [folder] [--check] [--out folder] [--redirects file.json] [--uploads folder]",
   "                            Check a site, then write it as plain files.",
 ].join("\n");
 
@@ -20,7 +20,7 @@ function flag(args: string[], name: string): string | undefined {
 /** Runs one command and returns the exit code: 0 passed, 1 the check failed, 2 the command was not understood. */
 export async function runCli(argv: string[], out: (text: string) => void): Promise<number> {
   const [command, ...rest] = argv;
-  const values = new Set([flag(rest, "--out"), flag(rest, "--redirects")]);
+  const values = new Set([flag(rest, "--out"), flag(rest, "--redirects"), flag(rest, "--uploads")]);
   const folder = rest.find((a) => !a.startsWith("--") && !values.has(a));
   if (command === "check") {
     const result = await checkPlugin(folder ?? ".");
@@ -38,8 +38,10 @@ export async function runCli(argv: string[], out: (text: string) => void): Promi
       ? (JSON.parse(readFileSync(redirectsFile, "utf8")) as Redirect[])
       : [];
     const outDir = flag(rest, "--out");
+    const uploads = flag(rest, "--uploads");
     const result = await exportSite(folder ?? ".", {
       ...(outDir ? { out: outDir } : {}),
+      ...(uploads ? { uploads } : {}),
       redirects,
     });
     out(formatExportCheck(result.check));
