@@ -23,6 +23,8 @@ export interface TestSite {
     width: number,
     colorScheme?: "light" | "dark",
     search?: string,
+    /** Runs on the new page before it loads, for example to expose a function the page calls. */
+    before?: (page: Page) => Promise<void>,
   ): Promise<{ page: Page; errors: string[] }>;
   close(): Promise<void>;
 }
@@ -30,7 +32,12 @@ export interface TestSite {
 /** `body` is the page's React code. `Shell`, `ListTable` and the oks-ui exports are in scope by import. */
 export async function startTestSite(entryBody: string): Promise<TestSite> {
   const dir = mkdtempSync(join(tmpdir(), "oks-page-"));
-  const entry = join(src, "..", "page-entry.tmp.tsx");
+  // A name of its own: test files run at the same time and must not overwrite each other's entry.
+  const entry = join(
+    src,
+    "..",
+    `page-entry-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp.tsx`,
+  );
   writeFileSync(
     entry,
     `import { createRoot } from "react-dom/client";
@@ -38,6 +45,7 @@ import "oks-ui/styles.css";
 import "${join(src, "shell.css")}";
 import { Shell } from "${join(src, "shell.tsx")}";
 import { ListTable } from "${join(src, "list-table.tsx")}";
+import { EntryEditor } from "${join(src, "entry-editor.tsx")}";
 ${entryBody}`,
   );
   try {
@@ -79,10 +87,11 @@ ${entryBody}`,
   return {
     base,
     browser,
-    async open(width, colorScheme = "light", search = "") {
+    async open(width, colorScheme = "light", search = "", before) {
       const page = await browser.newPage({ viewport: { width, height: 800 }, colorScheme });
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(e.message));
+      await before?.(page);
       await page.goto(base + search);
       await page.waitForSelector("h1");
       // oks-ui switches to dark through this attribute, not through the browser setting.
