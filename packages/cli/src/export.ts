@@ -1,5 +1,6 @@
 // `oks export` (spec 10; S6): check the site, build the pages as plain files, then add the redirect files.
 import { buildRedirectFiles, type Redirect, type RefusedRedirect } from "@oks-page/seo";
+import * as pagefind from "pagefind";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +14,8 @@ export interface ExportOptions extends ExportCheckOptions {
   redirects?: Redirect[];
   /** Builds the pages into `out`. The default runs the site's own `scripts/build-export.mjs`. Tests pass their own. */
   build?: (siteDir: string, out: string) => Promise<void>;
+  /** Makes the search index in `out`. The default runs Pagefind. Tests pass their own. */
+  search?: (out: string) => Promise<void>;
 }
 
 export interface ExportResult {
@@ -34,6 +37,20 @@ async function runSiteBuild(siteDir: string, out: string): Promise<void> {
     cwd: siteDir,
     maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+/** Indexes the built pages. Only the content marked `data-pagefind-body` is searched, so menus and footers are left out. */
+async function runPagefind(out: string): Promise<void> {
+  const { index, errors } = await pagefind.createIndex();
+  try {
+    if (!index) throw new Error(errors.join(" "));
+    const added = await index.addDirectory({ path: out });
+    if (added.errors.length > 0) throw new Error(added.errors.join(" "));
+    const written = await index.writeFiles({ outputPath: join(out, "pagefind") });
+    if (written.errors.length > 0) throw new Error(written.errors.join(" "));
+  } finally {
+    await pagefind.close();
+  }
 }
 
 function write(out: string, path: string, text: string): void {
@@ -73,6 +90,14 @@ export async function exportSite(
   // The finished export must have a home page and a 404 page, or the host shows its own error pages.
   for (const file of ["index.html", "404.html"])
     if (!existsSync(join(out, file))) result.problems.push(`The export has no ${file}.`);
+
+  try {
+    await (options.search ?? runPagefind)(out);
+  } catch (error) {
+    result.problems.push(
+      `The search index could not be made: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const files = buildRedirectFiles(options.redirects ?? []);
   result.refusedRedirects = files.refused;

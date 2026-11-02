@@ -78,4 +78,36 @@ describe("oks export", () => {
     expect(result.ok).toBe(false);
     expect(result.problems).toEqual(["The export has no 404.html."]);
   });
+
+  test("ST-22: the search index files are written into the export", async () => {
+    const site = tmp();
+    const out = join(site, "out");
+    const result = await exportSite(site, {
+      out,
+      build: async (_site, dir) => {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+          join(dir, "index.html"),
+          '<html lang="en"><body><nav>menuword</nav><main data-pagefind-body><h1>Home</h1><p>zebrafish</p></main></body></html>',
+        );
+        writeFileSync(join(dir, "404.html"), "<p>missing</p>");
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(existsSync(join(out, "pagefind", "pagefind.js"))).toBe(true);
+    expect(existsSync(join(out, "pagefind", "pagefind-entry.json"))).toBe(true);
+  });
+
+  test("a search index that cannot be made is reported, not thrown", async () => {
+    const site = tmp();
+    const result = await exportSite(site, {
+      out: join(site, "out"),
+      build: goodBuild,
+      search: async () => {
+        throw new Error("no room");
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.problems[0]).toContain("search index could not be made: no room");
+  });
 });

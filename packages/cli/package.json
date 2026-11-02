@@ -17,8 +17,9 @@
   },
   "dependencies": {
     "@oks-page/db": "workspace:*",
-    "@oks-page/seo": "workspace:*",
     "@oks-page/sandbox": "workspace:*",
-    "esbuild": "^0.28.2"
+    "@oks-page/seo": "workspace:*",
+    "esbuild": "^0.28.2",
+    "pagefind": "1.5.2"
   }
 }

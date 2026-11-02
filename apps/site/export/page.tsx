@@ -21,7 +21,7 @@ export default async function Page({ params }: Props) {
   const entry = await getPublishedEntry(slugOf((await params).slug));
   if (!entry) notFound();
   return (
-    <main>
+    <main data-pagefind-body>
       <h1>{entry.title}</h1>
       <article dangerouslySetInnerHTML={{ __html: entry.html }} />
     </main>
