@@ -17,8 +17,11 @@ import {
 } from "./cgroup.js";
 import { developerMessage, ownerSentence } from "./permission-text.js";
 import { FetchRefused, safeFetch } from "./safe-fetch.js";
+import type { PluginSettings } from "./settings.js";
 import type {
+  ActingUser,
   CallKind,
+  CallOptions,
   CallResult,
   ContentService,
   DeveloperNote,
@@ -27,6 +30,8 @@ import type {
   PermissionRefusal,
   PluginManifest,
   PluginStatus,
+  PublishCheck,
+  PublishCheckNote,
 } from "./types.js";
 import { WRAPPER_SOURCE } from "./wrapper.js";
 
@@ -49,6 +54,9 @@ export interface HostOptions {
   siteId: string;
   content: ContentService;
   settings?: (pluginId: string, key: string) => Promise<unknown>;
+  /** The plugins' saved settings (PL-39). When set, a plugin reads its own settings from here, secrets in full; it can
+   * never name another plugin, because the host looks them up by the calling plugin's own extension. */
+  pluginSettings?: PluginSettings;
   /** A folder for each plugin's files. */
   workDir: string;
   /** A call that takes longer than this is stopped and the process killed. */
@@ -62,6 +70,8 @@ export interface HostOptions {
   memoryMb?: number;
   /** A process that has had no call for this long is stopped (it starts again on the next call). 0: never. */
   idleMs?: number;
+  /** The time limit for a before-publish check (spec 04, section 5.3: 5 seconds). */
+  publishWallMs?: number;
   /** Where the message for the developer goes when a plugin is refused a permission (ADR 0036). Default: the server log. */
   onDeveloperNote?: (note: DeveloperNote) => void;
   /** Tests only. */
@@ -75,6 +85,8 @@ interface ActiveCall {
   kind: CallKind;
   name: string;
   refusals: PermissionRefusal[];
+  /** The person the call acts for, if any (PL-38). */
+  actingFor?: ActingUser;
 }
 
 interface Loaded {
@@ -110,9 +122,27 @@ export class SandboxHost {
   private server: Server | null = null;
   private hostPort = 0;
   private readonly o: Required<
-    Omit<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">
+    Omit<
+      HostOptions,
+      | "settings"
+      | "pluginSettings"
+      | "onDeveloperNote"
+      | "runner"
+      | "siteId"
+      | "content"
+      | "workDir"
+    >
   > &
-    Pick<HostOptions, "settings" | "onDeveloperNote" | "runner" | "siteId" | "content" | "workDir">;
+    Pick<
+      HostOptions,
+      | "settings"
+      | "pluginSettings"
+      | "onDeveloperNote"
+      | "runner"
+      | "siteId"
+      | "content"
+      | "workDir"
+    >;
 
   constructor(options: HostOptions) {
     this.o = {
@@ -122,6 +152,7 @@ export class SandboxHost {
       storageLimitBytes: 10_000_000,
       memoryMb: 0,
       idleMs: 0,
+      publishWallMs: 5000,
       allowPrivateForTests: false,
       pretendNoMemoryLimit: false,
       ...options,
@@ -188,6 +219,20 @@ export class SandboxHost {
     this.plugins.get(id)!.code = newCode;
   }
 
+  /** True when the plugin is loaded, on, and has been approved for `permission`. */
+  isAllowed(id: string, permission: string): boolean {
+    const p = this.plugins.get(id);
+    return p !== undefined && p.status === "enabled" && p.manifest.permissions.includes(permission);
+  }
+
+  /** Switches a plugin off by hand (the owner does this from the admin). It is not run and not asked again. */
+  disable(id: string): void {
+    const p = this.plugins.get(id);
+    if (!p) return;
+    p.status = "disabled";
+    this.stop(p);
+  }
+
   status(id: string): PluginStatus | "unknown" {
     return this.plugins.get(id)?.status ?? "unknown";
   }
@@ -207,7 +252,29 @@ export class SandboxHost {
 
   // ---- calls into a plugin ----
 
-  async call(id: string, kind: CallKind, name: string, payload: unknown): Promise<CallResult> {
+  /** The hooks and blocks the plugin's code really has, read by starting it. `oks check` compares this with the
+   * manifest (spec 04, section 11). Null for a plugin that is not loaded. */
+  async describe(id: string): Promise<{ hooks: string[]; blocks: string[] } | null> {
+    const p = this.plugins.get(id);
+    if (!p) return null;
+    await this.start(p);
+    this.touch(p);
+    const response = await fetch(`http://127.0.0.1:${p.port}/describe`, {
+      method: "POST",
+      body: "{}",
+      signal: AbortSignal.timeout(this.o.wallMs),
+    });
+    const body = (await response.json()) as { result?: { hooks: string[]; blocks: string[] } };
+    return body.result ?? null;
+  }
+
+  async call(
+    id: string,
+    kind: CallKind,
+    name: string,
+    payload: unknown,
+    options: CallOptions = {},
+  ): Promise<CallResult> {
     const started = performance.now();
     const ms = () => Math.round((performance.now() - started) * 100) / 100;
     const p = this.plugins.get(id);
@@ -242,7 +309,12 @@ export class SandboxHost {
     }
     // The plugin sends this id with each call it makes to the host, so a refusal can name the hook it happened in.
     const callId = randomBytes(8).toString("hex");
-    const active: ActiveCall = { kind, name, refusals: [] };
+    const active: ActiveCall = {
+      kind,
+      name,
+      refusals: [],
+      ...(options.actingFor ? { actingFor: options.actingFor } : {}),
+    };
     p.active.set(callId, active);
     const refusals = () =>
       active.refusals.length > 0 ? { permissionRefusals: [...active.refusals] } : {};
@@ -256,7 +328,7 @@ export class SandboxHost {
           body: JSON.stringify(
             kind === "hook" ? { event: payload, callId } : { props: payload, callId },
           ),
-          signal: AbortSignal.timeout(this.o.wallMs),
+          signal: AbortSignal.timeout(options.timeoutMs ?? this.o.wallMs),
         },
       );
       const body = (await response.json()) as {
@@ -290,6 +362,82 @@ export class SandboxHost {
     } finally {
       p.active.delete(callId);
     }
+  }
+
+  /** May `entry` be published? Runs every enabled plugin's `content:beforePublish` hook, by priority and then install
+   * order (spec 04, section 7). Only an explicit refusal (`{ refuse: "Add a featured image first" }`) from a plugin
+   * that worked blocks publishing, and the first one stops the check. A plugin that fails, crashes, gives an answer of
+   * the wrong shape or takes longer than the publish time limit is skipped: publishing goes ahead without it and the
+   * owner is told (spec 04, section 5.3, "Fail open"; PL-40). */
+  async beforePublish(entry: unknown, options: CallOptions = {}): Promise<PublishCheck> {
+    const entryId = String((entry as { id?: unknown } | null)?.id ?? "");
+    const order = [...this.plugins.values()]
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => p.status === "enabled")
+      .sort((a, b) => (a.p.manifest.priority ?? 10) - (b.p.manifest.priority ?? 10) || a.i - b.i);
+    const skipped: PublishCheck["skipped"] = [];
+    for (const { p } of order) {
+      const r = await this.call(p.manifest.id, "hook", "content:beforePublish", entry, {
+        ...options,
+        timeoutMs: options.timeoutMs ?? this.o.publishWallMs,
+      });
+      if (r.ok && r.skipped) continue; // the plugin has no before-publish hook
+      const name = p.manifest.displayName ?? p.manifest.id;
+      const refuse = r.ok
+        ? (r.result as { refuse?: unknown } | null | undefined)?.refuse
+        : undefined;
+      if (r.ok && refuse === undefined) continue;
+      if (r.ok && typeof refuse === "string" && refuse.trim() !== "") {
+        const message = refuse.trim().slice(0, 300);
+        await this.audit(p, "publish.refused", { entry: entryId, message });
+        return { allowed: false, refusal: { pluginId: p.manifest.id, message }, skipped };
+      }
+      // Failed, crashed, too slow, or an answer of the wrong shape: skip it, publish anyway, tell the owner.
+      const why: "timeout" | "failed" = !r.ok && r.error === "timeout" ? "timeout" : "failed";
+      const message =
+        why === "timeout"
+          ? `${name} took too long to check this before it was published, so it was published without that check.`
+          : `${name} could not check this before it was published, so it was published without that check.`;
+      skipped.push({ pluginId: p.manifest.id, why, message });
+      await this.audit(p, "publish.check_failed", {
+        entry: entryId,
+        why,
+        error: r.ok ? "an answer of the wrong shape" : r.error,
+      });
+    }
+    return { allowed: true, skipped };
+  }
+
+  /** One note for the owner per plugin whose before-publish check could not run (PL-40), however often it happened.
+   * Built from the audit trail, so it survives a restart. */
+  async publishCheckNotes(): Promise<PublishCheckNote[]> {
+    const rows = await this.o.runner.all(
+      `select "actor_id", "created_at" from "audit_log" where "site_id" = ? and "actor_type" = 'plugin' and "action" = 'publish.check_failed' order by "created_at"`,
+      [this.o.siteId],
+    );
+    const notes = new Map<string, PublishCheckNote>();
+    for (const row of rows) {
+      const pluginId = String(row["actor_id"]);
+      const at = new Date(row["created_at"] as string | number | Date).getTime();
+      const note = notes.get(pluginId);
+      if (note) {
+        note.count++;
+        note.lastAt = at;
+        continue;
+      }
+      const name = this.plugins.get(pluginId)?.manifest.displayName ?? pluginId;
+      notes.set(pluginId, {
+        pluginId,
+        message: `${name} could not check some posts before they were published. They were published without that check.`,
+        count: 1,
+        firstAt: at,
+        lastAt: at,
+      });
+    }
+    for (const note of notes.values())
+      if (note.count > 1)
+        note.message = `${this.plugins.get(note.pluginId)?.manifest.displayName ?? note.pluginId} could not check posts before they were published ${note.count} times. They were published without that check.`;
+    return [...notes.values()];
   }
 
   /** What the owner should be told about permissions the plugins were refused (spec 04, section 7; ADR 0036): one
@@ -528,6 +676,29 @@ const config :Workerd.Config = (
     };
     if (need && need !== "network:fetch" && !granted.includes(need))
       return refuse(need, "permission_denied", `permission "${need}" was not approved`);
+    /** A call that acts for a person may not do what that person may not (spec 02, section 8, rule 1; PL-38). This is
+     * not the plugin's fault, so it is no failure and no note for the owner; it is kept in the audit trail. */
+    const userRefuse = async (capability: string, entryId: string) => {
+      await this.audit(p, "host.denied_user", {
+        route,
+        need: capability,
+        user: during?.actingFor?.userId,
+        entry: entryId,
+        ...(during ? { kind: during.kind, name: during.name } : {}),
+      });
+      const message = `The person this ${during?.kind ?? "call"} acts for may not do this ("${capability}"). A plugin never gets more power than the person it acts for.`;
+      if (
+        during &&
+        !during.refusals.some((r) => r.code === "user_denied" && r.permission === capability)
+      )
+        during.refusals.push({ permission: capability, code: "user_denied", message });
+      return send(403, { error: message, code: "user_denied" });
+    };
+    const actingFor = during?.actingFor;
+    const own = (entry: { authorId?: string }) =>
+      actingFor !== undefined &&
+      entry.authorId !== undefined &&
+      entry.authorId === actingFor.userId;
     try {
       await this.audit(p, `host${route.replace("/", ".")}`, { route });
       switch (route) {
@@ -540,9 +711,27 @@ const config :Workerd.Config = (
               "permission_denied",
               'permission "content:read_drafts" was not approved',
             );
+          // Anyone may read what is published; anything else only a person who may see it (PL-38).
+          if (
+            actingFor &&
+            entry.status !== "published" &&
+            !actingFor.can("content.read_private", entry.typeKey) &&
+            !actingFor.can("content.edit_any", entry.typeKey) &&
+            !(own(entry) && actingFor.can("content.edit_own", entry.typeKey))
+          )
+            return userRefuse(own(entry) ? "content.edit_own" : "content.read_private", entry.id);
           return send(200, { result: entry });
         }
         case "/content/update": {
+          if (actingFor) {
+            const current = await this.o.content.get(String(body["id"]));
+            if (!current) return send(404, { error: "not found" });
+            if (
+              !actingFor.can("content.edit_any", current.typeKey) &&
+              !(own(current) && actingFor.can("content.edit_own", current.typeKey))
+            )
+              return userRefuse(own(current) ? "content.edit_own" : "content.edit_any", current.id);
+          }
           const raw = (body["patch"] ?? {}) as Record<string, unknown>;
           const patch: Record<string, unknown> = {};
           for (const key of ["title", "meta"]) if (key in raw) patch[key] = raw[key];
@@ -601,7 +790,10 @@ const config :Workerd.Config = (
         }
         case "/settings/get":
           return send(200, {
-            result: (await this.o.settings?.(p.manifest.id, String(body["k"]))) ?? null,
+            result:
+              (this.o.pluginSettings
+                ? await this.o.pluginSettings.forPlugin(p.extensionId, String(body["k"]))
+                : await this.o.settings?.(p.manifest.id, String(body["k"]))) ?? null,
           });
         case "/log":
           console.log(`[plugin ${p.manifest.id}] ${String(body["m"]).slice(0, 500)}`);

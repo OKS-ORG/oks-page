@@ -859,6 +859,28 @@ export const extensionStorage = pgTable(
   ],
 );
 
+// A plugin's settings (spec 04, section 9). A secret setting holds only its sealed value, never the plain secret (PL-39).
+export const extensionSettings = pgTable(
+  "extension_settings",
+  {
+    extensionId: text("extension_id")
+      .notNull()
+      .references(() => extensions.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull(),
+    isSecret: boolean("is_secret").notNull().default(false),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_extension_settings_extension_id_ulid", sql`length(${t.extensionId}) = 26`),
+    primaryKey({ columns: [t.extensionId, t.key] }),
+  ],
+);
+
 export const redirects = pgTable(
   "redirects",
   {
@@ -1054,6 +1076,7 @@ export const tableNames = [
   "extension_previous_versions",
   "extension_permissions",
   "extension_storage",
+  "extension_settings",
   "redirects",
   "not_found_log",
   "jobs",

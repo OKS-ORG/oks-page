@@ -298,6 +298,13 @@ export async function seedEverything(db: TestDb): Promise<void> {
     size_bytes: 7,
     updated_at: T,
   });
+  await ins(db, "extension_settings", {
+    extension_id: ext,
+    key: "units",
+    value: JSON.stringify("metric"),
+    is_secret: false,
+    updated_at: T,
+  });
   await ins(db, "extension_pending_updates", {
     extension_id: ext,
     version: "1.3.0",

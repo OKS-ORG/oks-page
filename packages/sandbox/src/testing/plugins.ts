@@ -53,6 +53,24 @@ export const PLUGINS: Record<string, TestPlugin> = {
   "user:afterLogin": async () => { throw Object.assign(new Error("pretend"), { code: "permission_denied" }); },
 } };`,
   },
+  // Built for PL-38: it reads and changes whatever entry it is told to, so a test can make it act for different people.
+  "acts-for": {
+    manifest: {
+      id: "acts-for",
+      version: "1.0.0",
+      permissions: ["content:read", "content:read_drafts", "content:write"],
+    },
+    code: `export default { hooks: {
+  "content:afterSave": async (e, ctx) => {
+    const code = (p) => p.then(() => "allowed", (er) => er.code);
+    const out = {};
+    if (e.read) out.read = await code(ctx.content.get(e.read));
+    if (e.write) out.write = await code(ctx.content.update(e.write, { title: "changed by a plugin" }));
+    return out;
+  },
+  "content:beforeSave": async (e, ctx) => { await ctx.content.update(e.write, { title: "changed by a plugin" }); return e; },
+} };`,
+  },
   "hostile-block": {
     manifest: { id: "hostile-block", version: "1.0.0", permissions: [] },
     code: `export default { blocks: { "hostile-block": { render: async () => ({

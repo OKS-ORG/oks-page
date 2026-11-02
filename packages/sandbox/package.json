@@ -16,5 +16,8 @@
     "workerd": "1.20261021.1",
     "@oks-page/db": "workspace:*",
     "@oks-page/content-safety": "workspace:*"
+  },
+  "devDependencies": {
+    "@oks-page/auth": "workspace:*"
   }
 }

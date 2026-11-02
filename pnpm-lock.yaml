@@ -112,7 +112,17 @@ importers:
         specifier: ^2.4.1
         version: 2.4.1
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      '@oks-page/db':
+        specifier: workspace:*
+        version: link:../db
+      '@oks-page/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   packages/content-safety: {}
 
@@ -160,6 +170,10 @@ importers:
       workerd:
         specifier: 1.20261021.1
         version: 1.20261021.1
+    devDependencies:
+      '@oks-page/auth':
+        specifier: workspace:*
+        version: link:../auth
 
   packages/sdk: {}
 

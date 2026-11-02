@@ -7,7 +7,19 @@ export interface PluginManifest {
   permissions: string[];
   /** sha256 of the bundle, set at install; checked on every start (spec 04, PL-23). */
   integrity?: string;
+  /** The settings the owner fills in (spec 04, section 9). */
+  settings?: SettingsSchema;
+  /** Filters run by priority, lowest first, then in install order (spec 04, section 7). Default 10. */
+  priority?: number;
 }
+
+/** One setting a plugin declares. A `secret` (an API key) is sealed at rest and never shown in full again (PL-39). */
+export interface SettingField {
+  type: "text" | "number" | "boolean" | "secret";
+  label?: string;
+}
+
+export type SettingsSchema = Record<string, SettingField>;
 
 export interface ContentEntry {
   id: string;
@@ -15,6 +27,10 @@ export interface ContentEntry {
   title: string;
   plainText?: string;
   meta?: Record<string, unknown>;
+  /** Who wrote the entry. Needed to tell "own" from "any" when a plugin acts for a person (PL-38). */
+  authorId?: string;
+  /** The content type, for roles that are limited to some types (spec 02, section 6). */
+  typeKey?: string;
   /** The block tree (spec 03). Reaches this interface only after the host has run it through the block checks (PL-37). */
   body?: { version: number; blocks: unknown[] };
 }
@@ -32,12 +48,30 @@ export interface ContentService {
 
 export type CallKind = "hook" | "block";
 
+/** The person a call acts for (spec 02, section 8, rule 1). The core builds it from the person's role, for example
+ * with `capabilitiesOf` from `@oks-page/auth`. */
+export interface ActingUser {
+  userId: string;
+  can(capability: string, typeKey?: string): boolean;
+}
+
+export interface CallOptions {
+  /** A time limit for this call instead of the host's usual one (spec 04, section 5.3: publish hooks get 5 seconds). */
+  timeoutMs?: number;
+  /** Set when a person's action started the call (they saved a post): the plugin may then do only what both its own
+   * permissions and this person's capabilities allow. Not set for a job or a hook with no person: then only the
+   * plugin's permissions apply. */
+  actingFor?: ActingUser;
+}
+
 /** A call the host refused because the plugin lacks a permission (spec 04, section 4.1, rule 1; ADR 0036). */
 export interface PermissionRefusal {
   /** The exact permission the plugin needs, for example "content:write" or "network:fetch:api.example.com". */
   permission: string;
-  /** `permission_denied`, or `host_denied` for a network host that was not approved. */
-  code: "permission_denied" | "host_denied";
+  /** `permission_denied`, `host_denied` for a network host that was not approved, or `user_denied` when the plugin has
+   * the permission but the person it acts for may not do this (PL-38). Then `permission` is that person's missing
+   * capability, for example "content.edit_any". */
+  code: "permission_denied" | "host_denied" | "user_denied";
   /** For the developer: the hook or block, the exact permission, and how to fix it. */
   message: string;
 }
@@ -67,6 +101,25 @@ export type CallResult = (
 };
 
 export type PluginStatus = "enabled" | "disabled" | "switched_off";
+
+/** The answer to "may this be published?" (spec 04, section 5.3; PL-40). Only an explicit refusal from a plugin that
+ * worked blocks publishing. A plugin that failed, crashed or took too long is skipped, and the owner is told. */
+export interface PublishCheck {
+  allowed: boolean;
+  /** When not allowed: the plugin that refused and its message for the author. */
+  refusal?: { pluginId: string; message: string };
+  /** Plugins that could not check, so publishing went ahead without them. */
+  skipped: { pluginId: string; why: "timeout" | "failed"; message: string }[];
+}
+
+/** One note for the owner per plugin whose before-publish check could not run (PL-40), built from the audit trail. */
+export interface PublishCheckNote {
+  pluginId: string;
+  message: string;
+  count: number;
+  firstAt: number;
+  lastAt: number;
+}
 
 export interface OwnerNotice {
   pluginId: string;

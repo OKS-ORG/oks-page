@@ -30,6 +30,8 @@ export default {
         if (!fn) return J({ ok: true, skipped: true });
         return J({ ok: true, result: await fn(body.event, ctx) });
       }
+      if (u.pathname === "/describe")
+        return J({ ok: true, result: { hooks: Object.keys(plugin.hooks || {}), blocks: Object.keys(plugin.blocks || {}) } });
       if (u.pathname.startsWith("/block/")) {
         const b = plugin.blocks?.[decodeURIComponent(u.pathname.slice(7))];
         if (!b) return J({ ok: false, error: "no such block" }, 404);
