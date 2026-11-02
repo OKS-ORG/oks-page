@@ -26,5 +26,7 @@ export default defineConfig({
     include: ["packages/*/src/**/*.test.ts", "apps/*/test/**/*.test.ts", "scripts/**/*.test.mjs"],
     // Speed tests run alone, in their own step (vitest.perf.config.ts).
     exclude: ["**/node_modules/**", "**/*.perf.test.ts"],
+    // The browser tests of the admin open many pages while several test files run at once.
+    testTimeout: 30_000,
   },
 });

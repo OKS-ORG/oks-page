@@ -141,3 +141,93 @@
   padding: 4px 8px;
   font-weight: 700;
 }
+
+/* The tab strip and the footer (D111, D112). */
+.oks-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--oks-color-border, currentColor);
+}
+.oks-tablist {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+.oks-tab {
+  flex: 0 0 auto;
+  border-bottom: 3px solid transparent !important;
+}
+.oks-tab[data-active="true"] {
+  border-bottom-color: var(--oks-color-primary-600, currentColor) !important;
+  font-weight: 700;
+}
+.oks-tab,
+.oks-tab-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.oks-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.oks-tab-tools {
+  display: flex;
+  flex: 0 0 auto;
+}
+.oks-popup-wrap {
+  position: relative;
+}
+.oks-popup {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  z-index: 20;
+  min-width: 160px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  background: var(--oks-color-surface);
+  border: 1px solid var(--oks-color-border, currentColor);
+  border-radius: 6px;
+}
+.oks-popup[hidden] {
+  display: none;
+}
+.oks-popup a {
+  display: block;
+  padding: 6px 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.oks-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.oks-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  margin-top: auto;
+  font-size: 0.875rem;
+  border-top: 1px solid var(--oks-color-border, currentColor);
+}
+.oks-footer a {
+  color: inherit;
+}

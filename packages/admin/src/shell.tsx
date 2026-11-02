@@ -1,6 +1,7 @@
 // The admin shell (spec 07, section 3): sidebar on wide screens, drawer below 1025 px, header with breadcrumbs and search,
 // a "Skip to content" link, and one main area with the screen's single h1.
 import { Sidebar, SidebarMenu, type ShellNavItem } from "./sidebar.js";
+import { ShellFooter, TabStrip, type FooterInfo, type TabStripProps } from "./tabs.js";
 import {
   Breadcrumbs,
   BreadcrumbItem,
@@ -28,6 +29,10 @@ export interface ShellProps {
   onNavigate?: (href: string) => void;
   /** The reading direction of the admin's language. The drawer opens on the start side (oks-ui's own `start` is not built yet). */
   dir?: "ltr" | "rtl";
+  /** The tab strip above the main area. Leave it out for a screen without tabs. */
+  tabs?: TabStripProps;
+  /** The slim footer. The owner can hide it (D112): then pass nothing. */
+  footer?: FooterInfo;
   children: ReactNode;
 }
 
@@ -44,6 +49,8 @@ export function Shell({
   searchItems = [],
   onNavigate,
   dir = "ltr",
+  tabs,
+  footer,
   children,
 }: ShellProps) {
   const wide = useMediaQuery(SIDEBAR_QUERY);
@@ -84,10 +91,12 @@ export function Shell({
           </Breadcrumbs>
           <Button onPress={palette.open}>Search</Button>
         </header>
+        {tabs ? <TabStrip {...tabs} /> : null}
         <main id="main" tabIndex={-1}>
           <h1>{title}</h1>
           {children}
         </main>
+        {footer ? <ShellFooter info={footer} /> : null}
       </div>
       {wide ? null : (
         <Drawer
