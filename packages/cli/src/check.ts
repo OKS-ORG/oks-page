@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { findReactCopies } from "./react-copies.js";
 
 export interface CheckIssue {
   level: "error" | "warning";
@@ -109,6 +110,14 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     entry: typeof raw["entry"] === "string" ? raw["entry"] : null,
   };
   if (manifest.runtime === "build") {
+    // Trusted code that runs inside the site: it must use the admin's React, not bring its own (AD-47).
+    const own = findReactCopies(root);
+    if (own.length > 0)
+      add(
+        "error",
+        "react-copy",
+        `This plugin has its own copy of React (${own[0]!.path}). Two copies of React in one page make it crash. Move react to peerDependencies and remove it from this plugin's own node_modules.`,
+      );
     add(
       "warning",
       "runtime",

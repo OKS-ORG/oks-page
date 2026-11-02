@@ -1,3 +1,4 @@
+import "oks-ui/styles.css";
 import { Suspense } from "react";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
