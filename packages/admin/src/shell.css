@@ -40,3 +40,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.oks-list-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* A list row stays on one line; a narrow screen scrolls the table inside its box (AD-10). */
+.oks-list-scroll th,
+.oks-list-scroll td {
+  white-space: nowrap;
+}
