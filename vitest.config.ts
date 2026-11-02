@@ -17,6 +17,10 @@ export default defineConfig({
         replacement: new URL("./packages/seo/src/index.ts", import.meta.url).pathname,
       },
       {
+        find: "@oks-page/content-safety",
+        replacement: new URL("./packages/content-safety/src/index.ts", import.meta.url).pathname,
+      },
+      {
         find: "@oks-page/db",
         replacement: new URL("./packages/db/src/index.ts", import.meta.url).pathname,
       },
@@ -26,5 +30,7 @@ export default defineConfig({
     include: ["packages/*/src/**/*.test.ts", "apps/*/test/**/*.test.ts", "scripts/**/*.test.mjs"],
     // Speed tests run alone, in their own step (vitest.perf.config.ts).
     exclude: ["**/node_modules/**", "**/*.perf.test.ts"],
+    // The browser tests of the admin open many pages while several test files run at once.
+    testTimeout: 30_000,
   },
 });
