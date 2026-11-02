@@ -12,6 +12,10 @@ export interface ExportCheckOptions {
   serverOnly?: string[];
   /** For each block the site uses: does it work on a static site? */
   blocks?: Record<string, BlockStatic>;
+  /** Paths (relative to the site folder) that the export build leaves out, so they are not checked. */
+  removed?: string[];
+  /** Files the export build swaps for another file: the other file is the one that is checked. */
+  replaced?: Record<string, string>;
   /** Blocks of the kind "helper" that already have their helper set (for example a form with an address). */
   helpersSet?: string[];
 }
@@ -42,15 +46,16 @@ export function checkExport(siteDir: string, options: ExportCheckOptions = {}): 
     issues.push({ level: "warning", code, message });
   const app = join(siteDir, "src", "app");
   const serverOnly = (options.serverOnly ?? ["admin", "api"]).map((name) => join(app, name));
+  const left = [...serverOnly, ...(options.removed ?? []).map((path) => join(siteDir, path))];
   const inExport = (path: string) =>
-    !serverOnly.some((dir) => path === dir || path.startsWith(dir + "/"));
+    !left.some((dir) => path === dir || path.startsWith(dir + "/"));
   const name = (path: string) => relative(siteDir, path);
 
   // A proxy (or the older "middleware") file is dropped by the export without a word.
   for (const base of ["proxy", "middleware"])
     for (const folder of [siteDir, join(siteDir, "src")])
       for (const ext of ["ts", "js", "mjs"])
-        if (existsSync(join(folder, `${base}.${ext}`)))
+        if (inExport(join(folder, `${base}.${ext}`)) && existsSync(join(folder, `${base}.${ext}`)))
           error(
             "proxy-file",
             `${name(join(folder, `${base}.${ext}`))}: an exported site has no proxy, so every rule in it (redirects, 404 pages) would silently stop working. Move the rule into the redirect list, or leave this file out of the export.`,
@@ -58,7 +63,8 @@ export function checkExport(siteDir: string, options: ExportCheckOptions = {}): 
 
   const pages = files(app, (path) => !inExport(path));
   for (const path of pages) {
-    const text = readFileSync(path, "utf8");
+    const swap = options.replaced?.[relative(siteDir, path)];
+    const text = readFileSync(swap ? join(siteDir, swap) : path, "utf8");
     const file = name(path);
     if (
       /from\s+["']next\/headers["']/.test(text) ||

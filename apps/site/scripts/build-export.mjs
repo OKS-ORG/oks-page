@@ -40,13 +40,9 @@ for (const name of readdirSync(site)) {
 }
 // Dependencies are shared, not copied.
 symlinkSync(join(site, "node_modules"), join(work, "node_modules"), "dir");
-for (const path of [
-  "src/proxy.ts",
-  "src/app/api",
-  "src/app/not-found-handler",
-  "src/app/test-form",
-])
-  rmSync(join(work, path), { recursive: true, force: true });
+// The files an export leaves out are listed in export/removed.json, so `oks export` checks the same set.
+const removed = JSON.parse(readFileSync(join(site, "export", "removed.json"), "utf8"));
+for (const path of removed.removed) rmSync(join(work, path), { recursive: true, force: true });
 cpSync(join(site, "export", "page.tsx"), join(work, "src", "app", "[[...slug]]", "page.tsx"));
 // In the copy, "@data" means the export data module (for the type check as well as the build).
 const tsconfig = JSON.parse(readFileSync(join(work, "tsconfig.json"), "utf8"));

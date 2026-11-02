@@ -120,6 +120,9 @@ importers:
       '@oks-page/sandbox':
         specifier: workspace:*
         version: link:../sandbox
+      '@oks-page/seo':
+        specifier: workspace:*
+        version: link:../seo
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
