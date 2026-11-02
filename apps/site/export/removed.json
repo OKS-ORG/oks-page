@@ -1,0 +1,6 @@
+{
+  "removed": ["src/proxy.ts", "src/app/api", "src/app/not-found-handler", "src/app/test-form"],
+  "replaced": {
+    "src/app/[[...slug]]/page.tsx": "export/page.tsx"
+  }
+}

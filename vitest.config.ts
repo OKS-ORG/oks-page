@@ -13,6 +13,10 @@ export default defineConfig({
         replacement: new URL("./packages/db/src/memory.ts", import.meta.url).pathname,
       },
       {
+        find: "@oks-page/seo",
+        replacement: new URL("./packages/seo/src/index.ts", import.meta.url).pathname,
+      },
+      {
         find: "@oks-page/db",
         replacement: new URL("./packages/db/src/index.ts", import.meta.url).pathname,
       },
