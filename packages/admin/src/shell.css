@@ -1,0 +1,42 @@
+/* The admin shell layout (spec 07, section 3). Colours come from oks-ui tokens, so light and dark both work. */
+.oks-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--oks-color-surface);
+  color: var(--oks-form-field-fg);
+}
+.oks-skip {
+  position: absolute;
+  inset-inline-start: 8px;
+  top: -100px;
+  padding: 8px 12px;
+  background: var(--oks-color-surface);
+  z-index: 100;
+}
+.oks-skip:focus {
+  top: 8px;
+}
+.oks-sidebar {
+  flex: 0 0 240px;
+  padding: 16px;
+  border-inline-end: 1px solid var(--oks-color-border, currentColor);
+}
+.oks-shell-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.oks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+.oks-shell-body > main {
+  padding: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
