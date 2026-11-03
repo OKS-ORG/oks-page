@@ -3,3 +3,4 @@ export * from "./check.js";
 export * from "./main.js";
 export * from "./export-check.js";
 export * from "./export.js";
+export * from "./react-copies.js";

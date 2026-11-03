@@ -1,10 +1,10 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
 import { chromium } from "playwright-core";
@@ -452,6 +452,14 @@ for (const { kind, skip } of openers) {
       "ST-31 the exported pages look the same as the server pages at 375, 768 and 1280 px",
       async () => {
         // A plain file server for the export, the way a static host serves it: /about finds about.html.
+        const types: Record<string, string> = {
+          ".html": "text/html",
+          ".css": "text/css",
+          ".js": "text/javascript",
+          ".json": "application/json",
+          ".woff2": "font/woff2",
+          ".svg": "image/svg+xml",
+        };
         const files = createHttpServer((req, res) => {
           const path = new URL(req.url ?? "/", "http://x").pathname;
           const candidates = [path, `${path}.html`, join(path, "index.html")];
@@ -460,7 +468,7 @@ for (const { kind, skip } of openers) {
             return existsSync(f) && statSync(f).isFile();
           });
           res.statusCode = found ? 200 : 404;
-          res.setHeader("content-type", found?.endsWith(".html") ? "text/html" : "text/plain");
+          res.setHeader("content-type", types[extname(found ?? "")] ?? "text/plain");
           res.end(found ? readFileSync(join(out, found)) : "not found");
         });
         await new Promise<void>((r) => files.listen(0, "127.0.0.1", r));
@@ -474,6 +482,11 @@ for (const { kind, skip } of openers) {
               const served = await page.screenshot({ fullPage: true });
               await page.goto(staticBase + path, { waitUntil: "networkidle" });
               const written = await page.screenshot({ fullPage: true });
+              if (!written.equals(served)) {
+                const stem = join(tmpdir(), `oks-st31-${width}${path.replace(/\//g, "_")}`);
+                writeFileSync(`${stem}-server.png`, served);
+                writeFileSync(`${stem}-export.png`, written);
+              }
               expect(written.equals(served), `${path} at ${width}px`).toBe(true);
             }
             await page.close();
