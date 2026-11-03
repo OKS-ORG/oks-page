@@ -623,7 +623,10 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
       return { status: response.status, text, cookies: document.cookie };
     });
     // When this fails the message says what came back (status, body and the cookies the page can see).
-    expect(session.text, JSON.stringify(session)).not.toBe("");
+    expect(
+      session.text,
+      `${JSON.stringify(session)}\nserver log:\n${site.log().slice(-2500)}`,
+    ).not.toBe("");
     const user = (JSON.parse(session.text) as { user?: { email: string } } | null)?.user;
     expect(user?.email, JSON.stringify(session)).toBe("anna@example.com");
     await page.close();
