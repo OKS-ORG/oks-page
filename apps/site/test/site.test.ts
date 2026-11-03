@@ -619,9 +619,13 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     // The session cookie from the last step is a working sign-in.
     const session = await page.evaluate(async () => {
       const response = await fetch("/api/auth/get-session");
-      return (await response.json()) as { user?: { email: string } } | null;
+      const text = await response.text();
+      return { status: response.status, text, cookies: document.cookie };
     });
-    expect(session?.user?.email).toBe("anna@example.com");
+    // When this fails the message says what came back (status, body and the cookies the page can see).
+    expect(session.text, JSON.stringify(session)).not.toBe("");
+    const user = (JSON.parse(session.text) as { user?: { email: string } } | null)?.user;
+    expect(user?.email, JSON.stringify(session)).toBe("anna@example.com");
     await page.close();
   });
 
