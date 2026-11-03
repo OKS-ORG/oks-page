@@ -529,15 +529,22 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     expect(new URL(response.headers.get("location")!, site.base).pathname).toBe("/admin/setup");
   });
 
-  test("the wizard has no accessibility violations on its first and second step", async () => {
+  test("the wizard has no accessibility violations on its three steps", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 800 } });
     await page.goto(site.base + "/admin/setup");
     await page.getByRole("heading", { name: "Set up your site", level: 1 }).waitFor();
-    for (const step of ["first", "second"]) {
+    for (const step of ["first", "second", "third"]) {
       if (step === "second") {
         await page.getByLabel("Site name").fill("My Site");
         await page.getByRole("button", { name: "Next" }).click();
         await page.getByLabel("Your name").waitFor();
+      }
+      if (step === "third") {
+        await page.getByLabel("Your name").fill("Anna");
+        await page.getByLabel("Email").fill("anna@example.com");
+        await page.getByLabel(/^Password/).fill("a-long-password");
+        await page.getByRole("button", { name: "Next" }).click();
+        await page.getByText("Add sample content?").waitFor();
       }
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
@@ -563,11 +570,14 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.getByLabel("Your name").fill("Anna");
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("short");
+    await page.getByRole("button", { name: "Next" }).click();
     await page.getByRole("button", { name: "Finish setup" }).click();
     await page
       .getByText(/at least 10 characters/i)
       .first()
       .waitFor();
+    // The wrong answer sends the person back to the account step, with their other answers kept.
+    expect(await page.getByLabel("Your name").inputValue()).toBe("Anna");
     expect(await count("sites")).toBe(0);
     expect(await count("users")).toBe(0);
     await page.close();
@@ -582,6 +592,7 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.getByLabel("Your name").fill("Anna");
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("a-long-password");
+    await page.getByRole("button", { name: "Next" }).click();
     await page.getByRole("button", { name: "Finish setup" }).click();
     await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
     expect(await page.getByText("signed in as anna@example.com").count()).toBe(1);
@@ -592,6 +603,18 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
       await db.run("select r.key as k from site_members m join roles r on r.id = m.role_id")
     )[0]!["k"];
     expect(role).toBe("administrator");
+
+    // The sample content is on the site, as the wizard's default.
+    for (const [path, text] of [
+      ["/", "This is your home page"],
+      ["/about", "Tell visitors who you are"],
+      ["/contact", "Say how people can reach you"],
+      ["/blog/hello-world", "This is your first post"],
+    ] as const) {
+      const response = await fetch(site.base + path);
+      expect(response.status, path).toBe(200);
+      expect(await response.text(), path).toContain(text);
+    }
 
     // The session cookie from the last step is a working sign-in.
     const session = await page.evaluate(async () => {

@@ -11,7 +11,13 @@ const PURPOSES = [
   { label: "Something else", value: "other" },
 ];
 
+const STARTER = [
+  { label: "Add sample pages (Home, About, Contact) and a first post", value: "sample" },
+  { label: "Start with an empty site", value: "empty" },
+];
+
 const SITE_FIELDS = ["siteName", "tagline", "purpose"];
+const ACCOUNT_FIELDS = ["name", "email", "password"];
 
 interface ApiError {
   code: string;
@@ -32,6 +38,7 @@ export function SetupWizard() {
     name: "",
     email: "",
     password: "",
+    starter: "sample",
   });
   const set = (key: keyof typeof answers) => (value: string) =>
     setAnswers((current) => ({ ...current, [key]: value }));
@@ -42,6 +49,7 @@ export function SetupWizard() {
       siteName: answers.siteName,
       tagline: answers.tagline,
       purpose: answers.purpose,
+      starterContent: answers.starter === "sample",
       admin: { name: answers.name, email: answers.email, password: answers.password },
     };
     let response: Response;
@@ -61,8 +69,9 @@ export function SetupWizard() {
     }
     const error = ((await response.json().catch(() => null)) as { error?: ApiError } | null)?.error;
     setProblem(error?.message ?? "Setup did not finish. Try again.");
-    // A wrong answer about the site goes back to the first step.
+    // A wrong answer goes back to the step that asked the question.
     if (error?.field && SITE_FIELDS.includes(error.field)) setStep(0);
+    else if (error?.field && ACCOUNT_FIELDS.includes(error.field)) setStep(1);
   }
 
   if (email)
@@ -119,7 +128,7 @@ export function SetupWizard() {
           {
             key: "account",
             title: "Your account",
-            fields: ["name", "email", "password"],
+            fields: ACCOUNT_FIELDS,
             content: (
               <>
                 <TextField
@@ -146,6 +155,20 @@ export function SetupWizard() {
                   onChange={set("password")}
                 />
               </>
+            ),
+          },
+          {
+            key: "starter",
+            title: "Starter content",
+            fields: ["starter"],
+            content: (
+              <RadioGroupField
+                name="starter"
+                label="Add sample content?"
+                options={STARTER}
+                value={answers.starter}
+                onChange={(value: string) => set("starter")(value)}
+              />
             ),
           },
         ]}

@@ -1,4 +1,5 @@
 // First-run setup on SQLite and PostgreSQL (installation guide; spec 02, section 3, rule 2).
+import { checkBlocks } from "@oks-page/content-safety";
 import { newId } from "@oks-page/db";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -141,6 +142,47 @@ for (const { kind, open, skip } of openers) {
       expect(await count("sites")).toBe(1);
       expect(await count("users")).toBe(1);
       expect(await count("site_members")).toBe(1);
+    });
+
+    test("without sample content the site has the Page and Post types and no entries", async () => {
+      const { siteId } = await runSetup(db.runner, createAccount, input());
+      const types = await db.run(
+        "select key, url_rule from content_types where site_id = ? order by key",
+        [siteId],
+      );
+      expect(types.map((t) => [t["key"], t["url_rule"]])).toEqual([
+        ["page", "/{slug}"],
+        ["post", "/blog/{slug}"],
+      ]);
+      expect(await count("entries")).toBe(0);
+    });
+
+    test("with sample content: Home, About, Contact and a first post, published and valid", async () => {
+      const { siteId, userId } = await runSetup(
+        db.runner,
+        createAccount,
+        input({ starterContent: true }),
+      );
+      const rows = await db.run(
+        "select type_key, slug, status, author_id, body, html, plain_text, published_at from entries where site_id = ? order by slug",
+        [siteId],
+      );
+      expect(rows.map((r) => [r["type_key"], r["slug"]])).toEqual([
+        ["page", "about"],
+        ["post", "blog/hello-world"],
+        ["page", "contact"],
+        ["page", "home"],
+      ]);
+      for (const row of rows) {
+        expect(row["status"]).toBe("published");
+        expect(row["author_id"]).toBe(userId);
+        expect(row["published_at"]).not.toBeNull();
+        expect(String(row["html"])).toMatch(/^<p>[^<]+<\/p>$/);
+        // The stored blocks pass the block checks without a single repair (spec 03, section 4).
+        const body = kind === "sqlite" ? JSON.parse(String(row["body"])) : row["body"];
+        expect(checkBlocks(body).repairs).toEqual([]);
+        expect(String(row["plain_text"]).length).toBeGreaterThan(10);
+      }
     });
   });
 }

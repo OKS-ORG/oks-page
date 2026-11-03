@@ -3,6 +3,7 @@
 // exists it refuses, so the wizard cannot be opened again.
 import { newId, type SqlRunner } from "@oks-page/db";
 import { DEFAULT_ROLES } from "./roles.js";
+import { BUILT_IN_TYPES, STARTER_ENTRIES, starterBody } from "./starter.js";
 
 export const SITE_PURPOSES = ["blog", "business", "portfolio", "other"] as const;
 export type SitePurpose = (typeof SITE_PURPOSES)[number];
@@ -11,6 +12,8 @@ export interface SetupInput {
   siteName: string;
   tagline?: string;
   purpose?: SitePurpose;
+  /** Make the sample pages (Home, About, Contact) and a first post. Default: no. */
+  starterContent?: boolean;
   admin: { name: string; email: string; password: string };
 }
 
@@ -120,6 +123,48 @@ export async function runSetup(
         `insert into "site_members" ("site_id", "user_id", "role_id", "created_at") values (?, ?, ?, ?)`,
         [siteId, userId, administratorRole, at],
       );
+      // The two built-in content types, so Pages and Posts exist from the first minute.
+      for (const type of BUILT_IN_TYPES)
+        await tx.all(
+          `insert into "content_types" ("id", "site_id", "key", "label", "url_rule", "has_body", "hierarchical", "options", "created_at", "updated_at") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            newId(),
+            siteId,
+            type.key,
+            type.label,
+            type.urlRule,
+            true,
+            type.hierarchical,
+            "{}",
+            at,
+            at,
+          ],
+        );
+      if (input.starterContent)
+        for (const entry of STARTER_ENTRIES) {
+          const text = starterBody(entry);
+          await tx.all(
+            `insert into "entries" ("id", "site_id", "type_key", "status", "title", "slug", "author_id", "fields", "body", "plain_text", "html", "seo", "meta", "published_at", "created_at", "updated_at") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              newId(),
+              siteId,
+              entry.type,
+              "published",
+              entry.title,
+              entry.slug,
+              userId,
+              "{}",
+              text.body,
+              text.plainText,
+              text.html,
+              "{}",
+              "{}",
+              at,
+              at,
+              at,
+            ],
+          );
+        }
       const settings: [string, unknown][] = [
         ["title", input.siteName.trim()],
         ["tagline", (input.tagline ?? "").trim()],
