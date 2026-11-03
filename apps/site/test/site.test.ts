@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
-import { chromium } from "playwright-core";
+import axe from "axe-core";
+import { chromium, type Browser } from "playwright-core";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
 beforeAll(() => buildSite(), 300_000);
@@ -500,3 +501,133 @@ for (const { kind, skip } of openers) {
     );
   });
 }
+
+// The wizard shares the build of this file: two builds at the same time would write into the same folder.
+describe.skipIf(!findBrowser())("the setup wizard", () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+
+  const count = async (table: string) =>
+    Number((await db.run(`select count(*) as n from ${table}`))[0]!["n"]);
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-wizard-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 600_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  test("a new install sends the first visit to the wizard", async () => {
+    const response = await fetch(site.base + "/", { redirect: "manual" });
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location")!, site.base).pathname).toBe("/admin/setup");
+  });
+
+  test("the wizard has no accessibility violations on its first and second step", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 800 } });
+    await page.goto(site.base + "/admin/setup");
+    await page.getByRole("heading", { name: "Set up your site", level: 1 }).waitFor();
+    for (const step of ["first", "second"]) {
+      if (step === "second") {
+        await page.getByLabel("Site name").fill("My Site");
+        await page.getByRole("button", { name: "Next" }).click();
+        await page.getByLabel("Your name").waitFor();
+      }
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        step,
+      ).toEqual([]);
+    }
+    await page.close();
+  });
+
+  test("a password that is too short is refused with a plain message, and nothing is created", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/setup");
+    await page.getByLabel("Site name").fill("My Site");
+    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByLabel("Your name").fill("Anna");
+    await page.getByLabel("Email").fill("anna@example.com");
+    await page.getByLabel(/^Password/).fill("short");
+    await page.getByRole("button", { name: "Finish setup" }).click();
+    await page
+      .getByText(/at least 10 characters/i)
+      .first()
+      .waitFor();
+    expect(await count("sites")).toBe(0);
+    expect(await count("users")).toBe(0);
+    await page.close();
+  });
+
+  test("two questions about the site, two about the owner, then the owner is signed in", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/setup");
+    await page.getByLabel("Site name").fill("Anna's Garden");
+    await page.getByLabel("Tagline").fill("Plants and notes");
+    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByLabel("Your name").fill("Anna");
+    await page.getByLabel("Email").fill("anna@example.com");
+    await page.getByLabel(/^Password/).fill("a-long-password");
+    await page.getByRole("button", { name: "Finish setup" }).click();
+    await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
+    expect(await page.getByText("signed in as anna@example.com").count()).toBe(1);
+
+    expect(await count("sites")).toBe(1);
+    expect(await count("site_members")).toBe(1);
+    const role = (
+      await db.run("select r.key as k from site_members m join roles r on r.id = m.role_id")
+    )[0]!["k"];
+    expect(role).toBe("administrator");
+
+    // The session cookie from the last step is a working sign-in.
+    const session = await page.evaluate(async () => {
+      const response = await fetch("/api/auth/get-session");
+      return (await response.json()) as { user?: { email: string } } | null;
+    });
+    expect(session?.user?.email).toBe("anna@example.com");
+    await page.close();
+  });
+
+  test("once set up, the wizard is closed: the page says so and the route refuses", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/setup");
+    await page.getByText("This site is already set up").waitFor();
+    expect(await page.getByLabel("Site name").count()).toBe(0);
+    await page.close();
+
+    const again = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Another",
+        admin: { name: "Bob", email: "bob@example.com", password: "another-long-password" },
+      }),
+    });
+    expect(again.status).toBe(409);
+    expect(await count("sites")).toBe(1);
+    expect(await count("users")).toBe(1);
+  });
+
+  test("a request from another address is refused", async () => {
+    const response = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: "{}",
+    });
+    expect(response.status).toBe(403);
+  });
+});
