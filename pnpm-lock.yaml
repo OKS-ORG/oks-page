@@ -164,7 +164,11 @@ importers:
 
   packages/content-safety: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@oks-page/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/db:
     dependencies:
