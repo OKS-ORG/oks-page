@@ -71,3 +71,24 @@ jobs:
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
             -e OKS_EXPECT_MEMORY_CAP=1 -e OKS_DEBUG_SANDBOX=1 \
             node:22 bash -c "corepack enable && pnpm install --frozen-lockfile && pnpm exec tsc -b && pnpm exec vitest run packages/sandbox"
+
+  # S8: the minimal site as a Docker image, run under memory limits of 512 MB, 1 GB and 2 GB. The table goes into the
+  # job summary and becomes the "hosting requirements" table. The job fails when a container is killed for memory.
+  hosting-baseline:
+    name: Hosting baseline (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b
+      - name: Make a small sample database
+        run: node apps/site/test/make-sample-db.mjs "$RUNNER_TEMP/data/site.sqlite"
+      - name: Build the image
+        run: docker build -f docker/site.Dockerfile -t oks-site .
+      - name: Measure memory and start time under limits
+        run: scripts/hosting-baseline.sh oks-site "$RUNNER_TEMP/data/site.sqlite"
