@@ -1,6 +1,9 @@
 # The minimal site as one image (S8): the site, the database driver, the admin and oks-ui. SQLite lives in /data.
 # This is the baseline that the memory and start-time measurements run on (scripts/hosting-baseline.sh).
 FROM node:22-slim AS build
+# better-sqlite3 is built from source here, which needs Python and a C++ compiler.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /app
 COPY . .

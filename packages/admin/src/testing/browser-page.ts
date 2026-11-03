@@ -94,6 +94,11 @@ ${entryBody}`,
       await before?.(page);
       await page.goto(base + search);
       await page.waitForSelector("h1");
+      // No transitions or animations: a colour that is still fading fails an axe contrast check on a slow machine.
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition: none !important; animation: none !important; }",
+      });
       // oks-ui switches to dark through this attribute, not through the browser setting.
       if (colorScheme === "dark")
         await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
