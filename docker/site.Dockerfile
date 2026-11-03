@@ -8,6 +8,8 @@ RUN corepack enable
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
+# The site imports the workspace packages from their built folders, so they are compiled first.
+RUN pnpm exec tsc -b
 # The pages read the database only when asked, so the build needs none.
 RUN OKS_SQLITE_PATH=/nonexistent pnpm --filter @oks-page/site build
 
