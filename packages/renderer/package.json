@@ -11,5 +11,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@oks-page/content-safety": "workspace:*"
   }
 }

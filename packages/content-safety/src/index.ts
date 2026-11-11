@@ -63,3 +63,4 @@ export function checkBlocks(input: unknown): CheckBlocksResult {
   const body = limitDocumentSize({ version, blocks }, repairs);
   return { body, repairs };
 }
+export { isSafeColor, isSafeUrl, isSafeVideoUrl } from "./schemes.js";
