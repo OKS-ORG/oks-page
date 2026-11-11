@@ -5,7 +5,7 @@
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
 import { NextResponse, type NextRequest } from "next/server";
 import { findPublished, slugOf } from "./data/entries";
-import { getSiteId } from "./db";
+import { getSiteId, NO_SITE } from "./db";
 import { NOT_FOUND_CACHE_HEADER, notFoundHeaders, pageHeaders, visitorOf } from "./headers";
 import { cdnEnabled } from "./settings";
 
@@ -13,7 +13,16 @@ export async function proxy(request: NextRequest) {
   const path = decodeURIComponent(request.nextUrl.pathname).replace(/\/+$/, "");
   const slug = slugOf(path === "" ? undefined : path.slice(1).split("/"));
   const started = performance.now();
-  const [found, cdn] = await Promise.all([findPublished(slug), cdnEnabled()]);
+  let found: Awaited<ReturnType<typeof findPublished>>;
+  let cdn: boolean;
+  try {
+    [found, cdn] = await Promise.all([findPublished(slug), cdnEnabled()]);
+  } catch (error) {
+    // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
+    if (error instanceof Error && error.message === NO_SITE)
+      return NextResponse.redirect(new URL("/admin/setup", request.url));
+    throw error;
+  }
   if (process.env["OKS_TEST"])
     ((globalThis as { __oksProxyMs?: number[] }).__oksProxyMs ??= []).push(
       performance.now() - started,
