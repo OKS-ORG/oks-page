@@ -76,6 +76,8 @@ describe("the project", () => {
         "app/layout.tsx",
         "app/[[...slug]]/page.tsx",
         "app/admin/setup/page.tsx",
+        "app/admin/page.tsx",
+        "app/admin/login/page.tsx",
         "app/api/setup/route.ts",
         "app/api/auth/[...all]/route.ts",
         "app/not-found-handler/route.ts",

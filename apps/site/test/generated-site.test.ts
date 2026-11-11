@@ -95,6 +95,10 @@ describe.skipIf(!findBrowser())("a site made by the installer", () => {
       return await response.text();
     });
     expect(JSON.parse(session).user.email).toBe("anna@example.com");
+    // The owner can open the dashboard with the session the wizard made.
+    await page.goto(base + "/admin");
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(await page.locator("main").innerText()).toContain("Made by the installer");
     await page.close();
   }, 120_000);
 

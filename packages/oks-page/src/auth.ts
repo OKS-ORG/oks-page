@@ -7,6 +7,18 @@ export const CLIENT_HEADER = "x-oks-client-ip";
 
 const shared = globalThis as typeof globalThis & { __oksAuth?: OksAuth };
 
+/**
+ * The address the visitor used, from the request's own headers. Next.js gives `request.url` its own idea of the host
+ * ("localhost"), and Better Auth then refuses a browser that came from another name for the same machine (403).
+ */
+export function requestOrigin(request: Request): string {
+  const host = request.headers.get("host");
+  if (!host) return new URL(request.url).origin;
+  const proto =
+    request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.replace(":", "");
+  return `${proto}://${host}`;
+}
+
 /** `origin` is the address the visitor used; it is only used when `OKS_SITE_URL` is not set. */
 export function getAuth(origin: string): OksAuth {
   if (shared.__oksAuth) return shared.__oksAuth;

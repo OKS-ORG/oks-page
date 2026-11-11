@@ -1,7 +1,7 @@
 // POST /api/setup: the last step of the setup wizard. Makes the site and the first Administrator, then signs them in.
 import { runSetup, SetupError, type SetupInput } from "@oks-page/core";
 import { NextResponse } from "next/server";
-import { CLIENT_HEADER, getAuth } from "./auth";
+import { CLIENT_HEADER, getAuth, requestOrigin } from "./auth";
 import { getRunner } from "./db";
 
 const STATUS = { invalid: 400, already_set_up: 409, account: 422 } as const;
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const auth = getAuth(new URL(request.url).origin).auth;
+    const auth = getAuth(requestOrigin(request)).auth;
     // Until trusted proxies are set up, every setup request counts as one client.
     const headers = { [CLIENT_HEADER]: "unknown" };
     await runSetup(

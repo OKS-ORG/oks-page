@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // The package's own name, read from its package.json, so the product name is written in one place (D84).
-const { name } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
-  name: string;
-};
+const { name, version } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { name: string; version: string };
 
 const unique = <T>(list: T[]): T[] => [...new Set(list)];
 
@@ -34,6 +34,8 @@ export function withOksPage(config: NextConfig = {}): NextConfig {
           },
         }),
     ...config,
+    // The admin footer shows these.
+    env: { ...config.env, OKS_PRODUCT: name, OKS_VERSION: version },
     // The admin and the API are for one person at a time: a CDN never stores them (decision D81). Not in an export.
     ...(exportBuild
       ? {}

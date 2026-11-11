@@ -14,5 +14,18 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../db" }, { "path": "../auth" }, { "path": "../core" }]
+  "references": [
+    {
+      "path": "../db"
+    },
+    {
+      "path": "../auth"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../admin"
+    }
+  ]
 }

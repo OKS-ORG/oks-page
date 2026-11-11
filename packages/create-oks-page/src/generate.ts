@@ -130,6 +130,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       path: "app/admin/setup/page.tsx",
       content: `export { default, metadata } from ${from("setup-page")};\n`,
     },
+    {
+      path: "app/admin/page.tsx",
+      content: `export { default, metadata } from ${from("admin-page")};\n`,
+    },
+    {
+      path: "app/admin/login/page.tsx",
+      content: `export { default, metadata } from ${from("login-page")};\n`,
+    },
     { path: "app/api/setup/route.ts", content: `export { POST } from ${from("api-setup")};\n` },
     {
       path: "app/api/auth/[...all]/route.ts",

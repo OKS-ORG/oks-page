@@ -661,3 +661,136 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe.skipIf(!findBrowser())("the admin sign-in and the dashboard", () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-admin-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const signIn = async (
+    page: Awaited<ReturnType<Browser["newPage"]>>,
+    password = owner.password,
+  ) => {
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  };
+
+  test("without a session, /admin sends the visitor to the sign-in page", async () => {
+    // The page streams, so the redirect is made in the browser, and the dashboard is never drawn.
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin");
+    await page.waitForURL("**/admin/login");
+    await page.getByRole("heading", { name: "Sign in", level: 1 }).waitFor();
+    expect(await page.getByText("Anna's Garden").count()).toBe(0);
+    await page.close();
+  });
+
+  test("a wrong password gets a plain message and stays on the sign-in page", async () => {
+    const page = await browser.newPage();
+    await signIn(page, "not-the-password");
+    await page.getByText("The email or the password is wrong.").waitFor();
+    expect(new URL(page.url()).pathname).toBe("/admin/login");
+    await page.close();
+  });
+
+  test("the right password opens the dashboard: the site, its counts and its latest edits", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/admin");
+    const body = await page.locator("main").innerText();
+    expect(body).toContain("Anna's Garden");
+    expect(body).toContain("Signed in as Anna (anna@example.com)");
+    expect(await page.getByRole("list", { name: "Recent edits" }).innerText()).toContain(
+      "Hello world",
+    );
+    expect(
+      (await page.locator('dl[aria-label="Your content"]').innerText()).replace(/\s+/g, " "),
+    ).toBe("Pages 3 Posts 1 Drafts 0");
+    expect(await page.locator("footer").innerText()).toMatch(/Developed with .+ · Version /);
+    await page.close();
+  });
+
+  test("the dashboard has no accessibility violations on a wide and a narrow screen", async () => {
+    for (const width of [1280, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 800 } });
+      await signIn(page);
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `${width}px`,
+      ).toEqual([]);
+      await page.close();
+    }
+  });
+
+  test("signing out goes back to the sign-in page, and /admin needs a session again", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByRole("heading", { name: "Sign in", level: 1 }).waitFor();
+    await page.goto(site.base + "/admin");
+    await page.waitForURL("**/admin/login");
+    await page.close();
+  });
+
+  test("someone with an account who is not a member of the site is not let in", async () => {
+    // A second account made through the sign-up route: it has no role on this site.
+    const made = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({
+        name: "Bob",
+        email: "bob@example.com",
+        password: "another-long-password",
+      }),
+    });
+    expect(made.ok).toBe(true);
+    const context = await browser.newContext();
+    await context.addCookies(
+      made.headers.getSetCookie().map((line) => {
+        const [pair] = line.split(";");
+        const [name, ...value] = pair!.split("=");
+        return { name: name!, value: value.join("="), url: site.base };
+      }),
+    );
+    const page = await context.newPage();
+    await page.goto(site.base + "/admin");
+    await page.waitForURL("**/admin/login");
+    expect(await page.getByText("Anna's Garden").count()).toBe(0);
+    await context.close();
+  });
+});

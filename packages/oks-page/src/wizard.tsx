@@ -80,7 +80,7 @@ export function SetupWizard() {
         <h2 id="done">Your site is set up</h2>
         <p>You are signed in as {email}.</p>
         <p>
-          <a href="/">View your site</a>
+          <a href="/admin">Open the dashboard</a> · <a href="/">View your site</a>
         </p>
       </section>
     );

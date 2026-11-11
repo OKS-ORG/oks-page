@@ -169,8 +169,8 @@ export interface FooterInfo {
   /** The product name comes from the brand file (D84). */
   product: string;
   version: string;
-  helpHref: string;
-  docsHref: string;
+  helpHref?: string;
+  docsHref?: string;
 }
 
 /** The slim line at the bottom (D112). The owner can hide it: the caller then passes nothing. */
@@ -180,8 +180,8 @@ export function ShellFooter({ info }: { info: FooterInfo }) {
       <span>
         Developed with {info.product} · Version {info.version}
       </span>
-      <a href={info.helpHref}>Help</a>
-      <a href={info.docsHref}>Docs</a>
+      {info.helpHref ? <a href={info.helpHref}>Help</a> : null}
+      {info.docsHref ? <a href={info.docsHref}>Docs</a> : null}
     </footer>
   );
 }

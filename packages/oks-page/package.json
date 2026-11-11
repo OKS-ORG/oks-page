@@ -15,6 +15,7 @@
     }
   },
   "dependencies": {
+    "@oks-page/admin": "workspace:*",
     "@oks-page/auth": "workspace:*",
     "@oks-page/core": "workspace:*",
     "@oks-page/db": "workspace:*",
