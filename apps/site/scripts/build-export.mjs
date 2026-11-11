@@ -22,7 +22,10 @@ const work = join(site, ".export-build");
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 for (const name of readdirSync(site)) {
-  if ([".next", ".export-build", "out", "test", "scripts", "export", "node_modules"].includes(name))
+  if (
+    [".next", ".export-build", "out", "test", "scripts", "export", "node_modules"].includes(name) ||
+    name.startsWith(".e2e-")
+  )
     continue;
   cpSync(join(site, name), join(work, name), { recursive: true });
 }

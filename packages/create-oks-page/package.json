@@ -1,0 +1,22 @@
+{
+  "name": "create-oks-page",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Creates a new oks-page site: npx create-oks-page my-site",
+  "type": "module",
+  "bin": {
+    "create-oks-page": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.20.5"
+  }
+}

@@ -9,6 +9,10 @@ export default defineConfig({
         replacement: new URL("./packages/db/src/testing/harness.ts", import.meta.url).pathname,
       },
       {
+        find: "@oks-page/db/migrate",
+        replacement: new URL("./packages/db/src/migrate.ts", import.meta.url).pathname,
+      },
+      {
         find: "@oks-page/db/memory",
         replacement: new URL("./packages/db/src/memory.ts", import.meta.url).pathname,
       },

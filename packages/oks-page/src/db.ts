@@ -1,5 +1,6 @@
 // The site's database connection, made once per process. SQLite (a file) or PostgreSQL (a URL), from the environment.
 import { pgRunner, pgSchema, sqliteRunner, sqliteSchema, type SqlRunner } from "@oks-page/db";
+import { migratePg, migrateSqlite, migrationsFolder } from "@oks-page/db/migrate";
 import Database from "better-sqlite3";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
@@ -8,6 +9,7 @@ import pg from "pg";
 interface Shared {
   runner?: SqlRunner;
   drizzle?: unknown;
+  native?: { kind: "sqlite"; db: Database.Database } | { kind: "postgres"; pool: pg.Pool };
   siteId?: string;
 }
 const shared = globalThis as typeof globalThis & { __oks?: Shared };
@@ -25,6 +27,7 @@ export function getRunner(): SqlRunner {
         : undefined,
     } as pg.PoolConfig);
     state.runner = pgRunner(pool);
+    state.native = { kind: "postgres", pool };
     state.drizzle = drizzlePg(pool, { schema: pgSchema });
   } else {
     const file = process.env["OKS_SQLITE_PATH"];
@@ -34,6 +37,7 @@ export function getRunner(): SqlRunner {
     db.pragma("busy_timeout = 5000");
     db.pragma("foreign_keys = ON");
     state.runner = sqliteRunner(db);
+    state.native = { kind: "sqlite", db };
     state.drizzle = drizzleSqlite(db, { schema: sqliteSchema });
   }
   return state.runner;
@@ -41,6 +45,27 @@ export function getRunner(): SqlRunner {
 
 /** The message of the error thrown when setup has not run yet. */
 export const NO_SITE = "The database has no site yet";
+
+/**
+ * Makes the tables of a new database, or brings an older one up to date. Safe to run at every start: a database that is
+ * up to date is left alone, and two servers starting together wait for each other. Returns the migrations it applied.
+ */
+export async function migrateDatabase(): Promise<string[]> {
+  getRunner();
+  const native = state.native!;
+  if (native.kind === "sqlite") return migrateSqlite(native.db, migrationsFolder("sqlite"));
+  const client = await native.pool.connect();
+  try {
+    const schema = process.env["OKS_PG_SEARCH_PATH"];
+    return await migratePg(
+      client as unknown as pg.Client,
+      migrationsFolder("postgres"),
+      schema ? { schema } : {},
+    );
+  } finally {
+    client.release();
+  }
+}
 
 /** The database as a Drizzle client, for Better Auth. */
 export function getDrizzle(): unknown {

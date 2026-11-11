@@ -11,7 +11,8 @@
 // (the migration tests start it in child processes).
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import type pg from "pg";
 
@@ -42,6 +43,13 @@ export function readMigrations(folder: string): Migration[] {
           .filter(Boolean),
       };
     });
+}
+
+/** Where the migration files of each database are (inside this package, next to `dist`). */
+export function migrationsFolder(dialect: "sqlite" | "postgres"): string {
+  // Next.js bundles this package into the server and leaves `import.meta.dirname` empty; the file URL still works.
+  const here = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+  return join(here, "..", "drizzle", dialect === "sqlite" ? "sqlite" : "pg");
 }
 
 export interface MigrateOptions {

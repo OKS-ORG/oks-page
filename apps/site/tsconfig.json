@@ -26,5 +26,5 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "export", "scripts", "out", ".export-build"]
+  "exclude": ["node_modules", "export", "scripts", "out", ".export-build", ".e2e-*"]
 }

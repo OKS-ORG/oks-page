@@ -18,6 +18,10 @@
     "./testing": {
       "types": "./dist/testing/harness.d.ts",
       "default": "./dist/testing/harness.js"
+    },
+    "./migrate": {
+      "types": "./dist/migrate.d.ts",
+      "default": "./dist/migrate.js"
     }
   },
   "dependencies": {
