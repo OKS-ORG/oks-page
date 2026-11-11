@@ -1,9 +1,9 @@
 "use client";
 // The list of pages or posts, with a box to add a new one.
 import { ListTable } from "@oks-page/admin";
-import { Alert, Button, TextField } from "oks-ui";
+import { Alert, Button, Modal, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
-import type { ListedEntry } from "@oks-page/core";
+import type { ListedEntry, TrashedEntry } from "@oks-page/core";
 
 export interface ContentListProps {
   /** The content type ("page", "post") and the word for its screen ("pages", "posts"). */
@@ -11,16 +11,52 @@ export interface ContentListProps {
   segment: string;
   singular: string;
   entries: ListedEntry[];
+  /** What is in the trash, for the Trash view. */
+  trashed: TrashedEntry[];
+  view: "all" | "trash";
   canAdd: boolean;
 }
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
-export function ContentList({ type, segment, singular, entries, canAdd }: ContentListProps) {
+export function ContentList({
+  type,
+  segment,
+  singular,
+  entries,
+  trashed,
+  view,
+  canAdd,
+}: ContentListProps) {
   const [title, setTitle] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState<TrashedEntry | null>(null);
+
+  /** Restores or deletes one trashed entry, then shows the list again. */
+  async function inTrash(entry: TrashedEntry, what: "restore" | "forever") {
+    setProblem(null);
+    try {
+      const response =
+        what === "restore"
+          ? await fetch(`/api/admin/entries/${entry.id}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "restore" }),
+            })
+          : await fetch(`/api/admin/entries/${entry.id}?forever=1`, { method: "DELETE" });
+      if (response.ok) {
+        window.location.assign(`/admin/${segment}?view=trash`);
+        return;
+      }
+      const body = (await response.json()) as { error?: { message: string } };
+      setProblem(body.error?.message ?? "It did not work. Try again.");
+    } catch {
+      setProblem("The site could not be reached. Check your connection and try again.");
+    }
+    setDeleting(null);
+  }
 
   async function add(event: FormEvent) {
     event.preventDefault();
@@ -44,9 +80,81 @@ export function ContentList({ type, segment, singular, entries, canAdd }: Conten
     setBusy(false);
   }
 
+  const inTrashView = view === "trash";
   return (
     <>
-      {canAdd ? (
+      <nav aria-label={`${segment} views`}>
+        <a href={`/admin/${segment}`} aria-current={inTrashView ? undefined : "page"}>
+          All ({entries.length})
+        </a>
+        {" | "}
+        <a href={`/admin/${segment}?view=trash`} aria-current={inTrashView ? "page" : undefined}>
+          Trash ({trashed.length})
+        </a>
+      </nav>
+      {problem && inTrashView ? (
+        <Alert color="danger" title="Not done" description={problem} />
+      ) : null}
+      {inTrashView ? (
+        trashed.length === 0 ? (
+          <p>The trash is empty.</p>
+        ) : (
+          <>
+            <p>Things in the trash are deleted for good after 30 days.</p>
+            <ListTable
+              label={`${segment} in the trash`}
+              rows={trashed.map((e) => ({ ...e, deleted: when(e.trashedAt) }))}
+              getRowKey={(row) => row.id}
+              columns={[
+                { key: "title", header: "Title", sortable: true },
+                {
+                  key: "deleted",
+                  header: "Deleted",
+                  sortValue: (row) => row.trashedAt,
+                  sortable: true,
+                },
+                {
+                  key: "daysLeft",
+                  header: "Days left",
+                  sortable: true,
+                  render: (row) => `${row.daysLeft}`,
+                },
+                {
+                  key: "actions",
+                  header: "Actions",
+                  render: (row) => (
+                    <>
+                      <Button size="sm" onPress={() => void inTrash(row, "restore")}>
+                        Restore
+                      </Button>{" "}
+                      <Button size="sm" color="danger" onPress={() => setDeleting(row)}>
+                        Delete forever
+                      </Button>
+                    </>
+                  ),
+                },
+              ]}
+            />
+          </>
+        )
+      ) : null}
+      <Modal
+        isOpen={deleting !== null}
+        onClose={() => setDeleting(null)}
+        role="alertdialog"
+        title="Delete for good?"
+        actions={
+          <>
+            <Button onPress={() => setDeleting(null)}>Cancel</Button>
+            <Button color="danger" onPress={() => deleting && void inTrash(deleting, "forever")}>
+              Delete forever
+            </Button>
+          </>
+        }
+      >
+        <p>{deleting?.title} and its earlier copies will be removed. This cannot be undone.</p>
+      </Modal>
+      {canAdd && !inTrashView ? (
         <form onSubmit={add} aria-label={`Add a ${singular}`}>
           {problem ? <Alert color="danger" title="Not added" description={problem} /> : null}
           <TextField
@@ -61,7 +169,7 @@ export function ContentList({ type, segment, singular, entries, canAdd }: Conten
           </Button>
         </form>
       ) : null}
-      {entries.length === 0 ? (
+      {inTrashView ? null : entries.length === 0 ? (
         <p>Nothing here yet.</p>
       ) : (
         <ListTable

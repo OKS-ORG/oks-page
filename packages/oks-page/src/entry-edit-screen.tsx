@@ -1,9 +1,10 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor } from "@oks-page/admin";
-import { Alert, Button, RadioGroupField, TextField } from "oks-ui";
+import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
 import { useRef, useState } from "react";
 import type { Block } from "oks-ui";
+import { EntryRevisions } from "./entry-revisions";
 import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
 
@@ -16,6 +17,9 @@ export interface EntryEditScreenProps {
   revision: number;
   blocks: Block[];
   canPublish: boolean;
+  canTrash: boolean;
+  /** Where the list this entry belongs to is ("/admin/pages"). */
+  listHref: string;
 }
 
 interface SaveReply {
@@ -48,6 +52,24 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
   const [slugPart, setSlugPart] = useState(props.slugPart);
   const [status, setStatus] = useState(props.status === "published" ? "published" : "draft");
   const revision = useRef(props.revision);
+  const [revisionNo, setRevisionNo] = useState(props.revision);
+  const [trashing, setTrashing] = useState(false);
+
+  async function moveToTrash() {
+    setProblem(null);
+    try {
+      const response = await fetch(`/api/admin/entries/${props.id}`, { method: "DELETE" });
+      if (response.ok) {
+        window.location.assign(props.listHref);
+        return;
+      }
+      const body = (await response.json()) as { error?: { message: string } };
+      setProblem(body.error?.message ?? "It could not be moved to the trash.");
+    } catch {
+      setProblem("The site could not be reached. Check your connection and try again.");
+    }
+    setTrashing(false);
+  }
   const [problem, setProblem] = useState<string | null>(null);
 
   return (
@@ -97,9 +119,37 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
             throw new Error(message);
           }
           revision.current = body.revision ?? revision.current;
+          setRevisionNo(revision.current);
           return { repairs: body.repairs ?? [] };
         }}
       />
+      <EntryRevisions id={props.id} revision={revisionNo} />
+      {props.canTrash ? (
+        <p>
+          <Button color="danger" onPress={() => setTrashing(true)}>
+            Move to trash
+          </Button>
+        </p>
+      ) : null}
+      <Modal
+        isOpen={trashing}
+        onClose={() => setTrashing(false)}
+        role="alertdialog"
+        title="Move to the trash?"
+        actions={
+          <>
+            <Button onPress={() => setTrashing(false)}>Cancel</Button>
+            <Button color="danger" onPress={() => void moveToTrash()}>
+              Move to trash
+            </Button>
+          </>
+        }
+      >
+        <p>
+          “{title}” leaves the site at once. It stays in the trash for 30 days, and you can restore
+          it from there.
+        </p>
+      </Modal>
     </>
   );
 }

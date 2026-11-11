@@ -3,8 +3,15 @@ import { ContentListPage } from "./content-list-page";
 
 export const metadata: Metadata = { title: "Pages", robots: { index: false } };
 
-export default function PagesListPage() {
+export default function PagesListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
   return (
-    <ContentListPage kind={{ type: "page", segment: "pages", singular: "page", title: "Pages" }} />
+    <ContentListPage
+      searchParams={searchParams}
+      kind={{ type: "page", segment: "pages", singular: "page", title: "Pages" }}
+    />
   );
 }

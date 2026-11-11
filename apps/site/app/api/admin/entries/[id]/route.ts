@@ -1,1 +1,1 @@
-export { PUT } from "oks-page/api-entry";
+export { PUT, PATCH, DELETE } from "oks-page/api-entry";

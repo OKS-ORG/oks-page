@@ -31,6 +31,8 @@ export interface SaveEntryInput {
   changes: EntryChanges;
   /** The files the saved entry uses, as (media id, field). Replaces the earlier list when given. */
   media?: { mediaId: string; field: string }[];
+  /** A full copy of the saved entry, written in the same transaction (spec 03, "Revisions"). */
+  snapshot?: { id: string; authorId: string; summary: string; content: unknown };
   now?: Date;
 }
 
@@ -82,6 +84,19 @@ export async function saveEntry(db: SqlRunner, input: SaveEntryInput): Promise<S
           `insert into "entry_media" ("entry_id", "media_id", "field") values (?, ?, ?)`,
           [input.entryId, m.mediaId, m.field],
         );
+    }
+    if (input.snapshot) {
+      await tx.all(
+        `insert into "entry_revisions" ("id", "entry_id", "kind", "snapshot", "summary", "author_id", "created_at") values (?, ?, 'revision', ?, ?, ?, ?)`,
+        [
+          input.snapshot.id,
+          input.entryId,
+          JSON.stringify(input.snapshot.content),
+          input.snapshot.summary,
+          input.snapshot.authorId,
+          input.now ?? new Date(),
+        ],
+      );
     }
     return { ok: true, revision: Number(updated[0]!["revision"]) } as const;
   });

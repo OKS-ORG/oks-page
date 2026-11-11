@@ -164,7 +164,11 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     },
     {
       path: "app/api/admin/entries/[id]/route.ts",
-      content: `export { PUT } from ${from("api-entry")};\n`,
+      content: `export { PUT, PATCH, DELETE } from ${from("api-entry")};\n`,
+    },
+    {
+      path: "app/api/admin/entries/[id]/revisions/route.ts",
+      content: `export { GET, POST } from ${from("api-revisions")};\n`,
     },
     {
       path: "app/api/admin/media/route.ts",

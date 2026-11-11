@@ -1003,6 +1003,188 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     expect(save.status).toBe(401);
   });
 
+  const addPageNamed = async (page: Page, title: string) => {
+    await page.goto(site.base + "/admin/pages");
+    await page.getByLabel(/^Title of the new page/).fill(title);
+    await page.getByRole("button", { name: "Add new" }).click();
+    await page.getByRole("heading", { name: `Edit: ${title}`, level: 1 }).waitFor();
+  };
+  const copies = (page: Page) => page.locator("#revisions-heading + ul > li");
+
+  test("trash: a published page leaves the site, can be restored as a draft, and can be deleted for good", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await addPageNamed(page, "Trash me");
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Words to remove");
+    await page.getByLabel("Published (everyone sees it)").check({ force: true });
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    expect((await text("/trash-me")).status).toBe(200);
+
+    // Cancel does nothing; moving it asks first and then takes it off the public site at once.
+    await page.getByRole("button", { name: "Move to trash" }).click();
+    const ask = page.getByRole("alertdialog");
+    await ask.getByRole("button", { name: "Cancel" }).click();
+    await ask.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "Move to trash" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Move to trash" }).click();
+    await page.waitForURL("**/admin/pages");
+    await expect.poll(async () => (await text("/trash-me")).status).toBe(404);
+    expect(await page.getByRole("link", { name: "Trash me" }).count()).toBe(0);
+
+    // The Trash view lists it with the days left; Restore brings it back as a draft.
+    await page.getByRole("link", { name: /^Trash \(/ }).click();
+    await page.getByRole("table", { name: "pages in the trash" }).waitFor();
+    const row = page.getByRole("row", { name: /Trash me/ });
+    expect(await row.textContent()).toContain("30");
+    await row.getByRole("button", { name: "Restore" }).click();
+    await page.getByText("The trash is empty.").waitFor();
+    await page.goto(site.base + "/admin/pages");
+    await page.getByRole("link", { name: "Trash me" }).click();
+    await page.getByRole("heading", { name: "Edit: Trash me", level: 1 }).waitFor();
+    expect(await page.getByLabel("Draft (only you see it)").isChecked()).toBe(true);
+    expect((await text("/trash-me")).status).toBe(404);
+
+    // Delete forever asks first, and then the page and its copies are gone from the database.
+    await page.getByRole("button", { name: "Move to trash" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Move to trash" }).click();
+    await page.waitForURL("**/admin/pages");
+    await page.goto(site.base + "/admin/pages?view=trash");
+    await page
+      .getByRole("row", { name: /Trash me/ })
+      .getByRole("button", { name: "Delete forever" })
+      .click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete forever" }).click();
+    await page.getByText("The trash is empty.").waitFor();
+    expect(await db.run("select id from entries where title = 'Trash me'")).toEqual([]);
+    await page.close();
+  });
+
+  test("the trash and the copies are closed to people who may not use them, and to anyone signed out", async () => {
+    const owner_ = await browser.newPage();
+    await signIn(owner_);
+    await addPageNamed(owner_, "Anna's private");
+    const id = owner_.url().split("/").pop()!;
+    const caraPage = await browser.newPage();
+    await signIn(caraPage, cara);
+    const call = (method: string, path: string, body?: unknown) =>
+      caraPage.evaluate(
+        async ([m, u, b]) => {
+          const r = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b ? { body: JSON.stringify(b) } : {}),
+          });
+          return r.status;
+        },
+        [method, path, body] as const,
+      );
+    expect(await call("DELETE", `/api/admin/entries/${id}`)).toBe(403);
+    expect(await call("PATCH", `/api/admin/entries/${id}`, { action: "restore" })).toBe(404);
+    expect(await call("GET", `/api/admin/entries/${id}/revisions`)).toBe(403);
+    for (const [method, path] of [
+      ["DELETE", `/entries/${id}`],
+      ["PATCH", `/entries/${id}`],
+      ["GET", `/entries/${id}/revisions`],
+      ["POST", `/entries/${id}/revisions`],
+    ] as const) {
+      const response = await fetch(site.base + "/api/admin" + path, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "GET" || method === "DELETE" ? null : "{}",
+      });
+      expect(response.status, `${method} ${path}`).toBe(401);
+    }
+    await owner_.close();
+    await caraPage.close();
+  });
+
+  test("copies: each save keeps one, compare shows what changed, and restore puts the old text back", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await addPageNamed(page, "Copies page");
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("alpha");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    await expect.poll(() => copies(page).count()).toBe(1);
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type(" beta");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => copies(page).count()).toBe(2);
+    const oldest = copies(page).last();
+    expect(await oldest.textContent()).toContain("by Anna: Changed the text");
+
+    await oldest.getByRole("button", { name: "Compare" }).click();
+    const region = page.getByRole("region", { name: "Compare with this copy" });
+    await region.getByText("Only in the copy: alpha", { exact: true }).waitFor();
+    await region.getByText("Only in the page now: alpha beta", { exact: true }).waitFor();
+    await region.getByRole("button", { name: "Close the compare" }).click();
+
+    // Restore asks first; then the old text is the newest save, and it is in the copies list too.
+    await oldest.getByRole("button", { name: "Restore" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Restore this copy" }).click();
+    await expect
+      .poll(() => page.locator("[contenteditable=true]").first().innerText())
+      .toMatch(/^alpha\s*$/);
+    await expect.poll(() => copies(page).count()).toBe(3);
+    expect(await copies(page).first().textContent()).toContain("Restored the copy from");
+    await page.close();
+  });
+
+  test("the trash view and an edit screen with copies have no accessibility violations on a wide and a narrow screen", async () => {
+    for (const width of [1280, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 800 } });
+      await signIn(page);
+      await addPageNamed(page, `Check ${width}`);
+      await page.locator("[contenteditable=true]").first().click();
+      await page.keyboard.type("text");
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect.poll(() => copies(page).count()).toBe(1);
+      await page.getByRole("button", { name: "Move to trash" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Move to trash" }).click();
+      await page.waitForURL("**/admin/pages");
+      for (const open of [
+        async () => {
+          await page.goto(site.base + "/admin/pages?view=trash");
+          await page.getByRole("table", { name: "pages in the trash" }).waitFor();
+        },
+        async () => {
+          await page
+            .getByRole("row", { name: new RegExp(`Check ${width}`) })
+            .getByRole("button", { name: "Restore" })
+            .click();
+          await page
+            .getByText("The trash is empty.")
+            .waitFor()
+            .catch(() => undefined);
+          await page.goto(site.base + "/admin/pages");
+          await page.getByRole("link", { name: `Check ${width}` }).click();
+          await page.getByRole("heading", { name: `Edit: Check ${width}`, level: 1 }).waitFor();
+          await copies(page).first().waitFor();
+          await page.getByRole("button", { name: "Compare" }).first().click();
+          await page.getByRole("region", { name: "Compare with this copy" }).waitFor();
+        },
+      ]) {
+        await open();
+        await page.addScriptTag({ content: axe.source });
+        const result = await page.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `${width}px`,
+        ).toEqual([]);
+      }
+      await page.close();
+    }
+  });
+
   test("the list and the edit screen have no accessibility violations on a wide and a narrow screen", async () => {
     for (const width of [1280, 390]) {
       const page = await browser.newPage({ viewport: { width, height: 800 } });

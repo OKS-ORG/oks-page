@@ -1,5 +1,5 @@
 // The server side of the list screens: only a signed-in member who may edit this kind of content sees them.
-import { isSetupDone, listEntries } from "@oks-page/core";
+import { isSetupDone, listEntries, listTrash } from "@oks-page/core";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
@@ -15,13 +15,21 @@ export interface ContentKind {
   title: string;
 }
 
-export async function ContentListPage({ kind }: { kind: ContentKind }) {
+export async function ContentListPage({
+  kind,
+  searchParams,
+}: {
+  kind: ContentKind;
+  searchParams?: Promise<{ view?: string }>;
+}) {
   await connection();
   if (!(await isSetupDone(getRunner()))) redirect("/admin/setup");
   const member = await signedInMember();
   if (!member) redirect("/admin/login");
   const actor = await actorOf(member);
   const entries = await listEntries(getRunner(), actor, member.siteId, kind.type);
+  const trashed = await listTrash(getRunner(), actor, member.siteId, kind.type);
+  const view = (await searchParams)?.view === "trash" ? "trash" : "all";
   return (
     <AdminFrame
       user={member.user}
@@ -36,6 +44,8 @@ export async function ContentListPage({ kind }: { kind: ContentKind }) {
         segment={kind.segment}
         singular={kind.singular}
         entries={entries}
+        trashed={trashed}
+        view={view}
         canAdd={actor.can("content.create", kind.type)}
       />
     </AdminFrame>

@@ -50,6 +50,11 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         // The stored blocks passed the block checks; oks-ui's own type is stricter than the checks' type.
         blocks={entry.blocks as unknown as EntryEditScreenProps["blocks"]}
         canPublish={canPublish}
+        canTrash={
+          actor.can("content.delete_any", entry.type) ||
+          (actor.can("content.delete_own", entry.type) && entry.authorId === actor.userId)
+        }
+        listHref={`/admin/${segment}`}
       />
     </AdminFrame>
   );

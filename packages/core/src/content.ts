@@ -4,6 +4,7 @@
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
 import { writeBlocks } from "@oks-page/renderer";
+import { canonicalJson, pruneRevisions, summarise } from "./revision-parts.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
 export interface Actor {
@@ -276,10 +277,11 @@ export async function saveContent(
   id: string,
   input: SaveInput,
   now: () => number = Date.now,
+  options: { summary?: string } = {},
 ): Promise<ContentResult<SavedContent>> {
   const row = (
     await runner.all(
-      `select "type_key", "author_id", "slug", "published_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "type_key", "author_id", "slug", "published_at", "title", "status", "plain_text", "body" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -335,6 +337,30 @@ export async function saveContent(
     },
     // Which library files the page uses, so a file in use is not deleted by mistake.
     media: await usedMedia(runner, siteId, checked.body.blocks),
+    // A full copy of this save, with a short summary of what changed.
+    snapshot: {
+      id: newId(),
+      authorId: actor.userId,
+      summary:
+        options.summary ??
+        summarise(
+          {
+            title: String(row["title"]),
+            slug: String(row["slug"]),
+            status: String(row["status"]),
+            plainText: String(row["plain_text"] ?? ""),
+            bodyJson: canonicalJson(parseJson(row["body"])),
+          },
+          {
+            title,
+            slug,
+            status: input.status,
+            plainText: written.plainText,
+            bodyJson: canonicalJson(checked.body),
+          },
+        ),
+      content: { title, slug, status: input.status, body: checked.body },
+    },
     now: at,
   });
   if (!saved.ok) {
@@ -348,6 +374,7 @@ export async function saveContent(
       );
     return fail("not_found", "This entry does not exist.");
   }
+  await pruneRevisions(runner, id, at.getTime());
   return {
     ok: true,
     revision: saved.revision,

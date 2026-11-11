@@ -5,3 +5,6 @@ export * from "./setup.js";
 export * from "./starter.js";
 export * from "./jobs.js";
 export * from "./media.js";
+export * from "./trash.js";
+export * from "./revisions.js";
+export { summarise, diffLines, type DiffLine } from "./revision-parts.js";
