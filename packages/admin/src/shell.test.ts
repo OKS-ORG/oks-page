@@ -56,9 +56,10 @@ describe.skipIf(!browserPath)("the admin shell", () => {
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
     expect(await dialog.getByRole("link", { name: "Dashboard" }).count()).toBe(1);
-    expect(
-      await page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null),
-    ).toBe(true);
+    // Focus moves into the dialog a moment after it opens, so wait for it (a slow machine needs longer).
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null))
+      .toBe(true);
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Menu");
