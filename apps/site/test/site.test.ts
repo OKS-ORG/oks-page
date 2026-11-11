@@ -864,7 +864,8 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
   test("the pages list shows the sample pages as links, the posts list the first post, and the menu has both", async () => {
     const page = await browser.newPage();
     await signIn(page);
-    expect(await page.getByRole("link", { name: "Posts", exact: true }).count()).toBeGreaterThan(0);
+    // The menu may draw a moment after the heading, so wait for it instead of counting at once.
+    await page.getByRole("link", { name: "Posts", exact: true }).first().waitFor();
     await page.getByRole("link", { name: "Pages", exact: true }).first().click();
     await page.getByRole("heading", { name: "Pages", level: 1 }).waitFor();
     for (const title of ["Home", "About", "Contact"])

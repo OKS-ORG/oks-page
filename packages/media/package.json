@@ -11,5 +11,13 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "jsdom": "29.1.1",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0"
   }
 }
