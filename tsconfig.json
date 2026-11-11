@@ -39,6 +39,9 @@
     },
     {
       "path": "packages/theme-default"
+    },
+    {
+      "path": "packages/oks-page"
     }
   ]
 }

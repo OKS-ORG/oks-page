@@ -47,7 +47,7 @@ test("EC-32: blocksToHtml in product code fails; a test file may mention it", ()
   expect(checkNoBlocksToHtml(ok)).toEqual([]);
 });
 
-test("D84: the bare product name in code fails; the scope in an import passes", () => {
+test("D84: the bare product name in code fails; the scope and the package in an import pass", () => {
   const brand = JSON.stringify({ product: "oks-page" });
   const bad = fixture({
     "brand.json": brand,
@@ -56,9 +56,16 @@ test("D84: the bare product name in code fails; the scope in an import passes", 
   expect(checkBrandName(bad)).toHaveLength(1);
   const ok = fixture({
     "brand.json": brand,
-    "packages/cli/src/a.ts": 'import { x } from "@oks-page/core";\n',
+    "packages/cli/src/a.ts":
+      'import { x } from "@oks-page/core";\nimport { w } from "oks-page/next";\nexport { default } from "oks-page/layout";\n',
   });
   expect(checkBrandName(ok)).toEqual([]);
+  // The name in text, even on a line that also has an import of the package, still fails.
+  const both = fixture({
+    "brand.json": brand,
+    "packages/cli/src/a.ts": 'import { w } from "oks-page/next"; const n = "oks-page";\n',
+  });
+  expect(checkBrandName(both)).toHaveLength(1);
 });
 
 test("DM-19: a raw JSON operator outside the field builder fails; inside it, and in a test, passes", () => {

@@ -2,7 +2,7 @@ import { getPublishedEntry, slugOf } from "@data";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
-import { canonicalFor } from "../../site-url";
+import { canonicalFor } from "./site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 

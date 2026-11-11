@@ -3,7 +3,7 @@
 // its cache tag with updateTag (SEO-06): the next visit, by anyone, is a fresh page.
 import { saveEntry } from "@oks-page/db";
 import { updateTag } from "next/cache";
-import { getRunner } from "../../db";
+import { getRunner } from "oks-page/db";
 
 export async function saveTitle(formData: FormData) {
   if (!process.env["OKS_TEST"]) throw new Error("Not available");

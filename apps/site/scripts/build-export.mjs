@@ -10,7 +10,6 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -23,18 +22,7 @@ const work = join(site, ".export-build");
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 for (const name of readdirSync(site)) {
-  if (
-    [
-      ".next",
-      ".export-build",
-      "out",
-      "test",
-      "scripts",
-      "export",
-      "cache-handlers",
-      "node_modules",
-    ].includes(name)
-  )
+  if ([".next", ".export-build", "out", "test", "scripts", "export", "node_modules"].includes(name))
     continue;
   cpSync(join(site, name), join(work, name), { recursive: true });
 }
@@ -43,13 +31,7 @@ symlinkSync(join(site, "node_modules"), join(work, "node_modules"), "dir");
 // The files an export leaves out are listed in export/removed.json, so `oks export` checks the same set.
 const removed = JSON.parse(readFileSync(join(site, "export", "removed.json"), "utf8"));
 for (const path of removed.removed) rmSync(join(work, path), { recursive: true, force: true });
-cpSync(join(site, "export", "page.tsx"), join(work, "src", "app", "[[...slug]]", "page.tsx"));
-// In the copy, "@data" means the export data module (for the type check as well as the build).
-const tsconfig = JSON.parse(readFileSync(join(work, "tsconfig.json"), "utf8"));
-tsconfig.compilerOptions.paths = { "@data": ["./src/data/export.ts"] };
-tsconfig.exclude = ["node_modules"];
-writeFileSync(join(work, "tsconfig.json"), JSON.stringify(tsconfig, null, 2));
-
+cpSync(join(site, "export", "page.tsx"), join(work, "app", "[[...slug]]", "page.tsx"));
 try {
   execFileSync(
     process.execPath,

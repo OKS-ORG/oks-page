@@ -2,7 +2,7 @@
 import { isSetupDone } from "@oks-page/core";
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { getRunner } from "../../../db";
+import { getRunner } from "./db";
 import { SetupWizard } from "./wizard";
 
 export const metadata: Metadata = { title: "Set up your site", robots: { index: false } };

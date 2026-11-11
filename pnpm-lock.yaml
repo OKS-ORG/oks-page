@@ -35,30 +35,15 @@ importers:
 
   apps/site:
     dependencies:
-      '@oks-page/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@oks-page/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@oks-page/db':
         specifier: workspace:*
         version: link:../../packages/db
-      better-sqlite3:
-        specifier: 13.0.3
-        version: 13.0.3
-      drizzle-orm:
-        specifier: 0.45.4
-        version: 0.45.4(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.7)(pg@8.23.1)
       next:
         specifier: 16.4.2
         version: 16.4.2(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      oks-ui:
-        specifier: 1.5.0
-        version: 1.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      pg:
-        specifier: ^8.23.1
-        version: 8.23.1
+      oks-page:
+        specifier: workspace:*
+        version: link:../../packages/oks-page
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -66,15 +51,9 @@ importers:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^9.6.0
-        version: 9.6.0
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
-      '@types/pg':
-        specifier: ^8.23.1
-        version: 8.23.1
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -84,6 +63,9 @@ importers:
       axe-core:
         specifier: 4.11.1
         version: 4.11.1
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
       playwright-core:
         specifier: ^1.64.1
         version: 1.64.1
@@ -210,6 +192,55 @@ importers:
   packages/editor: {}
 
   packages/media: {}
+
+  packages/oks-page:
+    dependencies:
+      '@oks-page/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@oks-page/core':
+        specifier: workspace:*
+        version: link:../core
+      '@oks-page/db':
+        specifier: workspace:*
+        version: link:../db
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.7)(pg@8.23.1)
+      oks-ui:
+        specifier: 1.5.0
+        version: 1.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      next:
+        specifier: 16.4.2
+        version: 16.4.2(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
 
   packages/renderer: {}
 

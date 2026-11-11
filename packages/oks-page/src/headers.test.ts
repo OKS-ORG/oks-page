@@ -7,7 +7,7 @@ import {
   PUBLIC_NOT_FOUND,
   PUBLIC_PAGE,
   visitorOf,
-} from "../src/headers";
+} from "./headers";
 
 describe("visitorOf", () => {
   test("no cookies is anonymous", () => expect(visitorOf([])).toBe("anonymous"));

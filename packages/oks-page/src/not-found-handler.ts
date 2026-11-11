@@ -3,7 +3,7 @@
 // Next.js replaces the cache headers a proxy sets on a route handler's response with its own, so the proxy hands the
 // header it wants to this handler in a request header, and the handler sends it. Only the two known values are used,
 // so a visitor who sends this header to the handler directly cannot make it say anything else.
-import { NOT_FOUND_CACHE_HEADER, PRIVATE_PAGE, PUBLIC_NOT_FOUND, PRIVATE } from "../../headers";
+import { NOT_FOUND_CACHE_HEADER, PRIVATE_PAGE, PUBLIC_NOT_FOUND, PRIVATE } from "./headers";
 
 export function GET(request: Request) {
   const wanted = request.headers.get(NOT_FOUND_CACHE_HEADER);

@@ -1,8 +1,8 @@
 // POST /api/setup: the last step of the setup wizard. Makes the site and the first Administrator, then signs them in.
 import { runSetup, SetupError, type SetupInput } from "@oks-page/core";
 import { NextResponse } from "next/server";
-import { CLIENT_HEADER, getAuth } from "../../../auth";
-import { getRunner } from "../../../db";
+import { CLIENT_HEADER, getAuth } from "./auth";
+import { getRunner } from "./db";
 
 const STATUS = { invalid: 400, already_set_up: 409, account: 422 } as const;
 
@@ -33,12 +33,12 @@ export async function POST(request: Request) {
     await runSetup(
       getRunner(),
       async ({ name, email, password }) => {
-        const created = await auth.api.signUpEmail({ body: { name, email, password }, headers });
+        const created = await auth.api.signUpEmail!({ body: { name, email, password }, headers });
         return { userId: String(created.user.id) };
       },
       input,
     );
-    const signedIn: Response = await auth.api.signInEmail({
+    const signedIn: Response = await auth.api.signInEmail!({
       body: { email: input.admin.email, password: input.admin.password },
       asResponse: true,
       headers,
