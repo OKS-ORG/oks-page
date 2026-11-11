@@ -5,7 +5,7 @@ export interface DashboardData {
   siteName: string;
   /** Published pages, published posts, and entries still in draft (any type). */
   counts: { pages: number; posts: number; drafts: number };
-  recent: { title: string; type: string; status: string; updatedAt: string }[];
+  recent: { id: string; title: string; type: string; status: string; updatedAt: string }[];
 }
 
 const toIso = (value: unknown): string =>
@@ -27,7 +27,7 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
     else if (row["status"] === "published" && row["type_key"] === "post") counts.posts += n;
   }
   const recent = await runner.all(
-    `select "title", "type_key", "status", "updated_at" from "entries"
+    `select "id", "title", "type_key", "status", "updated_at" from "entries"
       where "site_id" = ? and "status" <> 'trash' order by "updated_at" desc, "id" limit 5`,
     [siteId],
   );
@@ -35,6 +35,7 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
     siteName: String(site?.["name"] ?? ""),
     counts,
     recent: recent.map((row) => ({
+      id: String(row["id"]),
       title: String(row["title"]),
       type: String(row["type_key"]),
       status: String(row["status"]),

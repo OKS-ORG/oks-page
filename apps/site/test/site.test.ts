@@ -794,3 +794,244 @@ describe.skipIf(!findBrowser())("the admin sign-in and the dashboard", () => {
     await context.close();
   });
 });
+
+// These tests sign in and open many pages while the whole workspace runs at once, so they get more time.
+describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-pages-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    // Cara has an account and the contributor role on this site: she may write drafts, not publish.
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'contributor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  // The sign-in limit allows a few tries from one address, so the owner signs in once and the tests reuse the session.
+  let ownerCookies: Awaited<ReturnType<ReturnType<Page["context"]>["cookies"]>> | null = null;
+  const signIn = async (page: Page, who = owner) => {
+    if (who === owner && ownerCookies) {
+      await page.context().addCookies(ownerCookies);
+      await page.goto(site.base + "/admin");
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      return;
+    }
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    if (who === owner) ownerCookies = await page.context().cookies();
+  };
+  const status = (page: Page) => page.locator(".oks-entry-actions [role=status]");
+  const text = async (path: string) => {
+    const response = await fetch(site.base + path);
+    return { status: response.status, body: await response.text() };
+  };
+
+  test("the pages list shows the sample pages as links, the posts list the first post, and the menu has both", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    expect(await page.getByRole("link", { name: "Posts", exact: true }).count()).toBeGreaterThan(0);
+    await page.getByRole("link", { name: "Pages", exact: true }).first().click();
+    await page.getByRole("heading", { name: "Pages", level: 1 }).waitFor();
+    for (const title of ["Home", "About", "Contact"])
+      await page.getByRole("table").getByRole("link", { name: title, exact: true }).waitFor();
+    await page.goto(site.base + "/admin/posts");
+    await page.getByRole("link", { name: "Hello world" }).waitFor();
+    await page.close();
+  });
+
+  test("adding a page, writing in it and publishing it: it is private first, then on the public site at once, and a later change shows at once", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.goto(site.base + "/admin/pages");
+    await page.getByLabel(/^Title of the new page/).fill("My new page");
+    await page.getByRole("button", { name: "Add new" }).click();
+    await page.getByRole("heading", { name: "Edit: My new page", level: 1 }).waitFor();
+    expect(await page.getByLabel(/^Address/).inputValue()).toBe("my-new-page");
+    expect((await text("/my-new-page")).status).toBe(404); // a draft is not public
+
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Brand new words");
+    await page.getByLabel("Published (everyone sees it)").check({ force: true });
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    const published = await text("/my-new-page");
+    expect(published.status).toBe(200);
+    expect(published.body).toContain("Brand new words");
+
+    // A change to a published page shows on the public site at once (the cache is refreshed by tag).
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type(" and more");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect
+      .poll(async () => (await text("/my-new-page")).body)
+      .toContain("Brand new words and more");
+
+    // It is in the list, and reloading the edit screen gives back what was saved.
+    await page.reload();
+    expect(await page.getByLabel(/^Title/).inputValue()).toBe("My new page");
+    await expect
+      .poll(() => page.locator("[contenteditable=true]").first().innerText())
+      .toContain("Brand new words and more");
+    await page.close();
+  });
+
+  test("two people saving from the same version: the second is told, and nothing is overwritten", async () => {
+    const first = await browser.newPage();
+    const second = await browser.newPage();
+    await signIn(first);
+    await signIn(second);
+    await first.goto(site.base + "/admin/pages");
+    await first.getByRole("link", { name: "Contact", exact: true }).click();
+    await first.getByRole("heading", { name: "Edit: Contact", level: 1 }).waitFor();
+    const url = first.url();
+    await second.goto(url);
+    await second.getByRole("heading", { name: "Edit: Contact", level: 1 }).waitFor();
+    await first.getByLabel(/^Title/).fill("Contact us");
+    await first.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(first).textContent()).toBe("Saved.");
+    await second.getByLabel(/^Title/).fill("Contact them");
+    await second.getByRole("button", { name: "Save" }).click();
+    await second
+      .getByText(/Someone else saved this while you were editing/)
+      .first()
+      .waitFor();
+    await second.reload();
+    expect(await second.getByLabel(/^Title/).inputValue()).toBe("Contact us");
+    await first.close();
+    await second.close();
+  });
+
+  test("a contributor writes drafts but cannot publish: no Published choice, the server refuses, and others' entries stay closed", async () => {
+    const page = await browser.newPage();
+    await signIn(page, cara);
+    await page.goto(site.base + "/admin/pages");
+    expect(await page.getByRole("link", { name: "About", exact: true }).count()).toBe(0); // only her own
+    await page.getByLabel(/^Title of the new page/).fill("Cara's draft");
+    await page.getByRole("button", { name: "Add new" }).click();
+    await page.getByRole("heading", { name: "Edit: Cara's draft", level: 1 }).waitFor();
+    await page.getByText("An editor publishes it.").waitFor();
+    expect(await page.getByLabel("Published (everyone sees it)").count()).toBe(0);
+
+    const id = page.url().split("/").pop()!;
+    const refused = await page.evaluate(async (entryId) => {
+      const response = await fetch(`/api/admin/entries/${entryId}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "x",
+          slugPart: "caras-draft",
+          status: "published",
+          blocks: [],
+          revision: 1,
+        }),
+      });
+      return {
+        status: response.status,
+        body: (await response.json()) as { error: { field: string } },
+      };
+    }, id);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.field).toBe("status");
+    expect((await text("/caras-draft")).status).toBe(404);
+
+    // The owner's page is not hers to open.
+    const ownersId = String(
+      (await db.run("select id from entries where slug = 'about'"))[0]!["id"],
+    );
+    await page.goto(site.base + `/admin/pages/${ownersId}`);
+    await page.waitForURL("**/admin");
+    await page.close();
+  });
+
+  test("without a session the save routes answer 401", async () => {
+    const add = await fetch(site.base + "/api/admin/entries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "page", title: "x" }),
+    });
+    expect(add.status).toBe(401);
+    const save = await fetch(site.base + "/api/admin/entries/anything", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(save.status).toBe(401);
+  });
+
+  test("the list and the edit screen have no accessibility violations on a wide and a narrow screen", async () => {
+    for (const width of [1280, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 800 } });
+      await signIn(page);
+      for (const [path, heading] of [
+        ["/admin/pages", "Pages"],
+        ["/admin/posts", "Posts"],
+      ] as const) {
+        await page.goto(site.base + path);
+        await page.getByRole("heading", { name: heading, level: 1 }).waitFor();
+        await page.addScriptTag({ content: axe.source });
+        const result = await page.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `${path} ${width}px`,
+        ).toEqual([]);
+      }
+      await page.goto(site.base + "/admin/posts");
+      await page.getByRole("link", { name: "Hello world" }).click();
+      await page.getByRole("heading", { name: "Edit: Hello world", level: 1 }).waitFor();
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `edit ${width}px`,
+      ).toEqual([]);
+      await page.close();
+    }
+  });
+});

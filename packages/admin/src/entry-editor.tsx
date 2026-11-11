@@ -20,7 +20,10 @@ export interface EntryEditorProps {
 }
 
 type Status =
-  { kind: "idle" } | { kind: "saving" } | { kind: "saved"; repairs: number } | { kind: "error" };
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved"; repairs: number }
+  | { kind: "error"; message: string };
 
 export function EntryEditor({
   initialBlocks,
@@ -43,8 +46,8 @@ export function EntryEditor({
       const result = await onSave(blocks);
       setDirty(false);
       setStatus({ kind: "saved", repairs: result.repairs.length });
-    } catch {
-      setStatus({ kind: "error" });
+    } catch (error) {
+      setStatus({ kind: "error", message: error instanceof Error ? error.message : "" });
     }
   };
   return (
@@ -72,7 +75,10 @@ export function EntryEditor({
             : null}
         </span>
         {status.kind === "error" ? (
-          <span role="alert">Could not save. Your changes are still here: try again.</span>
+          <span role="alert">
+            Could not save{status.message ? `: ${status.message}` : ""}. Your changes are still
+            here: try again.
+          </span>
         ) : null}
       </div>
     </div>

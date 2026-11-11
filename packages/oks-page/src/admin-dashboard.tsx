@@ -1,8 +1,7 @@
 "use client";
-// The dashboard screen: the admin shell around the site's counts and its latest edits.
-import { Shell } from "@oks-page/admin";
-import "@oks-page/admin/shell.css";
-import { Button, Card, CardBody, CardHeader } from "oks-ui";
+// The dashboard screen: the site's counts and its latest edits, inside the admin frame.
+import { Card, CardBody, CardHeader } from "oks-ui";
+import { AdminFrame } from "./admin-frame";
 import type { DashboardData } from "./dashboard-data";
 
 export interface AdminDashboardProps {
@@ -12,33 +11,19 @@ export interface AdminDashboardProps {
   version: string;
 }
 
-const NAV = [{ key: "home", label: "Home", href: "/admin" }];
-
-async function signOut() {
-  await fetch("/api/auth/sign-out", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  });
-  window.location.assign("/admin/login");
-}
-
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
 export function AdminDashboard({ user, data, product, version }: AdminDashboardProps) {
   return (
-    <Shell
-      nav={NAV}
+    <AdminFrame
+      user={user}
+      product={product}
+      version={version}
       selectedKey="home"
       title="Home"
       breadcrumbs={[{ label: data.siteName }]}
-      footer={{ product, version }}
     >
-      <p>
-        Signed in as {user.name} ({user.email}){" "}
-        <Button onPress={() => void signOut()}>Sign out</Button>
-      </p>
       <Card>
         <CardHeader>{data.siteName}</CardHeader>
         <CardBody>
@@ -60,14 +45,17 @@ export function AdminDashboard({ user, data, product, version }: AdminDashboardP
           ) : (
             <ul aria-label="Recent edits">
               {data.recent.map((entry) => (
-                <li key={`${entry.type}-${entry.title}-${entry.updatedAt}`}>
-                  {entry.title} ({entry.type}, {entry.status}) · {when(entry.updatedAt)}
+                <li key={entry.id}>
+                  <a href={`/admin/${entry.type === "post" ? "posts" : "pages"}/${entry.id}`}>
+                    {entry.title}
+                  </a>{" "}
+                  ({entry.type}, {entry.status}) · {when(entry.updatedAt)}
                 </li>
               ))}
             </ul>
           )}
         </CardBody>
       </Card>
-    </Shell>
+    </AdminFrame>
   );
 }
