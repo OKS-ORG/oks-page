@@ -1,5 +1,5 @@
 {
-  "_comment": "The only place with the working name. The final name is a mechanical change (D84, D87).",
+  "_comment": "The only place with the product name. It is final (D144, 11 November 2026); a rename would be a mechanical change (D84, D87).",
   "product": "oks-page",
   "scope": "@oks-page",
   "command": "oks"

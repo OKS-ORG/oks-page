@@ -24,7 +24,7 @@ const plugin = (
     JSON.stringify({
       name: "my-plugin",
       version: "1.0.0",
-      oksBundle: {
+      oksPage: {
         type: "plugin",
         id: "my-plugin",
         permissions: ["content:read"],
@@ -58,13 +58,13 @@ describe("PL-41 oks check", () => {
   );
 
   test(
-    "PL-41 a folder with no oksBundle section fails with what to add",
+    "PL-41 a folder with no oksPage section fails with what to add",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "oks-check-test-"));
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
       const r = await checkPlugin(dir);
       expect(r.ok).toBe(false);
-      expect(errors(r)[0]!.message).toMatch(/no "oksBundle" section/);
+      expect(errors(r)[0]!.message).toMatch(/no "oksPage" section/);
     },
     T,
   );
@@ -126,13 +126,13 @@ describe("PL-41 oks check", () => {
     async () => {
       const extra = await checkPlugin(plugin(GOOD, { hooks: [] }));
       expect(errors(extra).map((e) => e.message)).toEqual([
-        'The code has the hook "content:afterSave" but "oksBundle.hooks" does not list it.',
+        'The code has the hook "content:afterSave" but "oksPage.hooks" does not list it.',
       ]);
       const missing = await checkPlugin(
         plugin(GOOD, { hooks: ["content:afterSave", "content:beforeSave"] }),
       );
       expect(errors(missing).map((e) => e.message)).toEqual([
-        '"oksBundle.hooks" lists "content:beforeSave" but the code does not have it.',
+        '"oksPage.hooks" lists "content:beforeSave" but the code does not have it.',
       ]);
     },
     T,
@@ -148,7 +148,7 @@ describe("PL-41 oks check", () => {
         ),
       );
       expect(errors(r).map((e) => e.message)).toEqual([
-        'The code has the block "my-card" but "oksBundle.blocks" does not list it.',
+        'The code has the block "my-card" but "oksPage.blocks" does not list it.',
       ]);
     },
     T,

@@ -67,7 +67,7 @@ describe("one copy of React (AD-47)", () => {
       JSON.stringify({
         name: "p",
         version: "1.0.0",
-        oksBundle: {
+        oksPage: {
           type: "plugin",
           id: "my-plugin",
           runtime: "build",

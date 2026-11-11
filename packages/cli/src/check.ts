@@ -58,7 +58,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   });
   const root = resolve(dir);
 
-  // 1. The manifest, in package.json under "oksBundle" (spec 04, section 3).
+  // 1. The manifest, in package.json under "oksPage" (spec 04, section 3).
   const pkgFile = join(root, "package.json");
   if (!existsSync(pkgFile)) {
     add("error", "manifest", `There is no package.json in ${root}.`);
@@ -71,12 +71,12 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     add("error", "manifest", "package.json is not valid JSON.");
     return result();
   }
-  const raw = pkg["oksBundle"] as Record<string, unknown> | undefined;
+  const raw = pkg["oksPage"] as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== "object") {
     add(
       "error",
       "manifest",
-      'package.json has no "oksBundle" section. Add one with the plugin\'s id and permissions.',
+      'package.json has no "oksPage" section. Add one with the plugin\'s id and permissions.',
     );
     return result();
   }
@@ -84,20 +84,16 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   const hooks = strings(raw["hooks"]);
   const blocks = strings(raw["blocks"]);
   if (raw["type"] !== "plugin")
-    add("error", "manifest", '"oksBundle.type" must be "plugin". Themes are checked separately.');
+    add("error", "manifest", '"oksPage.type" must be "plugin". Themes are checked separately.');
   if (typeof raw["id"] !== "string" || !ID.test(raw["id"]))
-    add(
-      "error",
-      "manifest",
-      '"oksBundle.id" must be 3 to 40 lower-case letters, digits or hyphens.',
-    );
+    add("error", "manifest", '"oksPage.id" must be 3 to 40 lower-case letters, digits or hyphens.');
   if (typeof pkg["version"] !== "string" || !/^\d+\.\d+\.\d+/.test(pkg["version"]))
     add("error", "manifest", 'package.json needs a "version" such as 1.0.0.');
   if (!permissions || !hooks || !blocks)
     add(
       "error",
       "manifest",
-      '"permissions", "hooks" and "blocks" in "oksBundle" must each be a list of text.',
+      '"permissions", "hooks" and "blocks" in "oksPage" must each be a list of text.',
     );
   if (issues.length > 0) return result();
   const manifest: Manifest = {
@@ -129,7 +125,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     add(
       "error",
       "manifest",
-      `"oksBundle.runtime" must be "sandbox" or "build", not "${manifest.runtime}".`,
+      `"oksPage.runtime" must be "sandbox" or "build", not "${manifest.runtime}".`,
     );
     return result();
   }
@@ -143,7 +139,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     add(
       "error",
       "build",
-      'The plugin\'s entry file was not found. Set "oksBundle.entry" or add src/index.ts.',
+      'The plugin\'s entry file was not found. Set "oksPage.entry" or add src/index.ts.',
     );
     return result();
   }
@@ -255,28 +251,28 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
         add(
           "error",
           "manifest-mismatch",
-          `The code has the hook "${h}" but "oksBundle.hooks" does not list it.`,
+          `The code has the hook "${h}" but "oksPage.hooks" does not list it.`,
         );
     for (const h of manifest.hooks)
       if (!shape.hooks.includes(h))
         add(
           "error",
           "manifest-mismatch",
-          `"oksBundle.hooks" lists "${h}" but the code does not have it.`,
+          `"oksPage.hooks" lists "${h}" but the code does not have it.`,
         );
     for (const b of shape.blocks)
       if (!manifest.blocks.includes(b))
         add(
           "error",
           "manifest-mismatch",
-          `The code has the block "${b}" but "oksBundle.blocks" does not list it.`,
+          `The code has the block "${b}" but "oksPage.blocks" does not list it.`,
         );
     for (const b of manifest.blocks)
       if (!shape.blocks.includes(b))
         add(
           "error",
           "manifest-mismatch",
-          `"oksBundle.blocks" lists "${b}" but the code does not have it.`,
+          `"oksPage.blocks" lists "${b}" but the code does not have it.`,
         );
 
     // Every hook and block runs once with sample data. A refusal means it uses a permission it did not declare.

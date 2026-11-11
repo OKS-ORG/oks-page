@@ -2,7 +2,7 @@
 
 > Code repository guide. Started 23 October 2026 from the [M1 plan](https://github.com/OKS-ORG/CMS-Docs) (`docs/08-m1-plan.md`) and the [documentation repository's CLAUDE.md](https://github.com/OKS-ORG/CMS-Docs) (`CLAUDE.md`). Change anything that does not match the founder's wishes.
 
-Guidance for Claude (and anyone) working in this repository. This repository holds the **code** for oks-page (working name, D87), a WordPress alternative built with Next.js, Tailwind CSS or custom CSS, and oks-ui. The **research, specifications and decisions live in the documentation repository** `OKS-ORG/CMS-Docs`. Code follows the approved specs there.
+Guidance for Claude (and anyone) working in this repository. This repository holds the **code** for oks-page (final name since 11 November 2026, D144), a WordPress alternative built with Next.js, Tailwind CSS or custom CSS, and oks-ui. The **research, specifications and decisions live in the documentation repository** `OKS-ORG/CMS-Docs`. Code follows the approved specs there.
 
 ## Read first
 
@@ -34,7 +34,7 @@ The product name lives in `brand.json`. Package scope is `@oks-page/*`.
 
 - pnpm workspaces and Turborepo; TypeScript strict; ESLint; Prettier; Vitest; Playwright; Changesets.
 - Node.js 22, 24 and 26 are all tested. Do not use a feature that only exists in one of them.
-- **One placeholder name** for the product and the command lives in one place; never write it elsewhere as a string. Nothing is published to npm in M1.
+- **The product name and the command name** live in one place (`brand.json`); never write it elsewhere as a string. Nothing is published to npm in M1.
 - Two database schemas (SQLite and PostgreSQL) are kept equal by the parity test. Every sort or filter on a custom field goes through the one query builder.
 - Public and stored HTML is made only by our own writer. Never use oks-ui's `blocksToHtml` for it. Every write of block content passes the block checks.
 - Public pages never contain `'use cache'` directly: data goes through the aliased data module (server and export builds differ in one file).
