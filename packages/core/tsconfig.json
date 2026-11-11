@@ -9,6 +9,12 @@
   "references": [
     {
       "path": "../db"
+    },
+    {
+      "path": "../content-safety"
+    },
+    {
+      "path": "../renderer"
     }
   ]
 }

@@ -160,9 +160,15 @@ importers:
 
   packages/core:
     dependencies:
+      '@oks-page/content-safety':
+        specifier: workspace:*
+        version: link:../content-safety
       '@oks-page/db':
         specifier: workspace:*
         version: link:../db
+      '@oks-page/renderer':
+        specifier: workspace:*
+        version: link:../renderer
 
   packages/create-oks-page:
     devDependencies:

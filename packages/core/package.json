@@ -13,6 +13,8 @@
     }
   },
   "dependencies": {
-    "@oks-page/db": "workspace:*"
+    "@oks-page/content-safety": "workspace:*",
+    "@oks-page/db": "workspace:*",
+    "@oks-page/renderer": "workspace:*"
   }
 }
