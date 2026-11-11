@@ -20,4 +20,11 @@ export async function register(): Promise<void> {
   } catch (error) {
     console.error("[oks] Could not start the background jobs:", error);
   }
+  // Scheduled pages go live on time, and the old trash is emptied.
+  try {
+    const { startScheduler } = await import("./scheduler");
+    startScheduler();
+  } catch (error) {
+    console.error("[oks] Could not start the scheduler:", error);
+  }
 }

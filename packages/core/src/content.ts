@@ -12,8 +12,8 @@ export interface Actor {
   can(capability: string, typeKey?: string): boolean;
 }
 
-export type ContentStatus = "draft" | "published";
-export const STATUSES: ContentStatus[] = ["draft", "published"];
+export type ContentStatus = "draft" | "scheduled" | "published";
+export const STATUSES: ContentStatus[] = ["draft", "scheduled", "published"];
 
 /** Addresses the site keeps for itself (spec 03, "Slugs"). */
 const RESERVED = new Set([
@@ -203,6 +203,8 @@ export interface EntryForEdit {
   /** What the type puts in front of the slug ("blog/"), or "". */
   prefix: string;
   status: string;
+  /** When a scheduled entry goes live (ISO time), or null. */
+  scheduledAt: string | null;
   revision: number;
   blocks: Block[];
   authorId: string;
@@ -211,6 +213,8 @@ export interface EntryForEdit {
 const mayEdit = (actor: Actor, type: string, authorId: string): boolean =>
   actor.can("content.edit_any", type) ||
   (actor.can("content.edit_own", type) && authorId === actor.userId);
+
+const toDate = (value: unknown): Date => (value instanceof Date ? value : new Date(Number(value)));
 
 const parseJson = (value: unknown): unknown =>
   typeof value === "string" ? JSON.parse(value) : value;
@@ -223,7 +227,7 @@ export async function loadForEdit(
 ): Promise<ContentResult<{ entry: EntryForEdit }>> {
   const row = (
     await runner.all(
-      `select "id", "type_key", "title", "slug", "status", "revision", "body", "author_id" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "id", "type_key", "title", "slug", "status", "revision", "body", "author_id", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -244,6 +248,7 @@ export async function loadForEdit(
       slugPart: slug.startsWith(prefix) ? slug.slice(prefix.length) : slug,
       prefix,
       status: String(row["status"]),
+      scheduledAt: row["scheduled_at"] == null ? null : toDate(row["scheduled_at"]).toISOString(),
       revision: Number(row["revision"]),
       blocks,
       authorId,
@@ -255,6 +260,8 @@ export interface SaveInput {
   title: string;
   slugPart: string;
   status: string;
+  /** When to publish, for the status "scheduled" (an ISO time in the future). */
+  scheduledAt?: string | null;
   blocks: unknown;
   /** The revision the editor loaded. */
   revision: number;
@@ -268,6 +275,7 @@ export interface SavedContent {
   skippedBlocks: string[];
   slug: string;
   status: string;
+  scheduledAt: string | null;
 }
 
 export async function saveContent(
@@ -281,7 +289,7 @@ export async function saveContent(
 ): Promise<ContentResult<SavedContent>> {
   const row = (
     await runner.all(
-      `select "type_key", "author_id", "slug", "published_at", "title", "status", "plain_text", "body" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "type_key", "author_id", "slug", "published_at", "title", "status", "plain_text", "body", "meta", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -306,13 +314,27 @@ export async function saveContent(
   if (RESERVED.has(slugPart))
     return fail("invalid", "This address is kept for the site itself.", { field: "slug" });
   if (!(STATUSES as string[]).includes(input.status))
-    return fail("invalid", "Choose draft or published.", { field: "status" });
+    return fail("invalid", "Choose draft, scheduled or published.", { field: "status" });
   const publishing = input.status === "published";
   const mayPublish =
     actor.can("content.publish_any", type) ||
     (actor.can("content.publish_own", type) && authorId === actor.userId);
-  if (publishing && !mayPublish)
+  if (input.status !== "draft" && !mayPublish)
     return fail("forbidden", "You may not publish this.", { field: "status" });
+  let scheduledAt: Date | null = null;
+  if (input.status === "scheduled") {
+    const when = input.scheduledAt ? new Date(String(input.scheduledAt)) : null;
+    if (!when || Number.isNaN(when.getTime()))
+      return fail("invalid", "Choose when to publish it.", { field: "scheduledAt" });
+    if (when.getTime() <= now())
+      return fail("invalid", "Choose a time in the future.", { field: "scheduledAt" });
+    scheduledAt = when;
+  }
+  // Who scheduled it is kept in the entry's meta, because the publishing job acts with their permission.
+  const oldMeta = (parseJson(row["meta"]) ?? {}) as Record<string, unknown>;
+  const meta: Record<string, unknown> = { ...oldMeta };
+  if (scheduledAt) meta["scheduledBy"] = actor.userId;
+  else delete meta["scheduledBy"];
 
   const prefix = (await addressPrefix(runner, siteId, type)) ?? "";
   const slug = prefix + slugPart;
@@ -330,6 +352,8 @@ export async function saveContent(
       title,
       slug,
       status: input.status,
+      scheduled_at: scheduledAt,
+      ...(JSON.stringify(meta) !== JSON.stringify(oldMeta) ? { meta } : {}),
       body: checked.body,
       html: written.html,
       plain_text: written.plainText,
@@ -348,6 +372,8 @@ export async function saveContent(
             title: String(row["title"]),
             slug: String(row["slug"]),
             status: String(row["status"]),
+            scheduledAt:
+              row["scheduled_at"] == null ? null : toDate(row["scheduled_at"]).toISOString(),
             plainText: String(row["plain_text"] ?? ""),
             bodyJson: canonicalJson(parseJson(row["body"])),
           },
@@ -355,6 +381,7 @@ export async function saveContent(
             title,
             slug,
             status: input.status,
+            scheduledAt: scheduledAt ? scheduledAt.toISOString() : null,
             plainText: written.plainText,
             bodyJson: canonicalJson(checked.body),
           },
@@ -382,6 +409,7 @@ export async function saveContent(
     skippedBlocks: written.skipped,
     slug,
     status: input.status,
+    scheduledAt: scheduledAt ? scheduledAt.toISOString() : null,
   };
 }
 

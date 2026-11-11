@@ -20,7 +20,7 @@ const toDate = (value: unknown): Date => (value instanceof Date ? value : new Da
 async function entryFor(runner: SqlRunner, actor: Actor, siteId: string, id: string) {
   const row = (
     await runner.all(
-      `select "type_key", "author_id", "title", "slug", "status", "revision", "body" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "type_key", "author_id", "title", "slug", "status", "revision", "body", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -144,6 +144,8 @@ export async function restoreRevision(
       title: old.snapshot.title,
       slugPart: slug.slice(slug.lastIndexOf("/") + 1),
       status: String(found.row["status"]),
+      scheduledAt:
+        found.row["scheduled_at"] == null ? null : toDate(found.row["scheduled_at"]).toISOString(),
       blocks: old.snapshot.body?.blocks ?? [],
       revision: fromRevision,
     },

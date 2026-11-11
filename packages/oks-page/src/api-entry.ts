@@ -27,6 +27,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     title: String(input["title"] ?? ""),
     slugPart: String(input["slugPart"] ?? ""),
     status: String(input["status"] ?? ""),
+    scheduledAt: input["scheduledAt"] == null ? null : String(input["scheduledAt"]),
     blocks: input["blocks"],
     revision: Number(input["revision"]),
   });
@@ -38,6 +39,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     skippedBlocks: result.skippedBlocks,
     slug: result.slug,
     status: result.status,
+    scheduledAt: result.scheduledAt,
   });
 }
 

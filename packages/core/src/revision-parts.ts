@@ -17,6 +17,8 @@ export interface SavedState {
   title: string;
   slug: string;
   status: string;
+  /** ISO time a scheduled entry goes live, or null. */
+  scheduledAt?: string | null;
   plainText: string;
   /** The body as JSON text, to notice changes that are not text (a picture, a setting). */
   bodyJson: string;
@@ -44,7 +46,15 @@ export function summarise(before: SavedState | null, after: SavedState): string 
   if (before.title !== after.title) parts.push("changed the title");
   if (before.slug !== after.slug) parts.push("changed the address");
   if (before.status !== after.status)
-    parts.push(after.status === "published" ? "published it" : "made it a draft");
+    parts.push(
+      after.status === "published"
+        ? "published it"
+        : after.status === "scheduled"
+          ? "scheduled it"
+          : "made it a draft",
+    );
+  else if (after.status === "scheduled" && before.scheduledAt !== after.scheduledAt)
+    parts.push("changed the publish time");
   if (before.plainText !== after.plainText) parts.push("changed the text");
   else if (before.bodyJson !== after.bodyJson) parts.push("changed pictures or layout");
   if (parts.length === 0) return "Saved with no changes";

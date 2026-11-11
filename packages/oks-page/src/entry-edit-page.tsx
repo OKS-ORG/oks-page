@@ -46,6 +46,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         slugPart={entry.slugPart}
         prefix={entry.prefix}
         status={entry.status}
+        scheduledAt={entry.scheduledAt}
         revision={entry.revision}
         // The stored blocks passed the block checks; oks-ui's own type is stricter than the checks' type.
         blocks={entry.blocks as unknown as EntryEditScreenProps["blocks"]}

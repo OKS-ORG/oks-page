@@ -14,6 +14,8 @@ export interface EntryEditScreenProps {
   slugPart: string;
   prefix: string;
   status: string;
+  /** When a scheduled entry goes live (ISO time), or null. */
+  scheduledAt: string | null;
   revision: number;
   blocks: Block[];
   canPublish: boolean;
@@ -27,6 +29,18 @@ interface SaveReply {
   repairs?: string[];
   slug?: string;
   error?: { message: string };
+}
+
+/** An ISO time as the value of a datetime-local box (the viewer's own clock), and back. */
+const pad = (n: number) => String(n).padStart(2, "0");
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(value: string): string | null {
+  const d = new Date(value);
+  return value && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
 }
 
 /** The "Insert image from the library" button and its window. */
@@ -50,7 +64,10 @@ function InsertFromLibrary({ insertImage }: { insertImage: (src: string, alt: st
 export function EntryEditScreen(props: EntryEditScreenProps) {
   const [title, setTitle] = useState(props.title);
   const [slugPart, setSlugPart] = useState(props.slugPart);
-  const [status, setStatus] = useState(props.status === "published" ? "published" : "draft");
+  const [status, setStatus] = useState(
+    props.status === "published" || props.status === "scheduled" ? props.status : "draft",
+  );
+  const [scheduledAt, setScheduledAt] = useState(toLocalInput(props.scheduledAt));
   const revision = useRef(props.revision);
   const [revisionNo, setRevisionNo] = useState(props.revision);
   const [trashing, setTrashing] = useState(false);
@@ -90,6 +107,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           label="Status"
           options={[
             { label: "Draft (only you see it)", value: "draft" },
+            { label: "Scheduled (goes live at the time you choose)", value: "scheduled" },
             { label: "Published (everyone sees it)", value: "published" },
           ]}
           value={status}
@@ -98,6 +116,23 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
       ) : (
         <p>Status: draft. An editor publishes it.</p>
       )}
+      {props.canPublish && status === "scheduled" ? (
+        <div>
+          <label htmlFor="scheduled-at">Publish at</label>
+          <input
+            id="scheduled-at"
+            name="scheduledAt"
+            type="datetime-local"
+            required
+            value={scheduledAt}
+            onChange={(event) => setScheduledAt(event.target.value)}
+            aria-describedby="scheduled-at-help"
+          />
+          <p id="scheduled-at-help">
+            The time on your own clock. The page goes live then, with your permission.
+          </p>
+        </div>
+      ) : null}
       <EntryEditor
         label="Content"
         initialBlocks={props.blocks}
@@ -110,7 +145,14 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           const response = await fetch(`/api/admin/entries/${props.id}`, {
             method: "PUT",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ title, slugPart, status, blocks, revision: revision.current }),
+            body: JSON.stringify({
+              title,
+              slugPart,
+              status,
+              scheduledAt: status === "scheduled" ? fromLocalInput(scheduledAt) : null,
+              blocks,
+              revision: revision.current,
+            }),
           });
           const body = (await response.json()) as SaveReply;
           if (!response.ok) {

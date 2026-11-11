@@ -814,7 +814,10 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
 
   beforeAll(async () => {
     db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-pages-")), "site.sqlite"));
-    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    site = await startSite("sqlite", db, {
+      OKS_SECRET: "s".repeat(40),
+      OKS_SCHEDULER_SECONDS: "1",
+    });
     const made = await fetch(site.base + "/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1130,6 +1133,146 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       .toMatch(/^alpha\s*$/);
     await expect.poll(() => copies(page).count()).toBe(3);
     expect(await copies(page).first().textContent()).toContain("Restored the copy from");
+    await page.close();
+  });
+
+  test("scheduling on the screen: a time in the past is refused, a future time is kept, and the page is not live yet", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await addPageNamed(page, "Plan ahead");
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Coming soon");
+    await page.getByLabel(/^Scheduled/).check({ force: true });
+    await page.getByLabel("Publish at").fill("2020-01-15T09:30");
+    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByText("Choose a time in the future.").first().waitFor();
+
+    await page.getByLabel("Publish at").fill("2090-01-15T09:30");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    expect((await text("/plan-ahead")).status).toBe(404);
+
+    await page.reload();
+    await page.getByRole("heading", { name: "Edit: Plan ahead", level: 1 }).waitFor();
+    expect(await page.getByLabel(/^Scheduled/).isChecked()).toBe(true);
+    expect(await page.getByLabel("Publish at").inputValue()).toBe("2090-01-15T09:30");
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    expect(
+      result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`),
+    ).toEqual([]);
+    await page.goto(site.base + "/admin/pages");
+    await page
+      .getByRole("row", { name: /Plan ahead/ })
+      .getByText("scheduled")
+      .waitFor();
+
+    // Back to a draft takes the time away.
+    await page.getByRole("link", { name: "Plan ahead" }).click();
+    await page.getByRole("heading", { name: "Edit: Plan ahead", level: 1 }).waitFor();
+    await page.getByLabel("Draft (only you see it)").check({ force: true });
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    expect(
+      (await db.run("select scheduled_at from entries where title = 'Plan ahead'"))[0]![
+        "scheduled_at"
+      ],
+    ).toBeNull();
+    await page.close();
+  });
+
+  test("a scheduled page goes live by itself at its time, and the copies list says so", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await addPageNamed(page, "Goes live");
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Scheduled words");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    expect((await text("/goes-live")).status).toBe(404);
+    // The screen's time box has minutes; to see the job work in seconds the test sends the time itself.
+    const saved = (
+      await db.run("select id, revision, body from entries where title = 'Goes live'")
+    )[0]!;
+    const body = (
+      typeof saved["body"] === "string" ? JSON.parse(saved["body"]) : saved["body"]
+    ) as {
+      blocks: unknown[];
+    };
+    const status_ = await page.evaluate(
+      async ([id, revision, blocks, at]) => {
+        const response = await fetch(`/api/admin/entries/${id}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: "Goes live",
+            slugPart: "goes-live",
+            status: "scheduled",
+            scheduledAt: at,
+            blocks,
+            revision,
+          }),
+        });
+        return response.status;
+      },
+      [
+        saved["id"],
+        Number(saved["revision"]),
+        body.blocks,
+        new Date(Date.now() + 2500).toISOString(),
+      ] as const,
+    );
+    expect(status_).toBe(200);
+    expect((await text("/goes-live")).status).toBe(404); // not yet
+
+    await expect
+      .poll(async () => (await text("/goes-live")).status, { timeout: 40_000, interval: 500 })
+      .toBe(200);
+    expect((await text("/goes-live")).body).toContain("Scheduled words");
+    const live = (
+      await db.run(
+        "select status, scheduled_at, published_at from entries where title = 'Goes live'",
+      )
+    )[0]!;
+    expect(live["status"]).toBe("published");
+    expect(live["scheduled_at"]).toBeNull();
+    expect(live["published_at"]).not.toBeNull();
+
+    await page.reload();
+    await copies(page).first().waitFor();
+    expect(await copies(page).first().textContent()).toContain("Published on schedule");
+    await page.close();
+  });
+
+  test("a contributor cannot schedule, and does not see the choice", async () => {
+    const page = await browser.newPage();
+    await signIn(page, cara);
+    await addPageNamed(page, "Cara's draft");
+    expect(await page.getByLabel(/^Scheduled/).count()).toBe(0);
+    const id = page.url().split("/").pop()!;
+    const code = await page.evaluate(
+      async ([entry, at]) => {
+        const response = await fetch(`/api/admin/entries/${entry}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: "Cara's draft",
+            slugPart: "caras-draft",
+            status: "scheduled",
+            scheduledAt: at,
+            blocks: [],
+            revision: 1,
+          }),
+        });
+        return response.status;
+      },
+      [id, new Date(Date.now() + 86_400_000).toISOString()] as const,
+    );
+    expect(code).toBe(403);
     await page.close();
   });
 
