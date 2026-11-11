@@ -1,13 +1,22 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
 import axe from "axe-core";
+import sharp from "sharp";
 import { chromium, type Browser } from "playwright-core";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
@@ -1034,5 +1043,367 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       ).toEqual([]);
       await page.close();
     }
+  });
+});
+
+// Uploads through the real server: the upload route, the background job, the file route and its headers, who may do
+// what, and the limits (spec 09: MD-01 to MD-07, MD-20, MD-21, MD-30 (without the screen), MD-31, MD-35, MD-36).
+describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  let uploads = "";
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  let ownerApi: Page["context"] extends () => infer C
+    ? C extends { request: infer R }
+      ? R
+      : never
+    : never;
+  let caraApi: typeof ownerApi;
+
+  const jpeg = (w: number, h: number) =>
+    sharp({ create: { width: w, height: h, channels: 3, background: { r: 30, g: 120, b: 200 } } })
+      .jpeg()
+      .toBuffer();
+
+  beforeAll(async () => {
+    const root = mkdtempSync(join(tmpdir(), "oks-media-site-"));
+    uploads = join(root, "uploads");
+    db = await openSqlite(join(root, "site.sqlite"));
+    site = await startSite("sqlite", db, {
+      OKS_SECRET: "s".repeat(40),
+      OKS_UPLOADS_DIR: uploads,
+    });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: false,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'contributor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+    const signIn = async (who: typeof owner) => {
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(who.email);
+      await page.getByLabel(/^Password/).fill(who.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      return page;
+    };
+    ownerApi = (await signIn(owner)).context().request;
+    caraApi = (await signIn(cara)).context().request;
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const send = (
+    api: typeof ownerApi,
+    name: string,
+    buffer: Buffer | Uint8Array,
+    mimeType = "application/octet-stream",
+  ) =>
+    api.post(site.base + "/api/admin/media", {
+      multipart: { file: { name, mimeType, buffer: Buffer.from(buffer) } },
+    });
+  const item = async (id: string) =>
+    (await (await ownerApi.get(site.base + `/api/admin/media/${id}`)).json()) as {
+      item: {
+        status: string;
+        url: string;
+        variants: { width: number; format: string; url: string }[];
+        alt: string;
+        blurPlaceholder: string | null;
+      };
+      usedIn: unknown[];
+      canEdit: boolean;
+    };
+  const ready = async (id: string) => {
+    let last = await item(id);
+    for (let i = 0; i < 100 && last.item.status === "processing"; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      last = await item(id);
+    }
+    return last;
+  };
+
+  test("a photo is uploaded, its sizes are made in the background, and every file is served with the protective headers", async () => {
+    const response = await send(ownerApi, "My Photo é.JPG", await jpeg(900, 450), "image/jpeg");
+    expect(response.status()).toBe(201);
+    const made = (await response.json()) as {
+      id: string;
+      status: string;
+      url: string;
+      fileName: string;
+    };
+    expect(made.fileName).toBe("My-Photo-é.jpg");
+    expect(["processing", "ready"]).toContain(made.status);
+
+    const done = await ready(made.id);
+    expect(done.item.status).toBe("ready");
+    expect(done.item.blurPlaceholder).toMatch(/^data:image\/webp;base64,/);
+    expect(done.item.variants.map((v) => `${v.width}.${v.format}`)).toEqual([
+      "320.avif",
+      "320.webp",
+      "640.avif",
+      "640.webp",
+      "900.avif",
+      "900.webp",
+    ]);
+
+    // The original: right type, safe headers, the picture itself.
+    const original = await fetch(site.base + made.url);
+    expect(original.status).toBe(200);
+    expect(original.headers.get("content-type")).toBe("image/jpeg");
+    expect(original.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(original.headers.get("content-disposition")).toMatch(
+      /^inline; filename\*=UTF-8''My-Photo-%C3%A9\.jpg$/,
+    );
+    expect(original.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(original.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const meta = await sharp(Buffer.from(await original.arrayBuffer())).metadata();
+    expect({ w: meta.width, h: meta.height }).toEqual({ w: 900, h: 450 });
+
+    // A size.
+    const small = done.item.variants.find((v) => v.width === 320 && v.format === "avif")!;
+    const sized = await fetch(site.base + small.url);
+    expect(sized.status).toBe(200);
+    expect(sized.headers.get("content-type")).toBe("image/avif");
+    expect((await sharp(Buffer.from(await sized.arrayBuffer())).metadata()).width).toBe(320);
+  });
+
+  test("a name with a space, an accent and a percent sign is served", async () => {
+    const response = await send(
+      ownerApi,
+      "100%41 my photo é.png",
+      await sharp({ create: { width: 20, height: 20, channels: 3, background: "#c00" } })
+        .png()
+        .toBuffer(),
+      "image/png",
+    );
+    const made = (await response.json()) as { id: string; url: string };
+    const served = await fetch(site.base + made.url);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+  });
+
+  test("a PDF and an SVG are always downloaded; the SVG is cleaned first; PHP and a renamed file are refused", async () => {
+    const pdf = await send(
+      ownerApi,
+      "Menu card.pdf",
+      Buffer.from("%PDF-1.7\n%x\n"),
+      "application/pdf",
+    );
+    expect(pdf.status()).toBe(201);
+    const pdfFile = await fetch(site.base + ((await pdf.json()) as { url: string }).url);
+    expect(pdfFile.headers.get("content-type")).toBe("application/pdf");
+    expect(pdfFile.headers.get("content-disposition")).toMatch(/^attachment;/);
+
+    const svg = await send(
+      ownerApi,
+      "logo.svg",
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><script>alert(1)</script><rect width="1" height="1" onclick="x()"/></svg>',
+      ),
+      "image/svg+xml",
+    );
+    expect(svg.status()).toBe(201);
+    const svgFile = await fetch(site.base + ((await svg.json()) as { url: string }).url);
+    expect(svgFile.headers.get("content-type")).toBe("image/svg+xml");
+    expect(svgFile.headers.get("content-disposition")).toMatch(/^attachment;/);
+    const svgText = await svgFile.text();
+    expect(svgText).toContain("<rect");
+    expect(svgText).not.toMatch(/script|onclick|alert/);
+
+    const php = await send(ownerApi, "shell.php", Buffer.from("<?php system($_GET['c']); ?>"));
+    expect(php.status()).toBe(400);
+    const renamed = await send(
+      ownerApi,
+      "photo.jpg",
+      await sharp({ create: { width: 5, height: 5, channels: 3, background: "#000" } })
+        .png()
+        .toBuffer(),
+    );
+    expect(renamed.status()).toBe(400);
+    expect(((await renamed.json()) as { error: { message: string } }).error.message).toBe(
+      "The file says it is .jpg but its content is image/png.",
+    );
+  });
+
+  test("a contributor may not upload, and nobody signed out may do anything", async () => {
+    const png = await sharp({ create: { width: 5, height: 5, channels: 3, background: "#000" } })
+      .png()
+      .toBuffer();
+    expect((await send(caraApi, "a.png", png)).status()).toBe(403);
+    const anon = await fetch(site.base + "/api/admin/media", {
+      method: "POST",
+      body: (() => {
+        const f = new FormData();
+        f.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "a.png");
+        return f;
+      })(),
+    });
+    expect(anon.status).toBe(401);
+    expect((await fetch(site.base + "/api/admin/media")).status).toBe(401);
+    expect((await fetch(site.base + "/api/admin/media/01ARZ3NDEKTSV4RRFFQ69G5FAV")).status).toBe(
+      401,
+    );
+    expect(
+      (await fetch(site.base + "/api/admin/media/01ARZ3NDEKTSV4RRFFQ69G5FAV", { method: "DELETE" }))
+        .status,
+    ).toBe(401);
+    // A request that says it comes from another address is refused.
+    const foreign = await ownerApi.post(site.base + "/api/admin/media", {
+      headers: { origin: "https://evil.example" },
+      multipart: { file: { name: "a.png", mimeType: "image/png", buffer: png } },
+    });
+    expect(foreign.status()).toBe(403);
+  });
+
+  test("an unknown file, or a key that tries to climb out of the folder, is 404", async () => {
+    for (const path of [
+      "/uploads/2026/11/nothing.png",
+      "/uploads/..%2F..%2Fetc%2Fpasswd",
+      "/uploads/%2e%2e/%2e%2e/etc/passwd",
+      "/uploads/2026/11/%00.png",
+    ]) {
+      expect((await fetch(site.base + path)).status, path).toBe(404);
+    }
+  });
+
+  test("alt text is saved, and deleting removes the file and its sizes from the disk and the site", async () => {
+    const made = (await (
+      await send(ownerApi, "tmp.jpg", await jpeg(400, 300), "image/jpeg")
+    ).json()) as { id: string; url: string };
+    const done = await ready(made.id);
+    const patch = await ownerApi.patch(site.base + `/api/admin/media/${made.id}`, {
+      data: { alt: "A blue rectangle", title: "Blue", focalX: 0.5, focalY: 0.25 },
+    });
+    expect(patch.status()).toBe(200);
+    expect((await item(made.id)).item.alt).toBe("A blue rectangle");
+    expect(
+      (
+        await ownerApi.patch(site.base + `/api/admin/media/${made.id}`, {
+          data: { alt: "x".repeat(600) },
+        })
+      ).status(),
+    ).toBe(400);
+    // A contributor has no access to the library at all.
+    expect((await caraApi.get(site.base + `/api/admin/media/${made.id}`)).status()).toBe(403);
+
+    const list = (await (await ownerApi.get(site.base + "/api/admin/media?search=tmp")).json()) as {
+      items: { id: string }[];
+      total: number;
+    };
+    expect(list.items.map((i) => i.id)).toEqual([made.id]);
+
+    const sizes = done.item.variants.map((v) => v.url);
+    expect(sizes.length).toBeGreaterThan(0);
+    const deleted = await ownerApi.delete(site.base + `/api/admin/media/${made.id}`);
+    expect(deleted.status()).toBe(200);
+    expect((await fetch(site.base + made.url)).status).toBe(404);
+    for (const url of sizes) expect((await fetch(site.base + url)).status, url).toBe(404);
+    expect((await ownerApi.get(site.base + `/api/admin/media/${made.id}`)).status()).toBe(404);
+  });
+
+  test("a file in use cannot be deleted, and the answer lists the pages (MD-35)", async () => {
+    const made = (await (
+      await send(
+        ownerApi,
+        "used.png",
+        await sharp({ create: { width: 9, height: 9, channels: 3, background: "#0a0" } })
+          .png()
+          .toBuffer(),
+        "image/png",
+      )
+    ).json()) as { id: string };
+    await ready(made.id);
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const entry = String(
+      (await db.run("select id from entries where site_id = ? limit 1", [siteId]))[0]?.["id"] ?? "",
+    );
+    let entryId = entry;
+    if (!entryId) {
+      const created = await ownerApi.post(site.base + "/api/admin/entries", {
+        data: { type: "page", title: "Uses a picture" },
+      });
+      entryId = ((await created.json()) as { id: string }).id;
+    }
+    await db.run("insert into entry_media (entry_id, media_id, field) values (?, ?, ?)", [
+      entryId,
+      made.id,
+      "body",
+    ]);
+    const refused = await ownerApi.delete(site.base + `/api/admin/media/${made.id}`);
+    expect(refused.status()).toBe(409);
+    const body = (await refused.json()) as { error: { code: string }; usedIn: { id: string }[] };
+    expect(body.error.code).toBe("in_use");
+    expect(body.usedIn.map((u) => u.id)).toEqual([entryId]);
+    expect(((await item(made.id)).usedIn as unknown[]).length).toBe(1);
+  });
+
+  test("a big file (12 MB) is accepted, and the sizes are made in the background", async () => {
+    // Random pixels do not shrink when saved, so the file is bigger than the 10 MB a proxy usually allows.
+    const noise = await sharp(randomBytes(2000 * 2000 * 3), {
+      raw: { width: 2000, height: 2000, channels: 3 },
+    })
+      .png({ compressionLevel: 1 })
+      .toBuffer();
+    expect(noise.length).toBeGreaterThan(10 * 1024 * 1024);
+    const response = await send(ownerApi, "big.png", noise, "image/png");
+    expect(response.status()).toBe(201);
+    const made = (await response.json()) as { id: string };
+    const done = await ready(made.id);
+    expect(done.item.status).toBe("ready");
+  });
+
+  test("a file over the limit (26 MB) is refused", async () => {
+    const response = await send(
+      ownerApi,
+      "huge.pdf",
+      Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(26 * 1024 * 1024)]),
+      "application/pdf",
+    );
+    expect(response.status()).toBe(400);
+    expect(((await response.json()) as { error: { message: string } }).error.message).toMatch(
+      /too big/,
+    );
+  });
+
+  test("the folder holds only what the library knows: no stray or temporary files", async () => {
+    const rows = await db.run("select storage_key from media");
+    const variants = await db.run("select storage_key from media_variants");
+    const known = new Set([...rows, ...variants].map((r) => String(r["storage_key"])));
+    const onDisk: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) walk(join(dir, e.name));
+        else onDisk.push(relative(uploads, join(dir, e.name)).split(sep).join("/"));
+      }
+    };
+    walk(uploads);
+    expect(onDisk.filter((f) => !known.has(f))).toEqual([]);
+    expect(onDisk.some((f) => f.endsWith(".tmp"))).toBe(false);
   });
 });

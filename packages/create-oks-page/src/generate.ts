@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|test-form|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -161,6 +161,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/entries/[id]/route.ts",
       content: `export { PUT } from ${from("api-entry")};\n`,
+    },
+    {
+      path: "app/api/admin/media/route.ts",
+      content: `export { GET, POST } from ${from("api-media")};\n`,
+    },
+    {
+      path: "app/api/admin/media/[id]/route.ts",
+      content: `export { GET, PATCH, DELETE } from ${from("api-media-item")};\n`,
+    },
+    {
+      path: "app/uploads/[...key]/route.ts",
+      content: `export { GET } from ${from("api-uploads")};\n`,
     },
     { path: "app/api/setup/route.ts", content: `export { POST } from ${from("api-setup")};\n` },
     {

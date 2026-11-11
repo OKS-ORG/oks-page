@@ -15,6 +15,10 @@
   "dependencies": {
     "@oks-page/content-safety": "workspace:*",
     "@oks-page/db": "workspace:*",
+    "@oks-page/media": "workspace:*",
     "@oks-page/renderer": "workspace:*"
+  },
+  "devDependencies": {
+    "sharp": "0.35.5"
   }
 }

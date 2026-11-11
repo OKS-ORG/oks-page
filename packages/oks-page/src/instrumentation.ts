@@ -8,4 +8,16 @@ export async function register(): Promise<void> {
   const { migrateDatabase } = await import("./db");
   const applied = await migrateDatabase();
   if (applied.length > 0) console.log(`[oks] Applied ${applied.length} database migration(s).`);
+  // Image sizes that were being made when the last server stopped are queued again, and waiting ones are run.
+  try {
+    const [{ recoverStaleJobs }, { getRunner }, { kickMediaJobs }] = await Promise.all([
+      import("@oks-page/core"),
+      import("./db"),
+      import("./uploads"),
+    ]);
+    await recoverStaleJobs(getRunner());
+    kickMediaJobs();
+  } catch (error) {
+    console.error("[oks] Could not start the background jobs:", error);
+  }
 }

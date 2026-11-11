@@ -1,5 +1,12 @@
 {
-  "removed": ["proxy.ts", "app/api", "app/not-found-handler", "app/test-form", "app/admin"],
+  "removed": [
+    "proxy.ts",
+    "app/api",
+    "app/not-found-handler",
+    "app/test-form",
+    "app/admin",
+    "app/uploads"
+  ],
   "replaced": {
     "app/[[...slug]]/page.tsx": "export/page.tsx"
   }

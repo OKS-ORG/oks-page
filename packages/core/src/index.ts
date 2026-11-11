@@ -3,3 +3,5 @@ export * from "./content.js";
 export * from "./roles.js";
 export * from "./setup.js";
 export * from "./starter.js";
+export * from "./jobs.js";
+export * from "./media.js";

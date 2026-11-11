@@ -54,6 +54,8 @@ export function withOksPage(config: NextConfig = {}): NextConfig {
       ...((own["serverExternalPackages"] as string[] | undefined) ?? []),
       "better-sqlite3",
       "pg",
+      "sharp",
+      "jsdom",
     ]),
     transpilePackages: unique([...(config.transpilePackages ?? []), name]),
     turbopack: {

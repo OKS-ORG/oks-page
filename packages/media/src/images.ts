@@ -1,7 +1,8 @@
 // Spec 09 section 6: images. Sizes, upright photos, no metadata, a blur
 // placeholder, and a refusal of image bombs and cut-off files.
 
-import sharp, { type Metadata } from "sharp";
+import type SharpFactory from "sharp";
+import type { Metadata } from "sharp";
 import { DEFAULT_MAX_PIXELS } from "./check.js";
 
 /** Variant widths. Never wider than the original. */
@@ -44,6 +45,12 @@ function limitMessage(max: number): string {
   return `The image has too many pixels. The most allowed is ${Math.floor(max / 1_000_000)} megapixels.`;
 }
 
+type Sharp = typeof SharpFactory;
+let sharpLoaded: Promise<Sharp> | null = null;
+// sharp is a large native library: it is loaded when the first image arrives, not when the site starts.
+const loadSharp = (): Promise<Sharp> =>
+  (sharpLoaded ??= import("sharp").then((m) => m.default as unknown as Sharp));
+
 /** Runs the image work. Any failure while decoding means the file is damaged. */
 async function guarded<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -56,7 +63,7 @@ async function guarded<T>(work: () => Promise<T>): Promise<T> {
 
 async function open(bytes: Uint8Array, max: number) {
   // Only the header is read here, so a forged size is refused before any decoding.
-  const img = sharp(bytes, { limitInputPixels: false, failOn: "error" });
+  const img = (await loadSharp())(bytes, { limitInputPixels: false, failOn: "error" });
   let meta: Metadata;
   try {
     meta = await img.metadata();
@@ -87,7 +94,7 @@ export async function prepareImage(
   let original = bytes;
   if (meta.format === "jpeg") {
     try {
-      let pipe = sharp(bytes, { limitInputPixels: max, failOn: "error" }).rotate();
+      let pipe = (await loadSharp())(bytes, { limitInputPixels: max, failOn: "error" }).rotate();
       if (options.keepMetadata) pipe = pipe.keepMetadata();
       original = new Uint8Array(await pipe.jpeg({ quality: 92, mozjpeg: false }).toBuffer());
     } catch (error) {
@@ -118,7 +125,7 @@ export async function makeVariants(
     const out: Variant[] = [];
     for (const w of variantWidths(width)) {
       for (const format of VARIANT_FORMATS) {
-        let pipe = sharp(bytes, { limitInputPixels: max, failOn: "error" })
+        let pipe = (await loadSharp())(bytes, { limitInputPixels: max, failOn: "error" })
           .rotate()
           .resize({ width: w, withoutEnlargement: true });
         if (options.keepMetadata) pipe = pipe.keepMetadata();
@@ -138,8 +145,8 @@ export async function makeBlurPlaceholder(
 ): Promise<string> {
   const max = options.maxPixels ?? DEFAULT_MAX_PIXELS;
   await open(bytes, max);
-  const tiny = await guarded(() =>
-    sharp(bytes, { limitInputPixels: max, failOn: "error", pages: 1 })
+  const tiny = await guarded(async () =>
+    (await loadSharp())(bytes, { limitInputPixels: max, failOn: "error", pages: 1 })
       .rotate()
       .resize({ width: 16 })
       .webp({ quality: 40 })

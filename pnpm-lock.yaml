@@ -69,6 +69,9 @@ importers:
       playwright-core:
         specifier: ^1.64.1
         version: 1.64.1
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@22.20.5)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -166,9 +169,16 @@ importers:
       '@oks-page/db':
         specifier: workspace:*
         version: link:../db
+      '@oks-page/media':
+        specifier: workspace:*
+        version: link:../media
       '@oks-page/renderer':
         specifier: workspace:*
         version: link:../renderer
+    devDependencies:
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@22.20.5)
 
   packages/create-oks-page:
     devDependencies:
@@ -233,6 +243,9 @@ importers:
       '@oks-page/db':
         specifier: workspace:*
         version: link:../db
+      '@oks-page/media':
+        specifier: workspace:*
+        version: link:../media
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3

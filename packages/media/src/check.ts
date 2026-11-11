@@ -106,7 +106,8 @@ export interface CheckOptions {
 }
 
 export type CheckResult =
-  { ok: true; type: FileType; fileName: string } | { ok: false; reason: string };
+  | { ok: true; type: FileType; fileName: string }
+  | { ok: false; reason: string; forbidden?: boolean };
 
 const refuse = (reason: string): CheckResult => ({ ok: false, reason });
 
@@ -127,7 +128,7 @@ export function checkUpload(name: string, bytes: Uint8Array, options: CheckOptio
   }
   if (!found) return refuse("This kind of file is not allowed.");
   if (found.kind === "svg" && !options.canUploadSvg) {
-    return refuse("You are not allowed to upload SVG files.");
+    return { ok: false, reason: "You are not allowed to upload SVG files.", forbidden: true };
   }
   const { base, ext } = cleanFileName(name);
   const fine = [found.ext, ...(ALSO_OK[found.ext] ?? [])];
