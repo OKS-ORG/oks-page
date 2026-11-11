@@ -1406,4 +1406,243 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     expect(onDisk.filter((f) => !known.has(f))).toEqual([]);
     expect(onDisk.some((f) => f.endsWith(".tmp"))).toBe(false);
   });
+
+  // ---- the screens ---------------------------------------------------------------------------------------------
+  const ownerPage = async (width = 1280) => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    await page.context().addCookies((await ownerApi.storageState()).cookies);
+    return page;
+  };
+  const png = (color = "#c00", w = 30, h = 20) =>
+    sharp({ create: { width: w, height: h, channels: 3, background: color } })
+      .png()
+      .toBuffer();
+  const uploadVia = async (name: string, color = "#c00") =>
+    (await (await send(ownerApi, name, await png(color), "image/png")).json()) as {
+      id: string;
+      url: string;
+    };
+  const openLibrary = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
+    await page.goto(site.base + "/admin/media");
+    await page.getByRole("heading", { name: "Media", level: 1 }).waitFor();
+  };
+  const violations = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("the library lists files, searches, filters by type, uploads with the button, and saves alt text that is there after a reload", async () => {
+    await uploadVia("Sunset beach.png", "#f80");
+    await send(ownerApi, "Report.pdf", Buffer.from("%PDF-1.7\n%x\n"), "application/pdf");
+    const page = await ownerPage();
+    await openLibrary(page);
+    await page.getByRole("link", { name: "Media", exact: true }).first().waitFor(); // the menu has the new entry
+    await page.getByRole("option", { name: /^Sunset-beach\.png/ }).waitFor();
+    await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
+
+    await page.getByRole("searchbox", { name: "Search media" }).fill("report");
+    await expect.poll(() => page.getByRole("option", { name: /^Sunset-beach/ }).count()).toBe(0);
+    await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
+    await page.getByRole("searchbox", { name: "Search media" }).fill("");
+    await page.getByRole("button", { name: "Images", exact: true }).click();
+    await expect.poll(() => page.getByRole("option", { name: /^Report/ }).count()).toBe(0);
+    await page.getByRole("button", { name: "All", exact: true }).click();
+    await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
+
+    // Upload with the button: the file shows, is picked, and its panel opens.
+    await page
+      .locator("input[type=file]")
+      .first()
+      .setInputFiles({
+        name: "Fresh upload.png",
+        mimeType: "image/png",
+        buffer: await png("#0a0"),
+      });
+    await page.getByText("Uploaded Fresh upload.png.").waitFor();
+    await page.getByRole("option", { name: /^Fresh-upload\.png/ }).waitFor();
+    await page.getByRole("heading", { name: "Fresh-upload.png", level: 2 }).waitFor();
+    // Making the sizes can take a while when the whole suite runs at once.
+    await expect
+      .poll(() => page.getByText("Making the smaller sizes…").count(), { timeout: 60_000 })
+      .toBe(0);
+
+    await page.getByRole("textbox", { name: "Alt text" }).fill("A green square");
+    await page.getByRole("button", { name: "Save details" }).click();
+    await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
+    await openLibrary(page);
+    await page.getByRole("option", { name: /^Fresh-upload\.png/ }).click();
+    await expect
+      .poll(() => page.getByRole("textbox", { name: "Alt text" }).inputValue())
+      .toBe("A green square");
+    await page.close();
+  });
+
+  test("a refused file shows the reason in words, and nothing is added", async () => {
+    const page = await ownerPage();
+    await openLibrary(page);
+    const before = await page.getByRole("option").count();
+    await page
+      .locator("input[type=file]")
+      .first()
+      .setInputFiles({
+        name: "fake.png",
+        mimeType: "image/png",
+        buffer: Buffer.from("<?php echo 1; ?>"),
+      });
+    await page.getByRole("alert").filter({ hasText: "fake.png was not uploaded" }).waitFor();
+    expect(await page.getByRole("alert").first().innerText()).toContain(
+      "This kind of file is not allowed.",
+    );
+    expect(await page.getByRole("option").count()).toBe(before);
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    expect(await page.getByRole("alert").filter({ hasText: "fake.png" }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("delete asks first; a file that a page uses stays and the page is listed", async () => {
+    const doomed = await uploadVia("Doomed.png");
+    const busy = await uploadVia("Busy.png", "#00c");
+    const created = await ownerApi.post(site.base + "/api/admin/entries", {
+      data: { type: "page", title: "Uses Busy" },
+    });
+    const pageId = ((await created.json()) as { id: string }).id;
+    await db.run("insert into entry_media (entry_id, media_id, field) values (?, ?, ?)", [
+      pageId,
+      busy.id,
+      "body",
+    ]);
+
+    const page = await ownerPage();
+    await openLibrary(page);
+    await page.getByRole("option", { name: /^Doomed\.png/ }).click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("alertdialog", { name: "Delete this file?" }).waitFor();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    expect((await fetch(site.base + doomed.url)).status).toBe(200);
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("button", { name: "Delete file" }).click();
+    await expect.poll(() => page.getByRole("option", { name: /^Doomed\.png/ }).count()).toBe(0);
+    await expect.poll(async () => (await fetch(site.base + doomed.url)).status).toBe(404);
+
+    await page.getByRole("option", { name: /^Busy\.png/ }).click();
+    await page.getByRole("link", { name: "Uses Busy" }).waitFor(); // the Used-in list
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("button", { name: "Delete file" }).click();
+    await page.getByText("This file is in use").waitFor();
+    expect(await page.getByRole("option", { name: /^Busy\.png/ }).count()).toBe(1);
+    expect((await fetch(site.base + busy.url)).status).toBe(200);
+    await page.close();
+  });
+
+  test("in the editor: insert an image from the library, upload one in the same window, save, publish, and the public page shows both", async () => {
+    const first = await uploadVia("Gallery one.png", "#808");
+    const created = await ownerApi.post(site.base + "/api/admin/entries", {
+      data: { type: "page", title: "Gallery page" },
+    });
+    const pageId = ((await created.json()) as { id: string }).id;
+    const page = await ownerPage();
+    await page.goto(site.base + `/admin/pages/${pageId}`);
+    await page.getByRole("heading", { name: "Edit: Gallery page", level: 1 }).waitFor();
+
+    await page.getByRole("button", { name: "Insert image from the library" }).click();
+    await page.getByRole("dialog", { name: "Insert an image from the library" }).waitFor();
+    await page.getByRole("option", { name: /^Gallery-one\.png/ }).click();
+    await page.getByRole("button", { name: "Insert image", exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "detached" });
+    await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
+
+    // A second picture, uploaded from the window: it is inserted at once.
+    await page.getByRole("button", { name: "Insert image from the library" }).click();
+    await page
+      .getByRole("dialog")
+      .locator("input[type=file]")
+      .setInputFiles({ name: "Gallery two.png", mimeType: "image/png", buffer: await png("#088") });
+    await page.getByRole("dialog").waitFor({ state: "detached" });
+    await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(1);
+
+    await page.getByLabel("Published (everyone sees it)").check({ force: true });
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect
+      .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
+      .toBe("Saved.");
+
+    const html = await (await fetch(site.base + "/gallery-page")).text();
+    expect(html).toContain(`src="${first.url}"`);
+    expect(html).toMatch(/src="\/uploads\/[^"]*Gallery-two\.png"/);
+    for (const src of [...html.matchAll(/src="(\/uploads\/[^"]+)"/g)].map((m) => m[1]!)) {
+      expect((await fetch(site.base + src)).status, src).toBe(200);
+    }
+    // Both files now say which page uses them, so neither can be deleted by mistake.
+    expect(((await item(first.id)).usedIn as { title: string }[]).map((u) => u.title)).toEqual([
+      "Gallery page",
+    ]);
+    expect((await ownerApi.delete(site.base + `/api/admin/media/${first.id}`)).status()).toBe(409);
+    await page.close();
+  });
+
+  test("in the editor: a file chosen in the image block is stored in the library", async () => {
+    const created = await ownerApi.post(site.base + "/api/admin/entries", {
+      data: { type: "page", title: "Block upload" },
+    });
+    const pageId = ((await created.json()) as { id: string }).id;
+    const page = await ownerPage();
+    await page.goto(site.base + `/admin/pages/${pageId}`);
+    await page.getByRole("heading", { name: "Edit: Block upload", level: 1 }).waitFor();
+    await page.locator("[contenteditable=true]").first().click();
+    await page.getByRole("button", { name: "Turn into another block type" }).click();
+    await page.getByRole("menuitemradio", { name: "Image" }).click();
+    const input = page.locator(".oks-entry-editor input[type=file]").first();
+    await input.waitFor({ state: "attached" });
+    await input.setInputFiles({
+      name: "From block.png",
+      mimeType: "image/png",
+      buffer: await png("#444"),
+    });
+    await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
+    const src = await page.locator(".oks-entry-editor img").first().getAttribute("src");
+    expect(src).toMatch(/^\/uploads\/.*From-block\.png$/);
+    expect((await fetch(site.base + src!)).status).toBe(200);
+    await page.close();
+  });
+
+  test("the library and the picker have no accessibility violations on a wide and a narrow screen", async () => {
+    await uploadVia("Axe check.png", "#369");
+    for (const width of [1280, 390]) {
+      const page = await ownerPage(width);
+      await openLibrary(page);
+      await page.getByRole("option", { name: /^Axe-check\.png/ }).click();
+      await page.getByRole("heading", { name: "Axe-check.png", level: 2 }).waitFor();
+      // Making the sizes can take a while when the whole suite runs at once.
+      await expect
+        .poll(() => page.getByText("Making the smaller sizes…").count(), { timeout: 60_000 })
+        .toBe(0);
+      expect(await violations(page), `library ${width}px`).toEqual([]);
+
+      const created = await ownerApi.post(site.base + "/api/admin/entries", {
+        data: { type: "page", title: `Axe page ${width}` },
+      });
+      const pageId = ((await created.json()) as { id: string }).id;
+      await page.goto(site.base + `/admin/pages/${pageId}`);
+      await page.getByRole("button", { name: "Insert image from the library" }).click();
+      await page.getByRole("dialog").waitFor();
+      await page.getByRole("dialog").getByRole("option").first().waitFor();
+      expect(await violations(page), `picker ${width}px`).toEqual([]);
+      await page.close();
+    }
+  });
+
+  test("a contributor has no library: the screen sends her back to the home screen", async () => {
+    const page = await browser.newPage();
+    await page.context().addCookies((await caraApi.storageState()).cookies);
+    await page.goto(site.base + "/admin/media");
+    await page.waitForURL(site.base + "/admin");
+    await page.close();
+  });
 });

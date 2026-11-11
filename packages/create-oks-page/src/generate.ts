@@ -139,6 +139,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("login-page")};\n`,
     },
     {
+      path: "app/admin/media/page.tsx",
+      content: `export { default, metadata } from ${from("media-page")};\n`,
+    },
+    {
       path: "app/admin/pages/page.tsx",
       content: `export { default, metadata } from ${from("pages-list-page")};\n`,
     },

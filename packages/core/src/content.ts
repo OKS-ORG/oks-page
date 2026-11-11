@@ -99,6 +99,60 @@ async function slugTaken(
   return rows.some((r) => String(r["id"]) !== exceptId);
 }
 
+const UPLOAD_PREFIX = "/uploads/";
+
+/** The keys of the uploaded files a list of blocks points at (an image, a file, a video), in any nesting. */
+export function uploadKeysIn(blocks: Block[]): string[] {
+  const keys = new Set<string>();
+  const walk = (list: Block[]) => {
+    for (const block of list) {
+      for (const name of ["src", "url"]) {
+        const value = (block.props as Record<string, unknown>)[name];
+        if (typeof value === "string" && value.startsWith(UPLOAD_PREFIX)) {
+          const path = value.slice(UPLOAD_PREFIX.length).split(/[?#]/)[0]!;
+          try {
+            keys.add(path.split("/").map(decodeURIComponent).join("/"));
+          } catch {
+            keys.add(path);
+          }
+        }
+      }
+      walk(block.children);
+    }
+  };
+  walk(blocks);
+  return [...keys];
+}
+
+/** The library files these blocks use (an original or one of its sizes), for the "Used in" list of each file. */
+async function usedMedia(
+  runner: SqlRunner,
+  siteId: string,
+  blocks: Block[],
+): Promise<{ mediaId: string; field: string }[]> {
+  const ids = new Set<string>();
+  for (const key of uploadKeysIn(blocks)) {
+    const original = (
+      await runner.all(`select "id" from "media" where "site_id" = ? and "storage_key" = ?`, [
+        siteId,
+        key,
+      ])
+    )[0];
+    if (original) {
+      ids.add(String(original["id"]));
+      continue;
+    }
+    const size = (
+      await runner.all(
+        `select v."media_id" from "media_variants" v join "media" m on m."id" = v."media_id" where m."site_id" = ? and v."storage_key" = ?`,
+        [siteId, key],
+      )
+    )[0];
+    if (size) ids.add(String(size["media_id"]));
+  }
+  return [...ids].map((mediaId) => ({ mediaId, field: "body" }));
+}
+
 /** A new draft with a title and nothing else. The address is made from the title, with -2, -3 on a clash. */
 export async function createDraft(
   runner: SqlRunner,
@@ -279,6 +333,8 @@ export async function saveContent(
       plain_text: written.plainText,
       ...(publishing && row["published_at"] == null ? { published_at: at } : {}),
     },
+    // Which library files the page uses, so a file in use is not deleted by mistake.
+    media: await usedMedia(runner, siteId, checked.body.blocks),
     now: at,
   });
   if (!saved.ok) {

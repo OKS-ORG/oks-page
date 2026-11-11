@@ -1,7 +1,7 @@
 // The entry editor (spec 03, sections 4 and 8): oks-ui's TextEditor with a Save button. The blocks are checked and
 // repaired on the server before they are stored (ADR 0019): this component only sends them and reports what was fixed.
-import { Button, TextEditor, type Block } from "oks-ui";
-import { useRef, useState } from "react";
+import { Button, TextEditor, type Block, type TextEditorHandle, type UploadHandler } from "oks-ui";
+import { useRef, useState, type ReactNode } from "react";
 
 export interface SaveResult {
   /** One entry per repair the block checks made. */
@@ -17,6 +17,17 @@ export interface EntryEditorProps {
   /** The block types this content type may hold (EC-42 is enforced on the server as well). */
   allowedBlocks?: Block["type"][];
   label?: string;
+  /** Store a file the writer adds to an image, file or video block and give back its address. */
+  onImageUpload?: UploadHandler;
+  onFileUpload?: UploadHandler;
+  onVideoUpload?: UploadHandler;
+  /** Buttons above the editor, with the tools they may use (for example "Insert image from the library"). */
+  toolbar?: (tools: EditorTools) => ReactNode;
+}
+
+export interface EditorTools {
+  /** Adds an image block at the end of the content. */
+  insertImage: (src: string, alt: string) => void;
 }
 
 type Status =
@@ -31,7 +42,12 @@ export function EntryEditor({
   onDirtyChange,
   allowedBlocks,
   label = "Content",
+  onImageUpload,
+  onFileUpload,
+  onVideoUpload,
+  toolbar,
 }: EntryEditorProps) {
+  const editor = useRef<TextEditorHandle>(null);
   const [blocks, setBlocks] = useState(initialBlocks);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const dirty = useRef(false);
@@ -50,10 +66,28 @@ export function EntryEditor({
       setStatus({ kind: "error", message: error instanceof Error ? error.message : "" });
     }
   };
+  const tools: EditorTools = {
+    insertImage: (src, alt) => {
+      const current = editor.current?.getBlocks() ?? blocks;
+      const image = {
+        id: crypto.randomUUID(),
+        type: "image",
+        props: { src, alt },
+        content: [],
+        children: [],
+      } as unknown as Block;
+      editor.current?.setBlocks([...current, image]);
+    },
+  };
   return (
     <div className="oks-entry-editor">
+      {toolbar ? <div className="oks-entry-toolbar">{toolbar(tools)}</div> : null}
       <TextEditor
+        ref={editor}
         label={label}
+        {...(onImageUpload ? { onImageUpload } : {})}
+        {...(onFileUpload ? { onFileUpload } : {})}
+        {...(onVideoUpload ? { onVideoUpload } : {})}
         value={blocks}
         {...(allowedBlocks ? { allowedBlocks } : {})}
         onChange={(next) => {

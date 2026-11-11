@@ -231,3 +231,26 @@
 .oks-footer a {
   color: inherit;
 }
+
+/* The media library: the grid and the details of the picked file, side by side on wide screens. */
+.oks-media {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.oks-media-uploads {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+.oks-media-preview {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+@media (max-width: 60rem) {
+  .oks-media {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

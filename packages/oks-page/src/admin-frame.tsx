@@ -9,6 +9,7 @@ export const NAV = [
   { key: "home", label: "Home", href: "/admin" },
   { key: "pages", label: "Pages", href: "/admin/pages" },
   { key: "posts", label: "Posts", href: "/admin/posts" },
+  { key: "media", label: "Media", href: "/admin/media" },
 ];
 
 async function signOut() {

@@ -1,9 +1,11 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor } from "@oks-page/admin";
-import { Alert, RadioGroupField, TextField } from "oks-ui";
+import { Alert, Button, RadioGroupField, TextField } from "oks-ui";
 import { useRef, useState } from "react";
 import type { Block } from "oks-ui";
+import { uploadForEditor } from "./media-client";
+import { MediaPicker } from "./media-picker";
 
 export interface EntryEditScreenProps {
   id: string;
@@ -21,6 +23,24 @@ interface SaveReply {
   repairs?: string[];
   slug?: string;
   error?: { message: string };
+}
+
+/** The "Insert image from the library" button and its window. */
+function InsertFromLibrary({ insertImage }: { insertImage: (src: string, alt: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button onPress={() => setOpen(true)}>Insert image from the library</Button>
+      <MediaPicker
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        onPick={(item) => {
+          insertImage(item.url, item.alt);
+          setOpen(false);
+        }}
+      />
+    </>
+  );
 }
 
 export function EntryEditScreen(props: EntryEditScreenProps) {
@@ -59,6 +79,10 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
       <EntryEditor
         label="Content"
         initialBlocks={props.blocks}
+        onImageUpload={uploadForEditor}
+        onFileUpload={uploadForEditor}
+        onVideoUpload={uploadForEditor}
+        toolbar={({ insertImage }) => <InsertFromLibrary insertImage={insertImage} />}
         onSave={async (blocks) => {
           setProblem(null);
           const response = await fetch(`/api/admin/entries/${props.id}`, {

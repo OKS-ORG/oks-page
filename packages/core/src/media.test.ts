@@ -8,7 +8,7 @@ import { newId } from "@oks-page/db";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { createDraft, type Actor } from "./content.js";
+import { createDraft, saveContent, uploadKeysIn, type Actor } from "./content.js";
 import { claimJob, drainJobs, enqueueJob, recoverStaleJobs, type JobHandler } from "./jobs.js";
 import {
   deleteMedia,
@@ -621,6 +621,94 @@ for (const { kind, open, skip } of openers) {
           ok: false,
           code: "not_found",
         });
+      });
+    });
+
+    describe("pages record the files they use", () => {
+      const image = (src: string, children: unknown[] = []) => ({
+        id: newId(),
+        type: "image",
+        props: { src, alt: "x" },
+        content: [],
+        children,
+      });
+      const para = (children: unknown[] = []) => ({
+        id: newId(),
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text: "hi", styles: {} }],
+        children,
+      });
+      const save = async (id: string, revision: number, blocks: unknown[]) => {
+        const r = await saveContent(db.runner, anna, siteId, id, {
+          title: "P",
+          slugPart: "p",
+          status: "draft",
+          blocks,
+          revision,
+        });
+        if (!r.ok) throw new Error(r.message);
+        return r.revision;
+      };
+      const usedBy = async (mediaId: string) => {
+        const r = await getMedia(db.runner, ctx, anna, siteId, mediaId);
+        if (!r.ok) throw new Error(r.message);
+        return r.usedIn.map((u) => u.title);
+      };
+
+      test("an image block that points at an uploaded file fills its Used-in list, and removing the block empties it", async () => {
+        const a = await upload(anna, "a.png", await png());
+        const b = await upload(anna, "b photo é.png", await png());
+        const page = await createDraft(db.runner, anna, siteId, { type: "page", title: "P" });
+        if (!page.ok) throw new Error("draft");
+        const encoded = b.url; // /uploads/2026/11/<id>-b-photo-é.png with the accent encoded
+        let revision = await save(page.id, 1, [image(a.url), para([image(encoded)])]);
+        expect(await usedBy(a.id)).toEqual(["P"]);
+        expect(await usedBy(b.id)).toEqual(["P"]);
+        // The file is now in use: it cannot be deleted.
+        expect(await deleteMedia(db.runner, ctx, anna, siteId, a.id)).toMatchObject({
+          ok: false,
+          code: "in_use",
+        });
+        revision = await save(page.id, revision, [image(a.url)]);
+        expect(await usedBy(a.id)).toEqual(["P"]);
+        expect(await usedBy(b.id)).toEqual([]);
+        await save(page.id, revision, [para()]);
+        expect(await usedBy(a.id)).toEqual([]);
+        expect((await deleteMedia(db.runner, ctx, anna, siteId, a.id)).ok).toBe(true);
+      });
+
+      test("a link to one of the sizes counts as using the file", async () => {
+        const a = await upload(anna, "a.jpg", await jpeg(700, 300));
+        await drainJobs(db.runner, handlers());
+        const got = await getMedia(db.runner, ctx, anna, siteId, a.id);
+        if (!got.ok) throw new Error("get");
+        const size = got.item.variants.find((v) => v.format === "webp")!;
+        const page = await createDraft(db.runner, anna, siteId, { type: "page", title: "P" });
+        if (!page.ok) throw new Error("draft");
+        await save(page.id, 1, [image(size.url + "?v=2")]);
+        expect(await usedBy(a.id)).toEqual(["P"]);
+      });
+
+      test("other addresses and unknown files are ignored", async () => {
+        const page = await createDraft(db.runner, anna, siteId, { type: "page", title: "P" });
+        if (!page.ok) throw new Error("draft");
+        await save(page.id, 1, [
+          image("https://example.com/uploads/2026/11/x.png"),
+          image("/uploads/2026/11/nothing.png"),
+          image("/other/a.png"),
+        ]);
+        expect(Number((await db.run("select count(*) as n from entry_media"))[0]!["n"])).toBe(0);
+      });
+
+      test("the keys are found at any depth, decoded, without a query", () => {
+        const blocks = [
+          para([image("/uploads/2026/11/a%20b.png?x=1#y"), para([image("/uploads/k/é.png")])]),
+          image("/uploads/2026/11/bad%.png"),
+        ] as unknown as Parameters<typeof uploadKeysIn>[0];
+        expect(uploadKeysIn(blocks).sort()).toEqual(
+          ["2026/11/a b.png", "2026/11/bad%.png", "k/é.png"].sort(),
+        );
       });
     });
 
