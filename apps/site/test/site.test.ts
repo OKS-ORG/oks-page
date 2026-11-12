@@ -16,6 +16,7 @@ import { extname, join, relative, sep } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
 import axe from "axe-core";
+import { generateSync } from "otplib";
 import sharp from "sharp";
 import { chromium, type Browser } from "playwright-core";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
@@ -2207,7 +2208,8 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
   test("the menu shows each person only the places they may use", async () => {
     const places = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
       // The menu is drawn in the browser, a moment after the heading: wait for its first entry.
-      await page.locator('a[href="/admin"]').first().waitFor();
+      // (Pages is in the menu of the owner and of the contributor; "/admin" alone may also be a link elsewhere.)
+      await page.locator('a[href="/admin/pages"]').first().waitFor({ state: "attached" });
       const found: string[] = [];
       for (const href of [
         "/admin",
@@ -2246,5 +2248,150 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await cara.goto(site.base + "/admin/settings/media");
     await cara.waitForURL(site.base + "/admin");
     await cara.close();
+  });
+});
+
+// Two-factor sign-in through the real server (AU-05 to AU-07 as the owner meets them, AU-41's password rule): turn it
+// on from the account screen, then sign in with an app code, with a backup code, and see a used backup code refused.
+// It has its own site, because the sign-in limit (5 tries per address) is shared by every sign-in of one site.
+describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    const root = mkdtempSync(join(tmpdir(), "oks-2fa-site-"));
+    db = await openSqlite(join(root, "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Two-factor garden",
+        starterContent: false,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const violations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+  const startSignIn = async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    return page;
+  };
+
+  test("turn it on, sign in with an app code and with a backup code, and a backup code works once", async () => {
+    // Turn it on from the account screen.
+    const first = await startSignIn();
+    await first.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await first.getByRole("link", { name: "Your account" }).click();
+    await first.getByRole("heading", { name: "Your account", level: 1 }).waitFor();
+    await first.getByLabel(/^Your password/).fill("not the password");
+    await first.getByRole("button", { name: "Turn on" }).click();
+    await first.getByRole("alert").filter({ hasText: "The password is not right." }).waitFor();
+    await first.getByLabel(/^Your password/).fill(owner.password);
+    await first.getByRole("button", { name: "Turn on" }).click();
+    await first.getByRole("img", { name: "QR code for your authenticator app" }).waitFor();
+    const secret = (await first.locator("code").first().innerText()).trim();
+    expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
+    const codes = await first
+      .getByRole("list", { name: "Backup codes" })
+      .locator("code")
+      .allInnerTexts();
+    expect(codes).toHaveLength(10);
+    expect(await violations(first), "set-up").toEqual([]);
+    // A wrong code does not finish it; a right one does.
+    await first.getByLabel("Code from the app").fill("000000");
+    await first.getByRole("button", { name: "Finish" }).click();
+    await first.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
+    await first.getByLabel("Code from the app").fill(generateSync({ secret }));
+    await first.getByRole("button", { name: "Finish" }).click();
+    await first.getByText("Two-factor sign-in is on.", { exact: true }).waitFor();
+    expect(Number((await db.run("select two_factor_enabled as e from users"))[0]!["e"])).toBe(1);
+    await first.close();
+
+    // The library allows 3 two-factor requests per 10 seconds from one address, so each group below starts in a new window.
+    const newWindow = () => new Promise((r) => setTimeout(r, 10_500));
+    await newWindow();
+
+    // Sign in again: the password is not enough; a wrong code is refused; the app code works.
+    const second = await startSignIn();
+    await second.getByLabel("Code from your authenticator app").waitFor();
+    expect(second.url()).not.toContain("/admin/login#");
+    expect(await violations(second), "code step").toEqual([]);
+    await second.getByLabel("Code from your authenticator app").fill("000000");
+    await second.getByRole("button", { name: "Sign in" }).click();
+    await second.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
+    await second.getByLabel("Code from your authenticator app").fill(generateSync({ secret }));
+    await second.getByRole("button", { name: "Sign in" }).click();
+    await second.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await second.close();
+
+    // A backup code signs in once.
+    await newWindow();
+    const third = await startSignIn();
+    await third.getByRole("button", { name: "Use a backup code instead" }).click();
+    await third.getByLabel("Backup code").fill(codes[0]!);
+    await third.getByRole("button", { name: "Sign in" }).click();
+    await third.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await third.close();
+    const fourth = await startSignIn();
+    await fourth.getByRole("button", { name: "Use a backup code instead" }).click();
+    await fourth.getByLabel("Backup code").fill(codes[0]!);
+    await fourth.getByRole("button", { name: "Sign in" }).click();
+    await fourth.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
+    expect(fourth.url()).toContain("/admin/login");
+    await fourth.close();
+
+    // Signed in again, new backup codes need the password; turning it off needs the password too.
+    await newWindow();
+    const fifth = await startSignIn();
+    await fifth.getByLabel("Code from your authenticator app").fill(generateSync({ secret }));
+    await fifth.getByRole("button", { name: "Sign in" }).click();
+    await fifth.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await fifth.goto(site.base + "/admin/account");
+    await fifth.getByRole("button", { name: "Turn off" }).waitFor();
+    // Without a password typed the button is off.
+    expect(await fifth.getByRole("button", { name: "Make new backup codes" }).isDisabled()).toBe(
+      true,
+    );
+    await fifth.getByLabel(/^Your password/).fill(owner.password);
+    await fifth.getByRole("button", { name: "Make new backup codes" }).click();
+    await fifth.getByRole("list", { name: "Backup codes" }).waitFor();
+    expect(await fifth.getByRole("list", { name: "Backup codes" }).locator("code").count()).toBe(
+      10,
+    );
+    await fifth.getByLabel(/^Your password/).fill("not the password");
+    await fifth.getByRole("button", { name: "Turn off" }).click();
+    await fifth.getByRole("alert").filter({ hasText: "The password is not right." }).waitFor();
+    expect(Number((await db.run("select two_factor_enabled as e from users"))[0]!["e"])).toBe(1);
+    await fifth.getByLabel(/^Your password/).fill(owner.password);
+    await fifth.getByRole("button", { name: "Turn off" }).click();
+    await fifth.getByText("Two-factor sign-in is off.", { exact: true }).waitFor();
+    expect(Number((await db.run("select two_factor_enabled as e from users"))[0]!["e"])).toBe(0);
+    await fifth.close();
   });
 });

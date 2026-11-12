@@ -46,7 +46,7 @@ export function AdminFrame({
       footer={{ product, version }}
     >
       <p>
-        Signed in as {user.name} ({user.email}){" "}
+        Signed in as {user.name} ({user.email}) · <a href="/admin/account">Your account</a>{" "}
         <Button onPress={() => void signOut()}>Sign out</Button>
       </p>
       {children}

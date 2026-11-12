@@ -23,7 +23,8 @@
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4",
     "oks-ui": "1.5.0",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "qrcode-generator": "^2.0.4"
   },
   "peerDependencies": {
     "next": "16.4.2",
