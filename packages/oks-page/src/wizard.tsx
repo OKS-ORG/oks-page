@@ -80,7 +80,13 @@ export function SetupWizard() {
         <h2 id="done">Your site is set up</h2>
         <p>You are signed in as {email}.</p>
         <p>
-          <a href="/admin">Open the dashboard</a> · <a href="/">View your site</a>
+          <strong>Recommended:</strong> turn on two-factor sign-in for your account. It asks for a
+          code from an app on your phone as well as your password. It takes about a minute, and you
+          can skip it and do it later on Your account.
+        </p>
+        <p>
+          <a href="/admin/account">Set up two-factor sign-in</a> ·{" "}
+          <a href="/admin">Skip for now: open the dashboard</a> · <a href="/">View your site</a>
         </p>
       </section>
     );

@@ -7,6 +7,7 @@ export * from "./jobs.js";
 export * from "./media.js";
 export * from "./media-html.js";
 export * from "./media-settings.js";
+export * from "./security.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

@@ -9,6 +9,7 @@ import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { MediaSettingsFormScreen } from "./media-settings-form";
+import { SettingsLinks } from "./settings-links";
 
 export const metadata: Metadata = { title: "Media settings", robots: { index: false } };
 
@@ -30,6 +31,7 @@ export default async function MediaSettingsPage() {
       title="Media settings"
       breadcrumbs={[{ label: "Settings" }, { label: "Media" }]}
     >
+      <SettingsLinks current="media" />
       <MediaSettingsFormScreen initial={settings} />
     </AdminFrame>
   );

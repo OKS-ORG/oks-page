@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Your account", robots: { index: fals
 export default async function AccountPage() {
   await connection();
   if (!(await isSetupDone(getRunner()))) redirect("/admin/setup");
-  const member = await signedInMember();
+  const member = await signedInMember({ allowSetup: true });
   if (!member) redirect("/admin/login");
   const actor = await actorOf(member);
   const row = (
@@ -26,7 +26,7 @@ export default async function AccountPage() {
   const enabled = row?.["two_factor_enabled"] === true || Number(row?.["two_factor_enabled"]) === 1;
   return (
     <AdminFrame
-      nav={navFor((c) => actor.can(c))}
+      nav={member.mustSetUpTwoFactor ? [] : navFor((c) => actor.can(c))}
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
@@ -34,7 +34,7 @@ export default async function AccountPage() {
       title="Your account"
       breadcrumbs={[{ label: "Your account" }]}
     >
-      <AccountScreen initialEnabled={enabled} />
+      <AccountScreen initialEnabled={enabled} required={member.mustSetUpTwoFactor} />
     </AdminFrame>
   );
 }

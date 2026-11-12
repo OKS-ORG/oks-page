@@ -620,6 +620,16 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.getByRole("button", { name: "Finish setup" }).click();
     await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
     expect(await page.getByText("signed in as anna@example.com").count()).toBe(1);
+    // Two-factor is recommended here, and can be skipped (it never blocks the owner).
+    await page.getByText("Recommended:").waitFor();
+    expect(
+      await page.getByRole("link", { name: "Set up two-factor sign-in" }).getAttribute("href"),
+    ).toBe("/admin/account");
+    expect(
+      await page
+        .getByRole("link", { name: "Skip for now: open the dashboard" })
+        .getAttribute("href"),
+    ).toBe("/admin");
 
     expect(await count("sites")).toBe(1);
     expect(await count("site_members")).toBe(1);
@@ -2392,6 +2402,40 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
     await fifth.getByRole("button", { name: "Turn off" }).click();
     await fifth.getByText("Two-factor sign-in is off.", { exact: true }).waitFor();
     expect(Number((await db.run("select two_factor_enabled as e from users"))[0]!["e"])).toBe(0);
+
+    // The rule "two-factor for administrators" (AU-37). It cannot be turned on by an administrator who has no
+    // two-factor herself.
+    await fifth.goto(site.base + "/admin/settings/security");
+    await fifth.getByRole("heading", { name: "Security settings", level: 1 }).waitFor();
+    expect(await violations(fifth), "security settings").toEqual([]);
+    await fifth.getByLabel(/^Required/).check({ force: true });
+    await fifth.getByRole("button", { name: "Save settings" }).click();
+    await fifth
+      .getByRole("alert")
+      .filter({ hasText: "Turn on two-factor sign-in for your own account first" })
+      .waitFor();
+    // With two-factor on for her (the flag is set directly here; the real set-up was tested above) it is saved.
+    await db.run("update users set two_factor_enabled = 1");
+    await fifth.getByRole("button", { name: "Save settings" }).click();
+    await fifth.getByText(/^Saved\. Administrators without two-factor/).waitFor();
+    expect(
+      String((await db.run("select value from settings where key = 'security'"))[0]!["value"]),
+    ).toContain('"requireTwoFactorForAdmins":true');
+
+    // Now her two-factor goes away: every screen and API closes, and the account screen explains.
+    await db.run("update users set two_factor_enabled = 0");
+    await fifth.goto(site.base + "/admin/pages");
+    await fifth.waitForURL(site.base + "/admin/account");
+    await fifth.getByText("Set up two-factor sign-in to continue").waitFor();
+    expect(await violations(fifth), "set up is required").toEqual([]);
+    expect((await fifth.request.get(site.base + "/api/admin/media")).status()).toBe(401);
+    await fifth.goto(site.base + "/admin/login");
+    await fifth.waitForURL(site.base + "/admin/account");
+
+    // With the rule off again, the admin opens.
+    await db.run("delete from settings where key = 'security'");
+    await fifth.goto(site.base + "/admin");
+    await fifth.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     await fifth.close();
   });
 });

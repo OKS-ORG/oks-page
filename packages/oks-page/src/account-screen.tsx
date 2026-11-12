@@ -46,7 +46,14 @@ function BackupCodes({ codes }: { codes: string[] }) {
   );
 }
 
-export function AccountScreen({ initialEnabled }: { initialEnabled: boolean }) {
+export function AccountScreen({
+  initialEnabled,
+  required = false,
+}: {
+  initialEnabled: boolean;
+  /** The site requires two-factor for administrators and this administrator has not set it up yet. */
+  required?: boolean;
+}) {
   const [enabled, setEnabled] = useState(initialEnabled);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -140,6 +147,18 @@ export function AccountScreen({ initialEnabled }: { initialEnabled: boolean }) {
   return (
     <section aria-label="Two-factor sign-in">
       <h2>Two-factor sign-in</h2>
+      {required && !enabled ? (
+        <Alert
+          color="warning"
+          title="Set up two-factor sign-in to continue"
+          description="This site requires two-factor sign-in for administrators. Turn it on below. The rest of the admin opens when it is on."
+        />
+      ) : null}
+      {required && enabled ? (
+        <p>
+          <a href="/admin">Continue to the dashboard</a>
+        </p>
+      ) : null}
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
       <p role="status">{note}</p>
 

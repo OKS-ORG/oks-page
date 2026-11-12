@@ -12,7 +12,9 @@ export const metadata: Metadata = { title: "Sign in", robots: { index: false } }
 export default async function LoginPage() {
   await connection();
   if (!(await isSetupDone(getRunner()))) redirect("/admin/setup");
-  if (await signedInMember()) redirect("/admin");
+  // An administrator who must still set up two-factor (the site's rule) goes to their account screen to do it.
+  const member = await signedInMember({ allowSetup: true });
+  if (member) redirect(member.mustSetUpTwoFactor ? "/admin/account" : "/admin");
   return (
     <main>
       <h1>Sign in</h1>
