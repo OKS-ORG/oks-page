@@ -14,12 +14,13 @@ describe("the menu for each default role", () => {
       "pages",
       "posts",
       "taxonomies",
+      "menus",
       "media",
       "settings",
     ]);
   });
   test("editor manages categories and tags but has no settings", () => {
-    expect(keysOf("editor")).toEqual(["home", "pages", "posts", "taxonomies", "media"]);
+    expect(keysOf("editor")).toEqual(["home", "pages", "posts", "taxonomies", "menus", "media"]);
   });
   test("author writes and uploads, but has no settings", () => {
     expect(keysOf("author")).toEqual(["home", "pages", "posts", "media"]);

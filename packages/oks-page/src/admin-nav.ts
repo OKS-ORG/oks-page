@@ -28,6 +28,7 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     href: "/admin/categories",
     needs: ["content.edit_any"],
   },
+  { key: "menus", label: "Menus", href: "/admin/menus", needs: ["menus.manage"] },
   {
     key: "media",
     label: "Media",

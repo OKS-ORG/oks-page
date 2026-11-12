@@ -1341,6 +1341,113 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.close();
   });
 
+  test("menus: add a page, a category and a link, nest and move them, save, see them after a reload; an old version is refused; signed-out is refused", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.getByRole("link", { name: "Menus", exact: true }).first().click();
+    await page.getByRole("heading", { name: "Menus", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Header menu", level: 2 }).waitFor();
+    await page.getByText("This menu is empty.").waitFor();
+
+    // A page, a link and a category (the starter site has these pages and the Uncategorised category).
+    await page.getByLabel("Page or post").selectOption({ label: "Page: About" });
+    await page.getByRole("button", { name: "Add to menu" }).click();
+    await page.getByLabel("Add", { exact: true }).selectOption("url");
+    await page.getByLabel("Label of the link").fill("Our shop");
+    await page.getByLabel("Address of the link").fill("https://shop.example.com");
+    await page.getByRole("button", { name: "Add to menu" }).click();
+    await page.getByLabel("Add", { exact: true }).selectOption("term");
+    await page.getByLabel("Category or tag").selectOption({ label: "Category: Uncategorised" });
+    await page.getByRole("button", { name: "Add to menu" }).click();
+    expect(await page.getByLabel("Label", { exact: true }).count()).toBe(3);
+
+    // A bad address is refused in words.
+    await page.getByLabel("Add", { exact: true }).selectOption("url");
+    await page.getByLabel("Label of the link").fill("Bad");
+    await page.getByLabel("Address of the link").fill("javascript:alert(1)");
+    await page.getByRole("button", { name: "Add to menu" }).click();
+    await page.getByText("The address must start with /").waitFor();
+
+    // Move the category to the top, and rename the page's item. The first item cannot move up or become a sub-item.
+    await page.getByRole("button", { name: "Move up: Uncategorised" }).click();
+    await page.getByRole("button", { name: "Move up: Uncategorised" }).click();
+    expect(await page.getByRole("button", { name: "Move up: Uncategorised" }).isDisabled()).toBe(
+      true,
+    );
+    expect(
+      await page.getByRole("button", { name: "Make a sub-item: Uncategorised" }).isDisabled(),
+    ).toBe(true);
+    await page.getByLabel("Label", { exact: true }).nth(1).fill("About us");
+    await page.getByRole("button", { name: "Save menu" }).click();
+    await page.getByText("Menu saved.").waitFor();
+
+    const saved = async () =>
+      JSON.parse(
+        String((await db.run("select items from menus where key = 'primary'"))[0]!["items"]),
+      ) as { label: string; kind: string; children: { label: string }[] }[];
+    let tree = await saved();
+    expect(tree.map((i) => i.label)).toEqual(["Uncategorised", "About us", "Our shop"]);
+
+    // After a reload the same menu is there, and the footer menu is separate and empty.
+    await page.reload();
+    await page.getByLabel("Label", { exact: true }).first().waitFor();
+    expect(await page.getByLabel("Label", { exact: true }).count()).toBe(3);
+    await page.getByRole("link", { name: "Footer menu" }).click();
+    await page.getByRole("heading", { name: "Footer menu", level: 2 }).waitFor();
+    await page.getByText("This menu is empty.").waitFor();
+    await page.getByRole("link", { name: "Header menu" }).click();
+    await page.getByLabel("Label", { exact: true }).first().waitFor();
+
+    // Indent "Our shop" under "About us", then move it back out; save the nested form.
+    await page.getByRole("button", { name: "Make a sub-item: Our shop" }).click();
+    await page.getByRole("button", { name: "Save menu" }).click();
+    await page.getByText("Menu saved.").waitFor();
+    tree = await saved();
+    expect(tree[1]!.children.map((c) => c.label)).toEqual(["Our shop"]);
+
+    // Someone else saves in between: this save is refused with a plain message and a Reload button.
+    await db.run("update menus set updated_at = updated_at + 5000 where key = 'primary'");
+    await page.getByRole("button", { name: "Move out: Our shop" }).click();
+    await page.getByRole("button", { name: "Save menu" }).click();
+    await page.getByText("Someone saved this menu while you were editing.").waitFor();
+    await page.getByRole("button", { name: "Reload the menu" }).waitFor();
+    tree = await saved();
+    expect(tree[1]!.children.map((c) => c.label)).toEqual(["Our shop"]); // unchanged
+
+    // Accessibility on a wide and a narrow screen.
+    await page.reload();
+    await page.getByLabel("Label", { exact: true }).first().waitFor();
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `menus ${width}px`,
+      ).toEqual([]);
+    }
+    await page.close();
+
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await fetch(site.base + "/api/admin/menus/primary", {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body: "{}" } : {}),
+      });
+      expect(response.status, method).toBe(401);
+    }
+    const visitor = await browser.newPage();
+    await visitor.goto(site.base + "/admin/menus");
+    await visitor.waitForURL("**/admin/login");
+    await visitor.close();
+  });
+
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill(title);
