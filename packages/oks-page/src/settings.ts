@@ -1,4 +1,9 @@
 // Site settings the proxy needs on every request, read at most once per few seconds in each process.
+import {
+  MAINTENANCE_SETTINGS_KEY,
+  readMaintenanceSettings,
+  type MaintenanceSettings,
+} from "@oks-page/core";
 import { getRunner, getSiteId } from "./db";
 
 const TTL_MS = Number(process.env["OKS_SETTINGS_TTL_MS"] ?? 5000);
@@ -22,6 +27,19 @@ async function readSetting(key: string): Promise<unknown> {
   }
   cache.set(key, { value, at: Date.now() });
   return value;
+}
+
+/**
+ * Makes this process read a setting again at the next request. Used right after the settings screen saves one, so the
+ * change is live here at once; other server processes pick it up within the few seconds of the cache.
+ */
+export function forgetSetting(key: string): void {
+  cache.delete(key);
+}
+
+/** Maintenance mode (on or off, and the message for visitors). Off unless the owner turns it on. */
+export async function maintenanceSettings(): Promise<MaintenanceSettings> {
+  return readMaintenanceSettings(await readSetting(MAINTENANCE_SETTINGS_KEY));
 }
 
 /** The "I use a CDN" setting (decision D81). Off unless the owner turns it on. */

@@ -3,6 +3,7 @@
     "proxy.ts",
     "app/api",
     "app/not-found-handler",
+    "app/maintenance-handler",
     "app/test-form",
     "app/admin",
     "app/uploads"

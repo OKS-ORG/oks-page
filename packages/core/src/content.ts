@@ -25,6 +25,7 @@ const RESERVED = new Set([
   "robots.txt",
   "favicon.ico",
   "not-found-handler",
+  "maintenance-handler",
   "test-form",
 ]);
 const SLUG_PART = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

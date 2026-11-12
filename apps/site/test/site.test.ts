@@ -2995,3 +2995,148 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
     await fifth.close();
   });
 });
+
+// Maintenance mode on a site of its own, so the mode cannot disturb the other tests and the sign-in limit is fresh.
+describe.skipIf(!findBrowser())("maintenance mode", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-maint-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "m".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    // Cara is an editor: she may edit everything but not manage the settings.
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'editor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const signedIn = async (who: { email: string; password: string }) => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    return page;
+  };
+  const visit = async (path: string, cookie?: string) => {
+    const response = await fetch(site.base + path, cookie ? { headers: { cookie } } : {});
+    return { response, body: await response.text() };
+  };
+
+  test("on: visitors get a 503 page with the message, administrators see the site, editors and forged cookies do not; off: open again", async () => {
+    // Open at first.
+    expect((await visit("/about")).response.status).toBe(200);
+
+    const page = await signedIn(owner);
+    // The settings screen: the owner turns it on with a message.
+    await page.goto(site.base + "/admin/settings/maintenance");
+    await page.getByRole("heading", { name: "Maintenance settings", level: 1 }).waitFor();
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    expect(
+      result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`),
+    ).toEqual([]);
+    await page.getByText(/^On: visitors see/).click();
+    await page.getByLabel("Message for visitors").fill("Back at five.\nThank you <b>all</b>!");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByText(/Visitors now see the maintenance page/).waitFor();
+
+    // Visitors: a real 503 for every kind of address, never cached, told not to index.
+    for (const path of ["/about", "/", "/blog/hello-world", "/category/uncategorised", "/nope"]) {
+      const { response, body } = await visit(path);
+      expect(response.status, path).toBe(503);
+      expect(response.headers.get("retry-after"), path).toBe("3600");
+      expect(response.headers.get("x-robots-tag"), path).toContain("noindex");
+      expect(response.headers.get("cache-control"), path).toContain("no-store");
+      expect(body, path).toContain("<p>Back at five.</p>");
+      // The message is shown as text, never as markup.
+      expect(body, path).toContain("<p>Thank you &lt;b&gt;all&lt;/b&gt;!</p>");
+      expect(body, path).not.toContain("<b>all</b>");
+      // The page's own content is not in the answer.
+      expect(body, path).not.toContain("<article>");
+    }
+    // A made-up session cookie does not pass.
+    const forged = await visit("/about", "better-auth.session_token=forged.value");
+    expect(forged.response.status).toBe(503);
+    // The sign-in page and the API stay reachable (so the owner can turn it off).
+    expect((await visit("/admin/login")).response.status).toBe(200);
+    expect((await visit("/api/admin/settings/maintenance")).response.status).toBe(401);
+
+    // The signed-in administrator sees the real site.
+    await page.goto(site.base + "/");
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(await page.getByText("Back at five.").count()).toBe(0);
+    const real = await page.goto(site.base + "/about");
+    expect(real!.status()).toBe(200);
+    await page.getByRole("heading", { name: "About", level: 1 }).waitFor();
+
+    // An editor may not manage the settings, so she sees the maintenance page, and the settings screen is closed.
+    const editor = await signedIn(cara);
+    const blocked = await editor.goto(site.base + "/about");
+    expect(blocked!.status()).toBe(503);
+    await editor.goto(site.base + "/admin/settings/maintenance");
+    await editor.waitForURL(site.base + "/admin");
+    const put = await editor.request.put(site.base + "/api/admin/settings/maintenance", {
+      data: { enabled: false },
+      headers: { origin: site.base },
+    });
+    expect(put.status()).toBe(403);
+    await editor.close();
+
+    // Off again: open to everyone at once.
+    await page.goto(site.base + "/admin/settings/maintenance");
+    await page.getByText(/^Off: the site is open/).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByText("Saved. The site is open to everyone.").waitFor();
+    const open = await visit("/about");
+    expect(open.response.status).toBe(200);
+    expect(open.body).toContain("<h1>About</h1>");
+    await page.close();
+  });
+
+  test("the settings routes refuse signed-out requests", async () => {
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await fetch(site.base + "/api/admin/settings/maintenance", {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body: JSON.stringify({ enabled: true }) } : {}),
+      });
+      expect(response.status, method).toBe(401);
+    }
+    expect((await visit("/about")).response.status).toBe(200);
+  });
+});

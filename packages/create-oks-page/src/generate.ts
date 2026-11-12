@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|maintenance-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -121,6 +121,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/[[...slug]]/page.tsx",
       content: `export { default, generateMetadata } from ${from("site")};\n`,
+    },
+    {
+      path: "app/maintenance-handler/route.ts",
+      content: `export { GET } from ${from("maintenance-handler")};\n`,
     },
     {
       path: "app/not-found-handler/route.ts",
@@ -149,6 +153,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/admin/settings/security/page.tsx",
       content: `export { default, metadata } from ${from("settings-security-page")};\n`,
+    },
+    {
+      path: "app/admin/settings/maintenance/page.tsx",
+      content: `export { default, metadata } from ${from("settings-maintenance-page")};\n`,
     },
     {
       path: "app/admin/account/page.tsx",
@@ -217,6 +225,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/media/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-media")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/maintenance/route.ts",
+      content: `export { GET, PUT } from ${from("api-settings-maintenance")};\n`,
     },
     {
       path: "app/api/admin/settings/security/route.ts",
