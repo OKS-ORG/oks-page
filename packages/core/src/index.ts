@@ -5,6 +5,7 @@ export * from "./setup.js";
 export * from "./starter.js";
 export * from "./jobs.js";
 export * from "./media.js";
+export * from "./media-html.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

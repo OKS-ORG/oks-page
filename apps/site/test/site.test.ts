@@ -264,7 +264,21 @@ for (const { kind, skip } of openers) {
       await text(b, "/team"); // cached before the count starts
       await stats(b, true);
       await retitle(ids["about"]!, "About v3");
+      const mark = Date.now();
       await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
+      // Next.js writes the refresh to the shared table after A has answered, so wait until it is there. (Asking
+      // B at once could beat the write and read the old page: that made this test fail now and then.)
+      await expect
+        .poll(
+          async () =>
+            (
+              await db.run("select updated_at from cache_tags where tag = ?", [
+                `entry:${ids["about"]}`,
+              ])
+            ).some((r) => new Date(r["updated_at"] as string | number | Date).getTime() >= mark),
+          { timeout: 10_000, interval: 20 },
+        )
+        .toBe(true);
       await text(b, "/about");
       await text(b, "/team");
       const { loads } = await stats(b);
@@ -1985,6 +1999,57 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     ]);
     expect((await ownerApi.delete(site.base + `/api/admin/media/${first.id}`)).status()).toBe(409);
     await page.close();
+  });
+
+  test("a public page uses the image sizes and the blur, as soon as the sizes exist, and every size can be fetched", async () => {
+    const shot = await uploadVia("Responsive shot.png", "#a50");
+    const created = await ownerApi.post(site.base + "/api/admin/entries", {
+      data: { type: "page", title: "Responsive page" },
+    });
+    const pageId = ((await created.json()) as { id: string }).id;
+    const saved = await ownerApi.put(site.base + `/api/admin/entries/${pageId}`, {
+      data: {
+        title: "Responsive page",
+        slugPart: "responsive-page",
+        status: "published",
+        blocks: [
+          {
+            id: "b1",
+            type: "image",
+            props: { src: shot.url, alt: "A brown square" },
+            content: [],
+            children: [],
+          },
+        ],
+        revision: 1,
+      },
+    });
+    expect(saved.status()).toBe(200);
+    // The sizes may still be in the making; when they are done the page is made fresh by itself.
+    let html = "";
+    await expect
+      .poll(
+        async () => {
+          html = await (await fetch(site.base + "/responsive-page")).text();
+          return html.includes("<picture>");
+        },
+        { timeout: 60_000, interval: 500 },
+      )
+      .toBe(true);
+    expect(html).toContain('type="image/avif"');
+    expect(html).toContain('type="image/webp"');
+    expect(html).toMatch(/<img src="\/uploads\/[^"]*Responsive-shot\.png" alt="A brown square"/);
+    expect(html).toMatch(/width="\d+" height="\d+" style="background-image:url\('data:image\/webp/);
+    // Every size in the srcset is a real file with the right type.
+    const sizes = [...html.matchAll(/srcset="([^"]+)"/g)].flatMap((m) =>
+      m[1]!.split(", ").map((part) => part.split(" ")[0]!),
+    );
+    expect(sizes.length).toBeGreaterThan(1);
+    for (const src of sizes) {
+      const response = await fetch(site.base + src);
+      expect(response.status, src).toBe(200);
+      expect(response.headers.get("content-type"), src).toMatch(/^image\/(avif|webp)/);
+    }
   });
 
   test("in the editor: a file chosen in the image block is stored in the library", async () => {

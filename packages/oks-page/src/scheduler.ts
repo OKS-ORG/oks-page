@@ -5,6 +5,7 @@
 import { capabilitiesOf } from "@oks-page/auth";
 import { publishDue, purgeEditingNotices, purgeTrash, type MayPublish } from "@oks-page/core";
 import { getRunner } from "./db";
+import { expireTags } from "./expire-tags";
 
 const SECOND = 1000;
 const PURGE_EVERY = 60 * 60 * SECOND;
@@ -16,18 +17,6 @@ const mayPublish: MayPublish = async ({ siteId, userId, type, authorId }) => {
     (caps.can("content.publish_own", type) && authorId === userId)
   );
 };
-
-/** Marks the cached copies of an entry as out of date for every server on this database (like revalidateTag). */
-async function expireTags(siteId: string, id: string, slug: string): Promise<void> {
-  const now = new Date();
-  for (const tag of [`entry:${id}`, `slug:${slug}`])
-    await getRunner().all(
-      `insert into "cache_tags" ("site_id", "tag", "stale_at", "expired_at", "updated_at") values (?, ?, ?, ?, ?)
-       on conflict ("site_id", "tag") do update set
-         "stale_at" = excluded."stale_at", "expired_at" = excluded."expired_at", "updated_at" = excluded."updated_at"`,
-      [siteId, tag, now, now, now],
-    );
-}
 
 let lastPurge = 0;
 

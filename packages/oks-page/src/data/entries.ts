@@ -1,5 +1,7 @@
 // The queries behind both data modules (server and export). No caching here.
+import { enhanceImages } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
+import { mediaContext } from "../uploads";
 import type { EntryView } from "./types";
 
 /** "/" is the entry with the slug "home"; other paths use the path without the leading slash. */
@@ -22,7 +24,7 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
     title: String(r["title"]),
     slug: String(r["slug"]),
     type: String(r["type_key"]),
-    html: String(r["html"]),
+    html: await enhanceImages(getRunner(), siteId, String(r["html"]), mediaContext().storage),
     plainText: String(r["plain_text"]),
     updatedAt: updated instanceof Date ? updated.getTime() : Number(updated),
   };
