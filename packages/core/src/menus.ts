@@ -224,3 +224,69 @@ export async function loadMenuChoices(runner: SqlRunner, siteId: string): Promis
     })),
   };
 }
+
+/** An item as the public site draws it: a label, an address and the items under it. */
+export interface PublicMenuItem {
+  id: string;
+  label: string;
+  href: string;
+  children: PublicMenuItem[];
+}
+
+/**
+ * A saved menu as visitors see it. A page or post is looked up now, so a changed address is followed; one that is not
+ * published (a draft, private, scheduled or trashed page) is left out together with the items under it. A category or
+ * tag that was deleted is left out the same way.
+ */
+export async function loadPublicMenu(
+  runner: SqlRunner,
+  siteId: string,
+  place: string,
+): Promise<PublicMenuItem[]> {
+  const items = (await loadMenu(runner, siteId, place)).items;
+  const entryIds: string[] = [];
+  const termIds: string[] = [];
+  const collect = (list: MenuItem[]) => {
+    for (const item of list) {
+      if (item.kind === "entry" && item.entryId) entryIds.push(item.entryId);
+      if (item.kind === "term" && item.termId) termIds.push(item.termId);
+      collect(item.children ?? []);
+    }
+  };
+  collect(items);
+  const marks = (ids: string[]) => ids.map(() => "?").join(", ");
+  const slugs = new Map<string, string>();
+  if (entryIds.length > 0)
+    for (const r of await runner.all(
+      `select "id", "slug" from "entries" where "site_id" = ? and "status" = 'published' and "locale" = ''
+         and "id" in (${marks(entryIds)})`,
+      [siteId, ...entryIds],
+    ))
+      slugs.set(String(r["id"]), String(r["slug"]));
+  const terms = new Map<string, string>();
+  if (termIds.length > 0)
+    for (const r of await runner.all(
+      `select t."id", t."slug", x."key" from "terms" t join "taxonomies" x on x."id" = t."taxonomy_id"
+        where x."site_id" = ? and t."id" in (${marks(termIds)})`,
+      [siteId, ...termIds],
+    ))
+      terms.set(String(r["id"]), `/${String(r["key"])}/${String(r["slug"])}`);
+  const hrefOf = (item: MenuItem): string | null => {
+    if (item.kind === "entry") {
+      const slug = slugs.get(item.entryId ?? "");
+      return slug === undefined ? null : slug === "home" ? "/" : `/${slug}`;
+    }
+    if (item.kind === "term") return terms.get(item.termId ?? "") ?? null;
+    return item.url ?? null;
+  };
+  const draw = (list: MenuItem[]): PublicMenuItem[] => {
+    const out: PublicMenuItem[] = [];
+    for (const item of list) {
+      const href = hrefOf(item);
+      if (href === null) continue;
+      out.push({ id: item.id, label: item.label, href, children: draw(item.children ?? []) });
+    }
+    return out;
+  };
+  return draw(items);
+}

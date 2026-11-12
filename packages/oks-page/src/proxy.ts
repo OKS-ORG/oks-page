@@ -9,6 +9,9 @@ import { getSiteId, NO_SITE } from "./db";
 import { NOT_FOUND_CACHE_HEADER, notFoundHeaders, pageHeaders, visitorOf } from "./headers";
 import { cdnEnabled } from "./settings";
 
+/** Every page shows the header and footer menus, so a CDN purge of a menu reaches every page. */
+const MENU_TAGS = ["menu:primary", "menu:footer"];
+
 export async function proxy(request: NextRequest) {
   const path = decodeURIComponent(request.nextUrl.pathname).replace(/\/+$/, "");
   const slug = slugOf(path === "" ? undefined : path.slice(1).split("/"));
@@ -37,11 +40,16 @@ export async function proxy(request: NextRequest) {
     return response;
   };
   if (found) {
-    const tags = [`site:${await getSiteId()}`, `entry:${found.id}`, `type:${found.type}`];
+    const tags = [
+      `site:${await getSiteId()}`,
+      `entry:${found.id}`,
+      `type:${found.type}`,
+      ...MENU_TAGS,
+    ];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   if (archive) {
-    const tags = [`site:${await getSiteId()}`, `term:${archive.id}`];
+    const tags = [`site:${await getSiteId()}`, `term:${archive.id}`, ...MENU_TAGS];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   // The 404 handler sends the cache header itself (Next.js would replace one set here), so it is passed on as a request header.

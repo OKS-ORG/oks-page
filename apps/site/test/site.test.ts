@@ -345,7 +345,10 @@ for (const { kind, skip } of openers) {
       expect(res.headers.get("cache-control")).toBe(
         "public, s-maxage=300, stale-while-revalidate=3600",
       );
-      expect(res.headers.get("cache-tag")).toBe(`site:${siteId},entry:${entryId},type:page`);
+      // Every page also carries the two menu tags, because every page shows the menus.
+      expect(res.headers.get("cache-tag")).toBe(
+        `site:${siteId},entry:${entryId},type:page,menu:primary,menu:footer`,
+      );
     });
 
     test("a public page sets no cookie", async () => {
@@ -432,7 +435,7 @@ for (const { kind, skip } of openers) {
           : await (await import("@oks-page/db/testing")).openPg();
       const s = await seed(db);
       await s.entry("home", "Home");
-      await s.entry("about", "About us");
+      const aboutEntry = await s.entry("about", "About us");
       await s.entry("docs/intro", "Intro");
       await s.entry("hidden", "Hidden", "draft");
       await s.entry("secret", "Secret", "private");
@@ -452,6 +455,19 @@ for (const { kind, skip } of openers) {
         post,
         term,
       ]);
+      // A header menu with a page and a link, so both builds draw it.
+      await db.run(
+        "insert into menus (id, site_id, key, label, items, updated_at) values (?, ?, 'primary', 'Header menu', ?, ?)",
+        [
+          `MNU${"0".repeat(22)}1`,
+          s.site,
+          JSON.stringify([
+            { id: "m1", label: "About", kind: "entry", entryId: aboutEntry, children: [] },
+            { id: "m2", label: "Shop", kind: "url", url: "https://shop.example.com", children: [] },
+          ]),
+          new Date(),
+        ],
+      );
       site = await startSite(kind, db, { OKS_SITE_URL: SITE_URL });
       out = mkdtempSync(join(tmpdir(), "oks-exp-out-"));
       buildExport(kind, db, out, { OKS_SITE_URL: SITE_URL });
@@ -472,6 +488,23 @@ for (const { kind, skip } of openers) {
         const written = pick(readFileSync(join(out, file), "utf8"));
         expect(written, path).toEqual(served);
         expect(written.canonical, path).toBe(path === "/" ? `${SITE_URL}/` : `${SITE_URL}${path}`);
+      }
+    });
+
+    test("the export draws the header menu like the server build, and no footer when there is none", async () => {
+      const menu = (html: string) =>
+        /<nav aria-label="Main menu">.*?<\/nav>/s.exec(html)?.[0] ?? "";
+      for (const [path, file] of [
+        ["/", "index.html"],
+        ["/about", "about.html"],
+        ["/category/news", "category/news.html"],
+      ] as const) {
+        const served = await (await fetch(site.base + path)).text();
+        const written = readFileSync(join(out, file), "utf8");
+        expect(menu(written), path).toContain('<a href="/about">About</a>');
+        expect(menu(written), path).toContain('<a href="https://shop.example.com">Shop</a>');
+        expect(menu(written), path).toBe(menu(served));
+        expect(written, path).not.toContain('aria-label="Footer menu"');
       }
     });
 
@@ -1446,6 +1479,112 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await visitor.goto(site.base + "/admin/menus");
     await visitor.waitForURL("**/admin/login");
     await visitor.close();
+  });
+
+  test("the public site shows the header and footer menus, follows a changed address, hides unpublished pages and refreshes at once", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const entryId = async (slug: string) =>
+      String((await db.run("select id from entries where slug = ?", [slug]))[0]!["id"]);
+    const links = (html: string, label: string) =>
+      [
+        ...(
+          new RegExp(`<nav aria-label="${label}">(.*?)</nav>`, "s").exec(html)?.[1] ?? ""
+        ).matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g),
+      ].map((m) => `${m[2]} -> ${m[1]}`);
+
+    // The menu was saved by the earlier menu test or is empty: start from a known one.
+    const before = await call("GET", "/api/admin/menus/primary");
+    const version = (before.json!["menu"] as { updatedAt: number }).updatedAt;
+    const saved = await call("PUT", "/api/admin/menus/primary", {
+      updatedAt: version,
+      items: [
+        { id: "m1", label: "Home", kind: "entry", entryId: await entryId("home"), children: [] },
+        {
+          id: "m2",
+          label: "About us",
+          kind: "entry",
+          entryId: await entryId("about"),
+          children: [
+            {
+              id: "m3",
+              label: "Contact",
+              kind: "entry",
+              entryId: await entryId("contact"),
+              children: [],
+            },
+          ],
+        },
+        { id: "m4", label: "Shop", kind: "url", url: "https://shop.example.com", children: [] },
+      ],
+    });
+    expect(saved.status).toBe(200);
+    const footerSaved = await call("PUT", "/api/admin/menus/footer", {
+      updatedAt: 0,
+      items: [{ id: "f1", label: "Privacy", kind: "url", url: "/privacy", children: [] }],
+    });
+    expect(footerSaved.status).toBe(200);
+
+    let html = (await text("/about")).body;
+    expect(links(html, "Main menu")).toEqual([
+      "Home -> /",
+      "About us -> /about",
+      "Contact -> /contact",
+      "Shop -> https://shop.example.com",
+    ]);
+    expect(links(html, "Footer menu")).toEqual(["Privacy -> /privacy"]);
+    // The menu is on the front page too, and on a category page.
+    expect(links((await text("/")).body, "Main menu")).toHaveLength(4);
+    expect(links((await text("/category/uncategorised")).body, "Main menu")).toHaveLength(4);
+
+    // A page's address changes: the menu follows it at once.
+    const aboutId = await entryId("about");
+    const renamed = await call("PUT", `/api/admin/entries/${aboutId}`, {
+      title: "About",
+      slugPart: "about-us",
+      status: "published",
+      blocks: [],
+      revision: Number(
+        (await db.run("select revision from entries where id = ?", [aboutId]))[0]!["revision"],
+      ),
+    });
+    expect(renamed.status).toBe(200);
+    html = (await text("/contact")).body;
+    expect(links(html, "Main menu")).toContain("About us -> /about-us");
+
+    // A page that is not published leaves the menu with its sub-items; a published one comes back.
+    const trashed = await call("DELETE", `/api/admin/entries/${aboutId}`);
+    expect(trashed.status).toBe(200);
+    expect(links((await text("/")).body, "Main menu")).toEqual([
+      "Home -> /",
+      "Shop -> https://shop.example.com",
+    ]);
+    const restored = await call("PATCH", `/api/admin/entries/${aboutId}`, { action: "restore" });
+    expect(restored.status).toBe(200);
+    // It comes back as a draft: still not in the menu.
+    expect(links((await text("/")).body, "Main menu")).toHaveLength(2);
+
+    // An empty menu draws nothing: no nav, no extra wrapper.
+    const current = await call("GET", "/api/admin/menus/footer");
+    const footerVersion = (current.json!["menu"] as { updatedAt: number }).updatedAt;
+    await call("PUT", "/api/admin/menus/footer", { updatedAt: footerVersion, items: [] });
+    expect((await text("/")).body).not.toContain('aria-label="Footer menu"');
+    await page.close();
   });
 
   const addPageNamed = async (page: Page, title: string) => {

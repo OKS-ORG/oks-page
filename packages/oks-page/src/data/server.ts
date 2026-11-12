@@ -1,7 +1,8 @@
 // The data module for the server build: answers are kept in the Next.js cache, tagged so a publish can refresh
 // exactly the pages that changed. Pages import this as "@data"; the export build swaps in `export.ts`.
 import { cacheTag } from "next/cache";
-import { loadPublishedEntry, loadTermArchive, slugOf } from "./entries";
+import type { PublicMenuItem } from "@oks-page/core";
+import { loadPublishedEntry, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
 import type { EntryView, TermArchive } from "./types";
 
 export { slugOf };
@@ -21,6 +22,17 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
   const entry = await loadPublishedEntry(slug);
   if (entry) cacheTag(`entry:${entry.id}`);
   return entry;
+}
+
+/**
+ * The header or footer menu. Tagged `menus` (refreshed whenever a menu, a page's address or status, or a term changes)
+ * and `menu:<place>`.
+ */
+export async function getSiteMenu(place: string): Promise<PublicMenuItem[]> {
+  "use cache";
+  cacheTag("menus", `menu:${place}`);
+  count(`menu:${place}`);
+  return loadSiteMenu(place);
 }
 
 /** A category or tag archive ("category/travel"). Refreshed whenever a post or a term changes (tag "archive:posts"). */

@@ -2,7 +2,15 @@ import { newId } from "@oks-page/db";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Actor } from "./content.js";
-import { loadMenu, loadMenuChoices, MENU_LIMITS, saveMenu, type MenuItem } from "./menus.js";
+import {
+  loadMenu,
+  loadMenuChoices,
+  loadPublicMenu,
+  MENU_LIMITS,
+  saveMenu,
+  type MenuItem,
+  type PublicMenuItem,
+} from "./menus.js";
 import { DEFAULT_ROLES } from "./roles.js";
 import { runSetup } from "./setup.js";
 import { createTerm } from "./taxonomies.js";
@@ -178,6 +186,83 @@ for (const { kind, open, skip } of openers) {
       expect(
         (await loadMenuChoices(db.runner, siteId)).terms.map((t) => `${t.kind}/${t.slug}`),
       ).toEqual(["category/uncategorised", "tag/garden"]);
+    });
+
+    describe("as visitors see it", () => {
+      const idOf = async (slug: string) =>
+        String((await db.run("select id from entries where slug = ?", [slug]))[0]!["id"]);
+      const entryItem = async (slug: string, label: string, children: MenuItem[] = []) =>
+        ({
+          id: `e-${slug.replace(/\W/g, "")}`,
+          label,
+          kind: "entry",
+          entryId: await idOf(slug),
+          children,
+        }) as MenuItem;
+      const shape = (items: PublicMenuItem[]): unknown =>
+        items.map((i) => [i.label, i.href, shape(i.children)]);
+
+      test("pages, posts, the front page, categories and links get their addresses; sub-items stay under their parent", async () => {
+        const term = String(
+          (await db.run("select id from terms where slug = 'uncategorised'"))[0]!["id"],
+        );
+        const saved = await save([
+          await entryItem("home", "Home"),
+          await entryItem("about", "About", [await entryItem("blog/hello-world", "Hello")]),
+          { id: "t", label: "Other", kind: "term", termId: term, children: [] },
+          url("u", "Shop", "https://shop.example.com"),
+        ]);
+        expect(saved.ok).toBe(true);
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["Home", "/", []],
+          ["About", "/about", [["Hello", "/blog/hello-world", []]]],
+          ["Other", "/category/uncategorised", []],
+          ["Shop", "https://shop.example.com", []],
+        ]);
+        expect(await loadPublicMenu(db.runner, siteId, "footer")).toEqual([]);
+      });
+
+      test("a changed address is followed, and a page that is not published leaves the menu with the items under it", async () => {
+        await save([
+          await entryItem("about", "About", [await entryItem("contact", "Contact")]),
+          await entryItem("home", "Home"),
+        ]);
+        await db.run("update entries set slug = 'about-us' where slug = 'about'");
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["About", "/about-us", [["Contact", "/contact", []]]],
+          ["Home", "/", []],
+        ]);
+        // The parent goes back to draft: it and its sub-items are not shown.
+        await db.run("update entries set status = 'draft' where slug = 'about-us'");
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["Home", "/", []],
+        ]);
+        // A sub-item alone that is not published is left out, the parent stays.
+        await db.run("update entries set status = 'published' where slug = 'about-us'");
+        await db.run("update entries set status = 'trash' where slug = 'contact'");
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["About", "/about-us", []],
+          ["Home", "/", []],
+        ]);
+      });
+
+      test("a deleted category leaves the menu, and a menu that was never saved is empty", async () => {
+        expect(await loadPublicMenu(db.runner, siteId, "primary")).toEqual([]);
+        const made = await createTerm(db.runner, editor, siteId, "tag", { name: "Garden" });
+        if (!made.ok) throw new Error("setup");
+        await save([
+          { id: "t", label: "Garden", kind: "term", termId: made.id, children: [] },
+          url("u", "Shop"),
+        ]);
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["Garden", "/tag/garden", []],
+          ["Shop", "/x", []],
+        ]);
+        await db.run("delete from terms where id = ?", [made.id]);
+        expect(shape(await loadPublicMenu(db.runner, siteId, "primary"))).toEqual([
+          ["Shop", "/x", []],
+        ]);
+      });
     });
   });
 }

@@ -1,5 +1,5 @@
 // The queries behind both data modules (server and export). No caching here.
-import { enhanceImages } from "@oks-page/core";
+import { enhanceImages, loadPublicMenu, type PublicMenuItem } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import type { EntryView, TermArchive } from "./types";
@@ -113,6 +113,11 @@ export async function loadTermArchive(slug: string): Promise<TermArchive | null>
     })),
     more: rows.length > MOST_POSTS,
   };
+}
+
+/** The header ("primary") or footer ("footer") menu as visitors see it. */
+export async function loadSiteMenu(place: string): Promise<PublicMenuItem[]> {
+  return loadPublicMenu(getRunner(), await getSiteId(), place);
 }
 
 /** Every archive address, for the export build. */

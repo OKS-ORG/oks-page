@@ -5,6 +5,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { refreshMenus } from "./refresh-cache";
 
 type Context = { params: Promise<{ place: string }> };
 
@@ -38,5 +39,6 @@ export async function PUT(request: Request, context: Context) {
     updatedAt: input["updatedAt"],
   });
   if (!result.ok) return reply(result, STATUS[result.code]);
+  refreshMenus();
   return NextResponse.json({ ok: true, updatedAt: result.updatedAt });
 }

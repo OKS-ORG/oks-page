@@ -1,8 +1,9 @@
-import { getPublishedEntry, getTermArchive, slugOf } from "@data";
+import { getPublishedEntry, getSiteMenu, getTermArchive, slugOf } from "@data";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
 import { ArchiveView, archiveTitle } from "./archive-view";
+import { PublicFrame } from "./public-frame";
 import { canonicalFor } from "./site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
@@ -24,16 +25,24 @@ export default async function Page({ params }: Props) {
     // An address that is not an entry may be a category or tag archive ("category/travel").
     const archive = await getTermArchive(slug);
     if (!archive) notFound();
-    return <ArchiveView archive={archive} />;
+    const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
+    return (
+      <PublicFrame header={header} footer={footer}>
+        <ArchiveView archive={archive} />
+      </PublicFrame>
+    );
   }
+  const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
   return (
-    <main>
-      <h1>{entry.title}</h1>
-      <Card>
-        <CardBody>
-          <article dangerouslySetInnerHTML={{ __html: entry.html }} />
-        </CardBody>
-      </Card>
-    </main>
+    <PublicFrame header={header} footer={footer}>
+      <main>
+        <h1>{entry.title}</h1>
+        <Card>
+          <CardBody>
+            <article dangerouslySetInnerHTML={{ __html: entry.html }} />
+          </CardBody>
+        </Card>
+      </main>
+    </PublicFrame>
   );
 }
