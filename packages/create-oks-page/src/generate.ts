@@ -184,7 +184,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     },
     {
       path: "app/api/admin/media/[id]/route.ts",
-      content: `export { GET, PATCH, DELETE } from ${from("api-media-item")};\n`,
+      content: `export { GET, POST, PATCH, DELETE } from ${from("api-media-item")};\n`,
     },
     {
       path: "app/uploads/[...key]/route.ts",

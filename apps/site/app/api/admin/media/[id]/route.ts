@@ -1,1 +1,1 @@
-export { GET, PATCH, DELETE } from "oks-page/api-media-item";
+export { GET, POST, PATCH, DELETE } from "oks-page/api-media-item";

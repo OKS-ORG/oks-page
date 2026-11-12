@@ -111,6 +111,22 @@ export async function saveFile(
   if (!response.ok) throw new Error(failure(await response.json(), "It could not be saved."));
 }
 
+/** Puts a new file in place of this one. The address, the descriptions and the pages that use it stay. */
+export async function replaceFile(id: string, file: File): Promise<void> {
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(`/api/admin/media/${id}`, { method: "POST", body: form });
+  if (!response.ok) {
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // Not JSON: the fallback message is used.
+    }
+    throw new Error(failure(body, "The file could not be replaced. Try again."));
+  }
+}
+
 export async function deleteFile(
   id: string,
 ): Promise<{ ok: true } | { ok: false; message: string; usedIn: UsedBy[] }> {

@@ -1,5 +1,5 @@
-// /api/admin/media/[id]: GET one file with the pages that use it, PATCH its descriptions, DELETE it.
-import { deleteMedia, getMedia, updateMedia, type MediaPatch } from "@oks-page/core";
+// /api/admin/media/[id]: GET one file with the pages that use it, PATCH its descriptions, POST a new file in its place, DELETE it.
+import { deleteMedia, getMedia, replaceMedia, updateMedia, type MediaPatch } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -7,7 +7,7 @@ import { isSameOrigin, reply } from "./api-entries";
 import { MEDIA_STATUS } from "./api-media";
 import { getRunner } from "./db";
 import { refreshEntry } from "./refresh-cache";
-import { mediaContext } from "./uploads";
+import { kickMediaJobs, mediaContext } from "./uploads";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -54,6 +54,42 @@ export async function PATCH(request: Request, context: Context) {
     if (row) refreshEntry(entryId, String(row["slug"]));
   }
   return NextResponse.json({ ok: true });
+}
+
+/** POST with a multipart form (field "file") puts a new file in place of this one; the address stays the same. */
+export async function POST(request: Request, context: Context) {
+  if (!isSameOrigin(request))
+    return reply({ code: "forbidden", message: "This request came from another address." }, 403);
+  const member = await signedInMember();
+  if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
+  const { id } = await context.params;
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return reply({ code: "invalid", message: "The upload was not understood." }, 400);
+  }
+  const file = form.get("file");
+  if (!(file instanceof File))
+    return reply({ code: "invalid", message: "Choose a file to upload." }, 400);
+  const result = await replaceMedia(
+    getRunner(),
+    mediaContext(),
+    await actorOf(member),
+    member.siteId,
+    id,
+    { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) },
+  );
+  if (!result.ok) return reply(result, MEDIA_STATUS[result.code]);
+  if (result.status === "processing") kickMediaJobs();
+  // Pages that use the file show the new picture at once.
+  for (const entryId of result.usedIn) {
+    const row = (
+      await getRunner().all(`select "slug" from "entries" where "id" = ?`, [entryId])
+    )[0];
+    if (row) refreshEntry(entryId, String(row["slug"]));
+  }
+  return NextResponse.json({ ok: true, status: result.status });
 }
 
 export async function DELETE(request: Request, context: Context) {

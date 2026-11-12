@@ -6,6 +6,7 @@ import {
   deleteFile,
   editAddress,
   loadFile,
+  replaceFile,
   saveFile,
   type MediaItem,
   type UsedBy,
@@ -35,6 +36,8 @@ export function MediaDetails({ id, canDelete, onChanged }: MediaDetailsProps) {
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [blockedBy, setBlockedBy] = useState<UsedBy[] | null>(null);
+  // Goes up after a replacement: the file is loaded again, but what was typed stays.
+  const [version, setVersion] = useState(0);
 
   // Load the file when another one is picked, and look again while its sizes are being made.
   useEffect(() => {
@@ -59,17 +62,22 @@ export function MediaDetails({ id, canDelete, onChanged }: MediaDetailsProps) {
         if (!cancelled) setProblem((error as Error).message);
       }
     };
-    setItem(null);
-    setProblem(null);
-    setNote("");
-    setBlockedBy(null);
-    setConfirming(false);
-    void run(true);
+    if (version === 0) {
+      setItem(null);
+      setProblem(null);
+      setNote("");
+      setBlockedBy(null);
+      setConfirming(false);
+    }
+    void run(version === 0);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [id]);
+  }, [id, version]);
+
+  // Another file was picked: start from the beginning.
+  useEffect(() => setVersion(0), [id]);
 
   if (problem)
     return <Alert color="danger" title="Could not open the file" description={problem} />;
@@ -85,6 +93,19 @@ export function MediaDetails({ id, canDelete, onChanged }: MediaDetailsProps) {
       onChanged(false);
     } catch (error) {
       setNote(`Could not save: ${(error as Error).message}`);
+    }
+  }
+
+  async function replace(file: File | undefined) {
+    if (!file) return;
+    setNote("Replacing the file…");
+    try {
+      await replaceFile(id, file);
+      setNote("The file was replaced. Pages that use it show the new one.");
+      setVersion((v) => v + 1);
+      onChanged(false);
+    } catch (error) {
+      setNote(`Could not replace the file: ${(error as Error).message}`);
     }
   }
 
@@ -105,7 +126,7 @@ export function MediaDetails({ id, canDelete, onChanged }: MediaDetailsProps) {
       {isImage ? (
         <img
           className="oks-media-preview"
-          src={item.url}
+          src={version > 0 ? `${item.url}?v=${version}` : item.url}
           alt={item.alt || `Preview of ${item.fileName}`}
           {...(item.width ? { width: item.width } : {})}
         />
@@ -162,6 +183,28 @@ export function MediaDetails({ id, canDelete, onChanged }: MediaDetailsProps) {
               Delete
             </Button>
           ) : null}
+        </p>
+      ) : null}
+      {canEdit ? (
+        <p>
+          <label>
+            Replace file{" "}
+            <input
+              type="file"
+              name="replacement"
+              accept={item.mimeType}
+              onChange={(event) => {
+                const input = event.currentTarget;
+                void replace(input.files?.[0]).finally(() => {
+                  input.value = "";
+                });
+              }}
+            />
+          </label>
+          <br />
+          <small>
+            The address and the pages that use it stay the same. It must be the same kind of file.
+          </small>
         </p>
       ) : null}
       <p role="status">{note}</p>

@@ -149,20 +149,8 @@ export interface UploadInput {
   folderId?: string | null;
 }
 
-/**
- * Checks, cleans and stores one file. A raster image is stored at once with the status `processing`, and a job makes
- * its sizes. Nothing is stored when a check refuses the file.
- */
-export async function uploadMedia(
-  runner: SqlRunner,
-  ctx: MediaContext,
-  actor: Actor,
-  siteId: string,
-  input: UploadInput,
-): Promise<
-  MediaResult<{ id: string; status: MediaItem["status"]; url: string; fileName: string }>
-> {
-  if (!actor.can("media.upload")) return fail("forbidden", "You may not upload files.");
+/** The checks and the cleaning that an upload and a replacement share. */
+async function prepareFile(ctx: MediaContext, actor: Actor, input: UploadInput) {
   const settings = ctx.settings ?? {};
   const checked = checkUpload(input.fileName, input.bytes, {
     canUploadSvg: actor.can("media.upload_svg"),
@@ -193,6 +181,26 @@ export async function uploadMedia(
     }
     throw error;
   }
+  return { ok: true as const, checked, stored, width, height, needsSizes };
+}
+
+/**
+ * Checks, cleans and stores one file. A raster image is stored at once with the status `processing`, and a job makes
+ * its sizes. Nothing is stored when a check refuses the file.
+ */
+export async function uploadMedia(
+  runner: SqlRunner,
+  ctx: MediaContext,
+  actor: Actor,
+  siteId: string,
+  input: UploadInput,
+): Promise<
+  MediaResult<{ id: string; status: MediaItem["status"]; url: string; fileName: string }>
+> {
+  if (!actor.can("media.upload")) return fail("forbidden", "You may not upload files.");
+  const prepared = await prepareFile(ctx, actor, input);
+  if (!prepared.ok) return prepared;
+  const { checked, stored, width, height, needsSizes } = prepared;
 
   if (input.folderId) {
     const folder = await runner.all(
@@ -498,6 +506,65 @@ export async function deleteMedia(
   });
   for (const key of keys) await ctx.storage.delete(key).catch(() => undefined);
   return { ok: true };
+}
+
+// -------------------------------------------------------------------------------------------------------------- replace
+
+/**
+ * Puts a new file in place of an old one. The file keeps its address, its descriptions, its folder and the pages that
+ * use it. The new file must be the same kind (the same type), so the address stays valid. A picture gets new sizes from
+ * a job; until they are ready, pages show the plain new picture. The old file is put back if anything fails.
+ */
+export async function replaceMedia(
+  runner: SqlRunner,
+  ctx: MediaContext,
+  actor: Actor,
+  siteId: string,
+  id: string,
+  input: { fileName: string; bytes: Uint8Array },
+): Promise<MediaResult<{ status: MediaItem["status"]; usedIn: string[] }>> {
+  const row = await load(runner, siteId, id);
+  if (!row || (!actor.can("media.edit_any") && String(row["uploaded_by"]) !== actor.userId))
+    return fail("not_found", "That file does not exist.");
+  if (!mayEdit(actor, row)) return fail("forbidden", "You may not change this file.");
+  const prepared = await prepareFile(ctx, actor, input);
+  if (!prepared.ok) return prepared;
+  const { checked, stored, width, height, needsSizes } = prepared;
+  if (checked.type.mime !== String(row["mime_type"]))
+    return fail(
+      "invalid",
+      `The new file must be the same kind as the old one (${String(row["mime_type"])}).`,
+    );
+
+  const key = String(row["storage_key"]);
+  const old = await ctx.storage.get(key);
+  const oldVariantKeys = (
+    await runner.all(`select "storage_key" from "media_variants" where "media_id" = ?`, [id])
+  ).map((r) => String(r["storage_key"]));
+  const status: MediaItem["status"] = needsSizes ? "processing" : "ready";
+  await ctx.storage.put(key, stored);
+  try {
+    await runner.transaction(async (tx) => {
+      await tx.all(`delete from "media_variants" where "media_id" = ?`, [id]);
+      await tx.all(
+        `update "media" set "size_bytes" = ?, "width" = ?, "height" = ?, "content_hash" = ?, "status" = ?, "blur_placeholder" = null where "id" = ?`,
+        [
+          stored.length,
+          width,
+          height,
+          createHash("sha256").update(stored).digest("hex"),
+          status,
+          id,
+        ],
+      );
+    });
+    if (needsSizes) await enqueueJob(runner, siteId, MEDIA_JOB, { mediaId: id }, ctx.now);
+  } catch (error) {
+    await ctx.storage.put(key, old).catch(() => undefined);
+    throw error;
+  }
+  for (const k of oldVariantKeys) await ctx.storage.delete(k).catch(() => undefined);
+  return { ok: true, status, usedIn: (await usesOf(runner, id)).map((u) => u.id) };
 }
 
 // ----------------------------------------------------------------------------------------------------------- serving

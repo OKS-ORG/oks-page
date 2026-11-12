@@ -17,6 +17,7 @@ import {
   listMedia,
   MEDIA_JOB,
   mediaJobHandler,
+  replaceMedia,
   updateMedia,
   uploadMedia,
   type MediaContext,
@@ -621,6 +622,112 @@ for (const { kind, open, skip } of openers) {
           ok: false,
           code: "not_found",
         });
+      });
+    });
+
+    describe("replacing a file", () => {
+      const replace = (actor: Actor, id: string, name: string, bytes: Uint8Array | Buffer) =>
+        replaceMedia(db.runner, ctx, actor, siteId, id, {
+          fileName: name,
+          bytes: new Uint8Array(bytes),
+        });
+
+      test("the address, descriptions and pages stay; the file and its sizes are new", async () => {
+        const r = await upload(anna, "photo.jpg", await jpeg(800, 400));
+        await drainJobs(db.runner, handlers());
+        await updateMedia(db.runner, anna, siteId, r.id, { alt: "A lake", title: "Lake" });
+        const page = await createDraft(db.runner, anna, siteId, { type: "page", title: "Trip" });
+        if (!page.ok) throw new Error("draft");
+        await db.run("insert into entry_media (entry_id, media_id, field) values (?, ?, ?)", [
+          page.id,
+          r.id,
+          "body",
+        ]);
+        const before = (await db.run("select * from media where id = ?", [r.id]))[0]!;
+
+        const done = await replace(anna, r.id, "new-name.jpg", await jpeg(300, 300));
+        expect(done).toMatchObject({ ok: true, status: "processing", usedIn: [page.id] });
+
+        const row = (await db.run("select * from media where id = ?", [r.id]))[0]!;
+        expect(row).toMatchObject({
+          storage_key: before["storage_key"],
+          filename: "photo.jpg",
+          alt: "A lake",
+          title: "Lake",
+          width: 300,
+          height: 300,
+          status: "processing",
+          blur_placeholder: null,
+        });
+        expect(row["content_hash"]).not.toBe(before["content_hash"]);
+        expect(Number((await db.run("select count(*) as n from media_variants"))[0]!["n"])).toBe(0);
+        const meta = await sharp(
+          Buffer.from(await storage.get(String(row["storage_key"]))),
+        ).metadata();
+        expect(meta.width).toBe(300);
+
+        expect(await drainJobs(db.runner, handlers())).toEqual({ done: 1, failed: 0 });
+        const widths = (
+          await db.run("select width from media_variants where media_id = ?", [r.id])
+        ).map((v) => Number(v["width"]));
+        expect(Math.max(...widths)).toBe(300);
+        const keys = await files();
+        expect(keys.filter((k) => k.includes("-800."))).toEqual([]);
+      });
+
+      test("a different kind of file is refused and nothing changes", async () => {
+        const r = await upload(anna, "photo.jpg", await jpeg());
+        const before = await files();
+        expect(await replace(anna, r.id, "photo.png", await png())).toMatchObject({
+          ok: false,
+          code: "invalid",
+        });
+        expect(await replace(anna, r.id, "x.pdf", PDF)).toMatchObject({
+          ok: false,
+          code: "invalid",
+        });
+        expect(await files()).toEqual(before);
+      });
+
+      test("a file that fails the checks leaves the old one in place", async () => {
+        const r = await upload(anna, "photo.jpg", await jpeg());
+        const key = String((await db.run("select storage_key from media"))[0]!["storage_key"]);
+        const old = Buffer.from(await storage.get(key));
+        expect(
+          await replace(anna, r.id, "photo.jpg", new TextEncoder().encode("not a picture")),
+        ).toMatchObject({ ok: false, code: "invalid" });
+        expect(Buffer.from(await storage.get(key)).equals(old)).toBe(true);
+      });
+
+      test("only people who may edit the file can replace it", async () => {
+        const mine = await upload(bob, "bob.jpg", await jpeg());
+        expect(await replace(bea, mine.id, "bob.jpg", await jpeg())).toMatchObject({
+          ok: false,
+          code: "not_found",
+        });
+        expect(await replace(sam, mine.id, "bob.jpg", await jpeg())).toMatchObject({
+          ok: false,
+        });
+        expect((await replace(bob, mine.id, "bob.jpg", await jpeg(100, 100))).ok).toBe(true);
+        expect((await replace(eve, mine.id, "bob.jpg", await jpeg(120, 120))).ok).toBe(true);
+        expect(await replace(anna, newId(), "x.jpg", await jpeg())).toMatchObject({
+          ok: false,
+          code: "not_found",
+        });
+      });
+
+      test("a PDF is replaced and stays ready", async () => {
+        const r = await upload(anna, "doc.pdf", PDF);
+        const next = new TextEncoder().encode("%PDF-1.7\n%second\n");
+        expect(await replace(anna, r.id, "other.pdf", next)).toMatchObject({
+          ok: true,
+          status: "ready",
+        });
+        const row = (await db.run("select * from media where id = ?", [r.id]))[0]!;
+        expect(Number(row["size_bytes"])).toBe(next.length);
+        expect(Buffer.from(await storage.get(String(row["storage_key"]))).toString()).toContain(
+          "second",
+        );
       });
     });
 

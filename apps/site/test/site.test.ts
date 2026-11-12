@@ -1955,6 +1955,62 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await page.close();
   });
 
+  test("replace file: the address and the typed description stay, the picture and its sizes are new, a wrong kind is refused", async () => {
+    const old = await uploadVia("Swap.png", "#c00");
+    const oldBytes = Buffer.from(await (await fetch(site.base + old.url)).arrayBuffer());
+    const page = await ownerPage();
+    await openLibrary(page);
+    await page.getByRole("option", { name: /^Swap\.png/ }).click();
+    await page.getByRole("textbox", { name: "Alt text" }).waitFor();
+    await page.getByRole("textbox", { name: "Alt text" }).fill("Typed, not saved yet");
+
+    // A file of another kind is refused in words, and the old file is unchanged.
+    await page.locator("input[name=replacement]").setInputFiles({
+      name: "x.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.7\n"),
+    });
+    await page
+      .getByText(/Could not replace the file: The new file must be the same kind/)
+      .waitFor();
+    expect(
+      Buffer.from(await (await fetch(site.base + old.url)).arrayBuffer()).equals(oldBytes),
+    ).toBe(true);
+
+    await page
+      .locator("input[name=replacement]")
+      .setInputFiles({ name: "other-name.png", mimeType: "image/png", buffer: await png("#0c0") });
+    await page.getByText("The file was replaced.").waitFor();
+    // Same address, new picture; what was typed is still there; the name is the old one.
+    await expect
+      .poll(async () =>
+        Buffer.from(await (await fetch(site.base + old.url)).arrayBuffer()).equals(oldBytes),
+      )
+      .toBe(false);
+    expect(await page.getByRole("textbox", { name: "Alt text" }).inputValue()).toBe(
+      "Typed, not saved yet",
+    );
+    await page.getByRole("heading", { name: "Swap.png", level: 2 }).waitFor();
+    // The new sizes are made again and then exist.
+    await expect
+      .poll(() => page.getByText("Making the smaller sizes…").count(), { timeout: 60_000 })
+      .toBe(0);
+    const row = (
+      await db.run("select id, status from media where storage_key like ?", [
+        "%" + old.url.split("/").pop(),
+      ])
+    )[0]!;
+    expect(row["status"]).toBe("ready");
+    expect(
+      Number(
+        (
+          await db.run("select count(*) as n from media_variants where media_id = ?", [row["id"]])
+        )[0]!["n"],
+      ),
+    ).toBeGreaterThan(0);
+    await page.close();
+  });
+
   test("in the editor: insert an image from the library, upload one in the same window, save, publish, and the public page shows both", async () => {
     const first = await uploadVia("Gallery one.png", "#808");
     const created = await ownerApi.post(site.base + "/api/admin/entries", {
