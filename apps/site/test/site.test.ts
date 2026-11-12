@@ -1831,11 +1831,16 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     sharp({ create: { width: w, height: h, channels: 3, background: color } })
       .png()
       .toBuffer();
-  const uploadVia = async (name: string, color = "#c00") =>
-    (await (await send(ownerApi, name, await png(color), "image/png")).json()) as {
+  // Waits until the sizes exist, so no background work competes with the browser steps that follow (on a slow
+  // machine that made the later tests of this group time out).
+  const uploadVia = async (name: string, color = "#c00") => {
+    const made = (await (await send(ownerApi, name, await png(color), "image/png")).json()) as {
       id: string;
       url: string;
     };
+    await ready(made.id);
+    return made;
+  };
   const openLibrary = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
     await page.goto(site.base + "/admin/media");
     await page.getByRole("heading", { name: "Media", level: 1 }).waitFor();
@@ -1895,6 +1900,38 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await expect
       .poll(() => page.getByRole("textbox", { name: "Alt text" }).inputValue())
       .toBe("A green square");
+    await page.close();
+  });
+
+  test("media settings: the owner changes the biggest file on the settings screen and the next upload obeys it", async () => {
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(1_500_000)]);
+    const page = await ownerPage();
+    try {
+      await openLibrary(page);
+      await page.getByRole("link", { name: "Media settings" }).click();
+      await page.getByRole("heading", { name: "Media settings", level: 1 }).waitFor();
+      expect(await page.getByRole("textbox", { name: /Biggest file/ }).inputValue()).toBe("25");
+      await page.getByRole("textbox", { name: /Biggest file/ }).fill("0");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByRole("alert").filter({ hasText: "from 1 to 200 MB" }).waitFor();
+      expect(await violations(page), "media settings with an error").toEqual([]);
+
+      await page.getByRole("textbox", { name: /Biggest file/ }).fill("1");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByText("Saved. The new limits count from the next upload.").waitFor();
+
+      const refused = await send(ownerApi, "big.pdf", pdf, "application/pdf");
+      expect(refused.status()).toBe(400);
+      expect(((await refused.json()) as { error: { message: string } }).error.message).toMatch(
+        /too big/,
+      );
+      // It is still there after a reload.
+      await page.reload();
+      expect(await page.getByRole("textbox", { name: /Biggest file/ }).inputValue()).toBe("1");
+    } finally {
+      await ownerApi.put(site.base + "/api/admin/settings/media", { data: { maxMegabytes: 25 } });
+    }
+    expect((await send(ownerApi, "big-ok.pdf", pdf, "application/pdf")).status()).toBe(201);
     await page.close();
   });
 

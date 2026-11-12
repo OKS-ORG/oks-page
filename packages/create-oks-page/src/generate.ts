@@ -143,6 +143,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("media-page")};\n`,
     },
     {
+      path: "app/admin/settings/media/page.tsx",
+      content: `export { default, metadata } from ${from("settings-media-page")};\n`,
+    },
+    {
       path: "app/admin/pages/page.tsx",
       content: `export { default, metadata } from ${from("pages-list-page")};\n`,
     },
@@ -185,6 +189,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/media/[id]/route.ts",
       content: `export { GET, POST, PATCH, DELETE } from ${from("api-media-item")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/media/route.ts",
+      content: `export { GET, PUT } from ${from("api-settings-media")};\n`,
     },
     {
       path: "app/uploads/[...key]/route.ts",

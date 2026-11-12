@@ -7,7 +7,7 @@ import { isSameOrigin, reply } from "./api-entries";
 import { MEDIA_STATUS } from "./api-media";
 import { getRunner } from "./db";
 import { refreshEntry } from "./refresh-cache";
-import { kickMediaJobs, mediaContext } from "./uploads";
+import { kickMediaJobs, mediaContext, mediaContextFor } from "./uploads";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -74,7 +74,7 @@ export async function POST(request: Request, context: Context) {
     return reply({ code: "invalid", message: "Choose a file to upload." }, 400);
   const result = await replaceMedia(
     getRunner(),
-    mediaContext(),
+    await mediaContextFor(member.siteId),
     await actorOf(member),
     member.siteId,
     id,

@@ -5,7 +5,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
-import { kickMediaJobs, mediaContext } from "./uploads";
+import { kickMediaJobs, mediaContext, mediaContextFor } from "./uploads";
 
 export const MEDIA_STATUS: Record<MediaErrorCode, number> = {
   invalid: 400,
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   const folder = form.get("folder");
   const result = await uploadMedia(
     getRunner(),
-    mediaContext(),
+    await mediaContextFor(member.siteId),
     await actorOf(member),
     member.siteId,
     {

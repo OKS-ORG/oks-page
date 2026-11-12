@@ -15,15 +15,27 @@ export interface MediaLibraryScreenProps {
   initial: { items: MediaItem[]; total: number };
   canUpload: boolean;
   canDelete: boolean;
+  /** Shows the link to the media settings (the biggest file and picture, photo details). */
+  canManageSettings?: boolean;
 }
 
-export function MediaLibraryScreen({ initial, canUpload, canDelete }: MediaLibraryScreenProps) {
+export function MediaLibraryScreen({
+  initial,
+  canUpload,
+  canDelete,
+  canManageSettings,
+}: MediaLibraryScreenProps) {
   const lib = useLibrary(initial);
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
     <div className="oks-media">
       <div className="oks-media-main">
+        {canManageSettings ? (
+          <p>
+            <a href="/admin/settings/media">Media settings</a>
+          </p>
+        ) : null}
         {lib.problem ? (
           <Alert color="danger" title="The library could not be loaded" description={lib.problem} />
         ) : null}

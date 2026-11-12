@@ -33,6 +33,7 @@ export default async function MediaPage() {
         initial={{ items: list.items, total: list.total }}
         canUpload={actor.can("media.upload")}
         canDelete={actor.can("media.delete_any")}
+        canManageSettings={actor.can("settings.manage")}
       />
     </AdminFrame>
   );
