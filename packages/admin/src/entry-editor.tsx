@@ -14,6 +14,8 @@ export interface EntryEditorProps {
   onSave: (blocks: Block[]) => Promise<SaveResult>;
   /** Tells the tab strip whether there are unsaved changes (the dot, D111). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Called with the blocks after every change the writer makes (autosave listens to this). */
+  onBlocksChange?: (blocks: Block[]) => void;
   /** The block types this content type may hold (EC-42 is enforced on the server as well). */
   allowedBlocks?: Block["type"][];
   label?: string;
@@ -28,6 +30,8 @@ export interface EntryEditorProps {
 export interface EditorTools {
   /** Adds an image block at the end of the content. */
   insertImage: (src: string, alt: string) => void;
+  /** Puts other content into the editor (for example an unsaved copy the writer chose to bring back). */
+  replaceBlocks: (blocks: Block[]) => void;
 }
 
 type Status =
@@ -40,6 +44,7 @@ export function EntryEditor({
   initialBlocks,
   onSave,
   onDirtyChange,
+  onBlocksChange,
   allowedBlocks,
   label = "Content",
   onImageUpload,
@@ -67,6 +72,12 @@ export function EntryEditor({
     }
   };
   const tools: EditorTools = {
+    replaceBlocks: (next) => {
+      editor.current?.setBlocks(next);
+      setBlocks(next);
+      setDirty(true);
+      onBlocksChange?.(next);
+    },
     insertImage: (src, alt) => {
       const current = editor.current?.getBlocks() ?? blocks;
       const image = {
@@ -93,6 +104,7 @@ export function EntryEditor({
         onChange={(next) => {
           setBlocks(next);
           setDirty(true);
+          onBlocksChange?.(next);
           setStatus({ kind: "idle" });
         }}
       />

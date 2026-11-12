@@ -2,8 +2,16 @@
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor } from "@oks-page/admin";
 import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Block } from "oks-ui";
+import {
+  AutosaveStatus,
+  EditingNotice,
+  UnsavedCopyBanner,
+  useAutosave,
+  useEditingNotice,
+  useUnsavedCopy,
+} from "./entry-editing";
 import { EntryRevisions } from "./entry-revisions";
 import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
@@ -71,6 +79,26 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
   const revision = useRef(props.revision);
   const [revisionNo, setRevisionNo] = useState(props.revision);
   const [trashing, setTrashing] = useState(false);
+  // Autosave: a counter that goes up with every change, and the latest content to send.
+  const [changes, setChanges] = useState(0);
+  const blocksNow = useRef(props.blocks);
+  const typed = useRef({ title, slugPart });
+  typed.current = { title, slugPart };
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    setChanges((n) => n + 1);
+  }, [title, slugPart]);
+  const keptAt = useAutosave(
+    props.id,
+    () => ({ ...typed.current, blocks: blocksNow.current, revision: revision.current }),
+    changes,
+  );
+  const [unsaved, forgetUnsaved] = useUnsavedCopy(props.id);
+  const otherEditor = useEditingNotice(props.id);
 
   async function moveToTrash() {
     setProblem(null);
@@ -91,6 +119,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
 
   return (
     <>
+      <EditingNotice name={otherEditor} />
       {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
       <TextField name="title" label="Title" required value={title} onChange={setTitle} />
       <TextField
@@ -139,7 +168,27 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
         onImageUpload={uploadForEditor}
         onFileUpload={uploadForEditor}
         onVideoUpload={uploadForEditor}
-        toolbar={({ insertImage }) => <InsertFromLibrary insertImage={insertImage} />}
+        onBlocksChange={(next) => {
+          blocksNow.current = next;
+          setChanges((n) => n + 1);
+        }}
+        toolbar={({ insertImage, replaceBlocks }) => (
+          <>
+            <InsertFromLibrary insertImage={insertImage} />
+            <UnsavedCopyBanner
+              copy={unsaved}
+              onBringBack={(copy) => {
+                setTitle(copy.title);
+                replaceBlocks(copy.blocks);
+                forgetUnsaved();
+              }}
+              onThrowAway={() => {
+                forgetUnsaved();
+                void fetch(`/api/admin/entries/${props.id}/autosave`, { method: "DELETE" });
+              }}
+            />
+          </>
+        )}
         onSave={async (blocks) => {
           setProblem(null);
           const response = await fetch(`/api/admin/entries/${props.id}`, {
@@ -165,6 +214,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           return { repairs: body.repairs ?? [] };
         }}
       />
+      <AutosaveStatus savedAt={keptAt} />
       <EntryRevisions id={props.id} revision={revisionNo} />
       {props.canTrash ? (
         <p>

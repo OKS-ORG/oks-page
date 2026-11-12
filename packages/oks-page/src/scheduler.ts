@@ -3,7 +3,7 @@
 // database, so a server that was off at the time simply catches up when it starts, and two servers on one database
 // do not publish an entry twice (the update itself decides who gets it).
 import { capabilitiesOf } from "@oks-page/auth";
-import { publishDue, purgeTrash, type MayPublish } from "@oks-page/core";
+import { publishDue, purgeEditingNotices, purgeTrash, type MayPublish } from "@oks-page/core";
 import { getRunner } from "./db";
 
 const SECOND = 1000;
@@ -38,6 +38,7 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
     await expireTags(entry.siteId, entry.id, entry.slug);
   if (now() - lastPurge >= PURGE_EVERY) {
     lastPurge = now();
+    await purgeEditingNotices(getRunner(), now);
     const gone = await purgeTrash(getRunner(), now);
     if (gone > 0)
       console.log(`[oks] Deleted ${gone} item(s) that had been in the trash for 30 days.`);

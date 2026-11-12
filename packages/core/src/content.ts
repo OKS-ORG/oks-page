@@ -402,6 +402,11 @@ export async function saveContent(
     return fail("not_found", "This entry does not exist.");
   }
   await pruneRevisions(runner, id, at.getTime());
+  // The unsaved copy this person had is now in the saved page.
+  await runner.all(
+    `delete from "entry_revisions" where "entry_id" = ? and "author_id" = ? and "kind" = 'autosave'`,
+    [id, actor.userId],
+  );
   return {
     ok: true,
     revision: saved.revision,

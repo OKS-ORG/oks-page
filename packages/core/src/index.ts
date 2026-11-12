@@ -7,5 +7,6 @@ export * from "./jobs.js";
 export * from "./media.js";
 export * from "./trash.js";
 export * from "./revisions.js";
+export * from "./editing.js";
 export { summarise, diffLines, type DiffLine } from "./revision-parts.js";
 export * from "./schedule.js";

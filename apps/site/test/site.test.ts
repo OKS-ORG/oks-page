@@ -1248,6 +1248,81 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.close();
   });
 
+  test("autosave: a copy is kept 10 s after typing, the page is untouched, it is offered back on the next visit, and a save clears it", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await addPageNamed(page, "Kept copy");
+    const id = page.url().split("/").pop()!;
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Words nobody saved");
+    await page
+      .locator("#autosave-status")
+      .getByText(/kept as a copy at/)
+      .waitFor({ timeout: 30_000 });
+    const copies_ = async () =>
+      (
+        await db.run("select kind from entry_revisions where entry_id = ? and kind = 'autosave'", [
+          id,
+        ])
+      ).length;
+    expect(await copies_()).toBe(1);
+    const entry = (await db.run("select plain_text, revision from entries where id = ?", [id]))[0]!;
+    expect(String(entry["plain_text"] ?? "")).not.toContain("nobody saved");
+    expect(await copies(page).count()).toBe(0); // it is not an earlier copy
+
+    // Leave without saving; the next visit offers the copy back.
+    page.on("dialog", (dialog) => void dialog.accept());
+    await page.goto(site.base + "/admin/pages");
+    await page.goto(site.base + `/admin/pages/${id}`);
+    await page.getByText("You have changes that were not saved").waitFor();
+    await page.getByRole("button", { name: "Bring them back" }).click();
+    await expect
+      .poll(() => page.locator("[contenteditable=true]").first().innerText())
+      .toContain("Words nobody saved");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    expect(await copies_()).toBe(0);
+    await page.reload();
+    await page.getByRole("heading", { name: "Edit: Kept copy", level: 1 }).waitFor();
+    expect(await page.getByText("You have changes that were not saved").count()).toBe(0);
+
+    // Throwing a copy away.
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type(" and more");
+    await page
+      .locator("#autosave-status")
+      .getByText(/kept as a copy at/)
+      .waitFor({ timeout: 30_000 });
+    await page.goto(site.base + `/admin/pages/${id}`);
+    await page.getByText("You have changes that were not saved").waitFor();
+    await page.getByRole("button", { name: "Throw them away" }).click();
+    await expect.poll(copies_).toBe(0);
+    await page.close();
+  });
+
+  test("the editing notice: the second person is told who has the page open, nobody is blocked, and leaving ends it", async () => {
+    const caraPage = await browser.newPage();
+    await signIn(caraPage, cara);
+    await addPageNamed(caraPage, "Shared page");
+    const id = caraPage.url().split("/").pop()!;
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.goto(site.base + `/admin/pages/${id}`);
+    await page.getByText("Cara has this page open too").waitFor();
+    // Anna can still change and save it.
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("Anna was here");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => status(page).textContent()).toBe("Saved.");
+    // Cara leaves; the notice goes, so a later visit by Anna's colleague sees no one.
+    await caraPage.goto(site.base + "/admin/pages");
+    await expect
+      .poll(async () => (await db.run("select 1 from entry_locks where entry_id = ?", [id])).length)
+      .toBe(0);
+    await page.close();
+    await caraPage.close();
+  });
+
   test("a contributor cannot schedule, and does not see the choice", async () => {
     const page = await browser.newPage();
     await signIn(page, cara);
