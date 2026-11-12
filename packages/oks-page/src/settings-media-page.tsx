@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
+import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { MediaSettingsFormScreen } from "./media-settings-form";
@@ -21,12 +22,13 @@ export default async function MediaSettingsPage() {
   const settings = await loadMediaSettingsForm(getRunner(), member.siteId);
   return (
     <AdminFrame
+      nav={navFor((c) => actor.can(c))}
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
-      selectedKey="media"
+      selectedKey="settings"
       title="Media settings"
-      breadcrumbs={[{ label: "Media", href: "/admin/media" }, { label: "Settings" }]}
+      breadcrumbs={[{ label: "Settings" }, { label: "Media" }]}
     >
       <MediaSettingsFormScreen initial={settings} />
     </AdminFrame>

@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
+import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { EntryEditScreen, type EntryEditScreenProps } from "./entry-edit-screen";
@@ -30,6 +31,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
     (actor.can("content.publish_own", entry.type) && entry.authorId === actor.userId);
   return (
     <AdminFrame
+      nav={navFor((c) => actor.can(c))}
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}

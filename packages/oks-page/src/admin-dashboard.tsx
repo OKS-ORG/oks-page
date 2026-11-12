@@ -2,10 +2,12 @@
 // The dashboard screen: the site's counts and its latest edits, inside the admin frame.
 import { Card, CardBody, CardHeader } from "oks-ui";
 import { AdminFrame } from "./admin-frame";
+import type { NavItem } from "./admin-nav";
 import type { DashboardData } from "./dashboard-data";
 
 export interface AdminDashboardProps {
   user: { name: string; email: string };
+  nav: NavItem[];
   data: DashboardData;
   product: string;
   version: string;
@@ -14,10 +16,11 @@ export interface AdminDashboardProps {
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
-export function AdminDashboard({ user, data, product, version }: AdminDashboardProps) {
+export function AdminDashboard({ user, nav, data, product, version }: AdminDashboardProps) {
   return (
     <AdminFrame
       user={user}
+      nav={nav}
       product={product}
       version={version}
       selectedKey="home"

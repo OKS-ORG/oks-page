@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
+import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { MediaLibraryScreen } from "./media-library";
@@ -22,6 +23,7 @@ export default async function MediaPage() {
   if (!list.ok) redirect("/admin");
   return (
     <AdminFrame
+      nav={navFor((c) => actor.can(c))}
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}

@@ -4,13 +4,7 @@ import { Shell } from "@oks-page/admin";
 import "@oks-page/admin/shell.css";
 import { Button } from "oks-ui";
 import type { ReactNode } from "react";
-
-export const NAV = [
-  { key: "home", label: "Home", href: "/admin" },
-  { key: "pages", label: "Pages", href: "/admin/pages" },
-  { key: "posts", label: "Posts", href: "/admin/posts" },
-  { key: "media", label: "Media", href: "/admin/media" },
-];
+import type { NavItem } from "./admin-nav";
 
 async function signOut() {
   await fetch("/api/auth/sign-out", {
@@ -23,6 +17,8 @@ async function signOut() {
 
 export interface AdminFrameProps {
   user: { name: string; email: string };
+  /** The menu for this person (see `navFor`). */
+  nav: NavItem[];
   product: string;
   version: string;
   selectedKey: string;
@@ -33,6 +29,7 @@ export interface AdminFrameProps {
 
 export function AdminFrame({
   user,
+  nav,
   product,
   version,
   selectedKey,
@@ -42,7 +39,7 @@ export function AdminFrame({
 }: AdminFrameProps) {
   return (
     <Shell
-      nav={NAV}
+      nav={nav}
       selectedKey={selectedKey}
       title={title}
       {...(breadcrumbs ? { breadcrumbs } : {})}

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
+import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { ContentList } from "./content-list";
 import { getRunner } from "./db";
@@ -32,6 +33,7 @@ export async function ContentListPage({
   const view = (await searchParams)?.view === "trash" ? "trash" : "all";
   return (
     <AdminFrame
+      nav={navFor((c) => actor.can(c))}
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}

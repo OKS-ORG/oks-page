@@ -2203,4 +2203,48 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await page.waitForURL(site.base + "/admin");
     await page.close();
   });
+
+  test("the menu shows each person only the places they may use", async () => {
+    const places = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
+      // The menu is drawn in the browser, a moment after the heading: wait for its first entry.
+      await page.locator('a[href="/admin"]').first().waitFor();
+      const found: string[] = [];
+      for (const href of [
+        "/admin",
+        "/admin/pages",
+        "/admin/posts",
+        "/admin/media",
+        "/admin/settings/media",
+      ])
+        if ((await page.locator(`a[href="${href}"]`).count()) > 0) found.push(href);
+      return found;
+    };
+    const owner = await ownerPage();
+    await owner.goto(site.base + "/admin");
+    await owner.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(await places(owner)).toEqual([
+      "/admin",
+      "/admin/pages",
+      "/admin/posts",
+      "/admin/media",
+      "/admin/settings/media",
+    ]);
+    // The settings screen marks Settings as the place you are in.
+    await owner.goto(site.base + "/admin/settings/media");
+    await owner.getByRole("heading", { name: "Media settings", level: 1 }).waitFor();
+    expect(
+      await owner.locator('a[href="/admin/settings/media"][aria-current]').count(),
+    ).toBeGreaterThan(0);
+    await owner.close();
+
+    const cara = await browser.newPage();
+    await cara.context().addCookies((await caraApi.storageState()).cookies);
+    await cara.goto(site.base + "/admin");
+    await cara.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(await places(cara)).toEqual(["/admin", "/admin/pages", "/admin/posts"]);
+    // The screens still refuse her on the server, whatever the menu shows.
+    await cara.goto(site.base + "/admin/settings/media");
+    await cara.waitForURL(site.base + "/admin");
+    await cara.close();
+  });
 });
