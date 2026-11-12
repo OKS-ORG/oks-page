@@ -163,6 +163,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-maintenance-page")};\n`,
     },
     {
+      path: "app/admin/settings/redirects/page.tsx",
+      content: `export { default, metadata } from ${from("settings-redirects-page")};\n`,
+    },
+    {
       path: "app/admin/account/page.tsx",
       content: `export { default, metadata } from ${from("account-page")};\n`,
     },
@@ -233,6 +237,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/maintenance/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-maintenance")};\n`,
+    },
+    {
+      path: "app/api/admin/redirects/route.ts",
+      content: `export { GET, POST } from ${from("api-redirects")};\n`,
+    },
+    {
+      path: "app/api/admin/redirects/[id]/route.ts",
+      content: `export { DELETE } from ${from("api-redirect")};\n`,
     },
     {
       path: "app/api/admin/settings/security/route.ts",

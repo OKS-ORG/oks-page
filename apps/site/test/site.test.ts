@@ -1775,6 +1775,149 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.close();
   });
 
+  test("redirects: a new address for a published post keeps the old one working (one step, query kept), and the screen adds, refuses loops and deletes", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const hop = async (path: string) => {
+      const response = await fetch(site.base + path, { redirect: "manual" });
+      // The server may answer with a relative address ("/blog/x"): compare full addresses.
+      const to = response.headers.get("location");
+      return {
+        status: response.status,
+        location: to === null ? null : new URL(to, site.base).toString(),
+      };
+    };
+
+    // A published post gets a new address twice.
+    const made = await call("POST", "/api/admin/entries", { type: "post", title: "Old name" });
+    const id = String(made.json!["id"]);
+    const save = async (slugPart: string, revision: number) => {
+      const saved = await call("PUT", `/api/admin/entries/${id}`, {
+        title: "Old name",
+        slugPart,
+        status: "published",
+        blocks: [],
+        revision,
+      });
+      expect(saved.status).toBe(200);
+      return Number(saved.json!["revision"]);
+    };
+    let revision = await save("old-name", Number(made.json!["revision"]));
+    expect((await hop("/blog/old-name")).status).toBe(200);
+    revision = await save("new-name", revision);
+    const first = await hop("/blog/old-name");
+    expect(first.status).toBe(301);
+    expect(first.location).toBe(`${site.base}/blog/new-name`);
+    // The query string goes along, and a trailing slash does not matter.
+    expect((await hop("/blog/old-name?utm_source=mail")).location).toBe(
+      `${site.base}/blog/new-name?utm_source=mail`,
+    );
+    const followed = await fetch(`${site.base}/blog/old-name/`);
+    expect(followed.url).toBe(`${site.base}/blog/new-name`);
+    expect(followed.status).toBe(200);
+    // A second rename: the first old address goes straight to the newest one.
+    revision = await save("newest-name", revision);
+    expect((await hop("/blog/old-name")).location).toBe(`${site.base}/blog/newest-name`);
+    expect((await hop("/blog/new-name")).location).toBe(`${site.base}/blog/newest-name`);
+    expect((await hop("/blog/newest-name")).status).toBe(200);
+    expect(revision).toBeGreaterThan(0);
+    // An address that was never used is still a real 404.
+    expect((await hop("/blog/never-existed")).status).toBe(404);
+    // The uses are counted (in the background).
+    await expect
+      .poll(
+        async () =>
+          Number(
+            (
+              await db.run("select hit_count from redirects where from_path = '/blog/old-name'")
+            )[0]!["hit_count"],
+          ),
+        { timeout: 5000 },
+      )
+      .toBeGreaterThanOrEqual(3);
+
+    // The screen lists them and adds one by hand.
+    await page.goto(site.base + "/admin/settings/redirects");
+    await page.getByRole("heading", { name: "Redirects", level: 1 }).waitFor();
+    await page.getByRole("cell", { name: "/blog/old-name", exact: true }).waitFor();
+    await page.getByLabel("Old address").fill("/legacy");
+    await page.getByLabel("New address").fill("/blog/newest-name");
+    await page.getByRole("button", { name: "Add redirect" }).click();
+    await page.getByRole("cell", { name: "/legacy", exact: true }).waitFor();
+    expect((await hop("/legacy")).location).toBe(`${site.base}/blog/newest-name`);
+
+    // Refusals are said in words: a loop, a live page.
+    const add = async (from: string, to: string) => {
+      await page.getByLabel("Old address").fill(from);
+      await page.getByLabel("New address").fill(to);
+      await page.getByRole("button", { name: "Add redirect" }).click();
+    };
+    await add("/loop-a", "/loop-b");
+    await page.getByRole("cell", { name: "/loop-a", exact: true }).waitFor();
+    await add("/loop-b", "/loop-a");
+    await page.getByText("This would make a loop.").waitFor();
+    await add("/blog/newest-name", "/legacy"); // the live post of this test
+    await page.getByText("A page already uses this address").waitFor();
+
+    // No accessibility violation on a wide and a narrow screen.
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `redirects ${width}px`,
+      ).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // Delete asks first; afterwards the old address is a 404.
+    await page.getByRole("button", { name: "Delete the redirect from /legacy" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByText(/will no longer lead to/)
+      .waitFor();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("cell", { name: "/legacy", exact: true }).waitFor({ state: "detached" });
+    expect((await hop("/legacy")).status).toBe(404);
+    await page.close();
+
+    // Signed out: the API refuses.
+    for (const [method, url] of [
+      ["GET", "/api/admin/redirects"],
+      ["POST", "/api/admin/redirects"],
+      ["DELETE", "/api/admin/redirects/anything"],
+    ] as const) {
+      const response = await fetch(site.base + url, {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      expect(response.status, `${method} ${url}`).toBe(401);
+    }
+  });
+
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill(title);

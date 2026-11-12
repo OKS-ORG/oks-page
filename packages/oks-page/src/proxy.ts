@@ -3,9 +3,10 @@
 //     trashed or a scheduled entry is not reachable (SEO-50), and a made-up address does not fill the cache.
 //     The lookup is one indexed read (SEO-51: under 5 ms at the 95th percentile).
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
+import { countRedirectHit, findRedirect } from "@oks-page/core";
 import { NextResponse, type NextRequest } from "next/server";
 import { findPublished, findTermArchive, slugOf } from "./data/entries";
-import { getSiteId, NO_SITE } from "./db";
+import { getRunner, getSiteId, NO_SITE } from "./db";
 import {
   NOT_FOUND_CACHE_HEADER,
   PRIVATE,
@@ -25,6 +26,7 @@ export async function proxy(request: NextRequest) {
   const started = performance.now();
   let found: Awaited<ReturnType<typeof findPublished>>;
   let archive: Awaited<ReturnType<typeof findTermArchive>> = null;
+  let moved: Awaited<ReturnType<typeof findRedirect>> = null;
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
   try {
@@ -35,6 +37,9 @@ export async function proxy(request: NextRequest) {
     ]);
     // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
     if (!found) archive = await findTermArchive(slug);
+    // Still nothing: it may be an old address that was redirected (a page that got a new address, or one set by hand).
+    if (!found && !archive && path !== "")
+      moved = await findRedirect(getRunner(), await getSiteId(), path);
   } catch (error) {
     // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
     if (error instanceof Error && error.message === NO_SITE)
@@ -74,6 +79,13 @@ export async function proxy(request: NextRequest) {
   if (archive) {
     const tags = [`site:${await getSiteId()}`, `term:${archive.id}`, ...MENU_TAGS];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+  }
+  if (moved) {
+    // Go to the new address and keep the query string ("?utm_source=..."), then count the use (never slows the answer).
+    const to = new URL(moved.to, request.url);
+    if (moved.to.startsWith("/")) to.search = request.nextUrl.search;
+    void countRedirectHit(getRunner(), moved.id).catch(() => undefined);
+    return NextResponse.redirect(to, moved.status);
   }
   // The 404 handler sends the cache header itself (Next.js would replace one set here), so it is passed on as a request header.
   const wanted = notFoundHeaders({ cdn, visitor })["cache-control"];

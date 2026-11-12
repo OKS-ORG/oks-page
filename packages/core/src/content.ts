@@ -4,6 +4,7 @@
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
 import { writeBlocks } from "@oks-page/renderer";
+import { recordSlugChange } from "./redirects.js";
 import { canonicalJson, pruneRevisions, summarise } from "./revision-parts.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
@@ -404,6 +405,13 @@ export async function saveContent(
     return fail("not_found", "This entry does not exist.");
   }
   await pruneRevisions(runner, id, at.getTime());
+  // A published page that gets a new address keeps its old address working (a 301, chains collapsed).
+  if (
+    String(row["status"]) === "published" &&
+    input.status === "published" &&
+    slug !== String(row["slug"])
+  )
+    await recordSlugChange(runner, siteId, String(row["slug"]), slug);
   // The unsaved copy this person had is now in the saved page.
   await runner.all(
     `delete from "entry_revisions" where "entry_id" = ? and "author_id" = ? and "kind" = 'autosave'`,
