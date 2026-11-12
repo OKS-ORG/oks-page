@@ -12,6 +12,7 @@ import { signedInMember } from "./admin-session";
 import { STATUS_OF, isSameOrigin, reply } from "./api-entries";
 import { TAXONOMY_STATUS } from "./api-taxonomy";
 import { getRunner } from "./db";
+import { refreshArchives } from "./refresh-cache";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -52,6 +53,7 @@ export async function PUT(request: Request, context: Context) {
     tags: input["tags"],
   });
   if (!result.ok) return reply(result, TAXONOMY_STATUS[result.code]);
+  refreshArchives();
   return NextResponse.json({
     ok: true,
     categoryIds: result.categoryIds,

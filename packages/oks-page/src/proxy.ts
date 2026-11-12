@@ -4,7 +4,7 @@
 //     The lookup is one indexed read (SEO-51: under 5 ms at the 95th percentile).
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
 import { NextResponse, type NextRequest } from "next/server";
-import { findPublished, slugOf } from "./data/entries";
+import { findPublished, findTermArchive, slugOf } from "./data/entries";
 import { getSiteId, NO_SITE } from "./db";
 import { NOT_FOUND_CACHE_HEADER, notFoundHeaders, pageHeaders, visitorOf } from "./headers";
 import { cdnEnabled } from "./settings";
@@ -14,9 +14,12 @@ export async function proxy(request: NextRequest) {
   const slug = slugOf(path === "" ? undefined : path.slice(1).split("/"));
   const started = performance.now();
   let found: Awaited<ReturnType<typeof findPublished>>;
+  let archive: Awaited<ReturnType<typeof findTermArchive>> = null;
   let cdn: boolean;
   try {
     [found, cdn] = await Promise.all([findPublished(slug), cdnEnabled()]);
+    // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
+    if (!found) archive = await findTermArchive(slug);
   } catch (error) {
     // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
     if (error instanceof Error && error.message === NO_SITE)
@@ -35,6 +38,10 @@ export async function proxy(request: NextRequest) {
   };
   if (found) {
     const tags = [`site:${await getSiteId()}`, `entry:${found.id}`, `type:${found.type}`];
+    return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+  }
+  if (archive) {
+    const tags = [`site:${await getSiteId()}`, `term:${archive.id}`];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   // The 404 handler sends the cache header itself (Next.js would replace one set here), so it is passed on as a request header.

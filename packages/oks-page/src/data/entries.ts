@@ -2,7 +2,7 @@
 import { enhanceImages } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
-import type { EntryView } from "./types";
+import type { EntryView, TermArchive } from "./types";
 
 /** "/" is the entry with the slug "home"; other paths use the path without the leading slash. */
 export const slugOf = (path: string[] | undefined) =>
@@ -39,6 +39,91 @@ export async function findPublished(slug: string): Promise<{ id: string; type: s
   );
   const r = rows[0];
   return r ? { id: String(r["id"]), type: String(r["type_key"]) } : null;
+}
+
+/** Splits an address like "category/travel" into the list and the term's address, or null if it is not one. */
+export function archiveParts(slug: string): { kind: "category" | "tag"; slug: string } | null {
+  const parts = slug.split("/");
+  if (parts.length !== 2 || !parts[1]) return null;
+  const kind = parts[0] === "category" ? "category" : parts[0] === "tag" ? "tag" : null;
+  return kind ? { kind, slug: parts[1] } : null;
+}
+
+/** The cheap question the proxy asks for an address that is not an entry: is it the archive of a real term? */
+export async function findTermArchive(slug: string): Promise<{ id: string } | null> {
+  const parts = archiveParts(slug);
+  if (!parts) return null;
+  const siteId = await getSiteId();
+  const rows = await getRunner().all(
+    `select t."id" from "terms" t join "taxonomies" x on x."id" = t."taxonomy_id"
+      where x."site_id" = ? and x."key" = ? and t."slug" = ? limit 1`,
+    [siteId, parts.kind, parts.slug],
+  );
+  return rows[0] ? { id: String(rows[0]["id"]) } : null;
+}
+
+const MOST_POSTS = 100;
+
+/** An archive with its newest published posts, or null when there is no such term. */
+export async function loadTermArchive(slug: string): Promise<TermArchive | null> {
+  const parts = archiveParts(slug);
+  if (!parts) return null;
+  const siteId = await getSiteId();
+  const runner = getRunner();
+  const found = await runner.all(
+    `select t."id", t."name", t."slug", t."description" from "terms" t join "taxonomies" x on x."id" = t."taxonomy_id"
+      where x."site_id" = ? and x."key" = ? and t."slug" = ? limit 1`,
+    [siteId, parts.kind, parts.slug],
+  );
+  const term = found[0];
+  if (!term) return null;
+  const id = String(term["id"]);
+  // A category's archive also holds the posts of the categories under it.
+  const ids = [id];
+  if (parts.kind === "category")
+    for (let from = [id]; from.length > 0;) {
+      const marks = from.map(() => "?").join(", ");
+      const kids = await runner.all(
+        `select "id" from "terms" where "parent_id" in (${marks})`,
+        from,
+      );
+      from = kids.map((k) => String(k["id"])).filter((k) => !ids.includes(k));
+      ids.push(...from);
+    }
+  const marks = ids.map(() => "?").join(", ");
+  const rows = await runner.all(
+    `select distinct e."id", e."title", e."slug", e."published_at" from "entries" e
+       join "entry_terms" et on et."entry_id" = e."id"
+      where e."site_id" = ? and e."status" = 'published' and e."locale" = '' and e."type_key" = 'post'
+        and et."term_id" in (${marks})
+      order by e."published_at" desc, e."id" limit ${MOST_POSTS + 1}`,
+    [siteId, ...ids],
+  );
+  const time = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
+  return {
+    id,
+    kind: parts.kind,
+    name: String(term["name"]),
+    slug: String(term["slug"]),
+    description: String(term["description"]),
+    posts: rows.slice(0, MOST_POSTS).map((r) => ({
+      title: String(r["title"]),
+      slug: String(r["slug"]),
+      publishedAt: time(r["published_at"]),
+    })),
+    more: rows.length > MOST_POSTS,
+  };
+}
+
+/** Every archive address, for the export build. */
+export async function listArchiveSlugs(): Promise<string[]> {
+  const siteId = await getSiteId();
+  const rows = await getRunner().all(
+    `select x."key", t."slug" from "terms" t join "taxonomies" x on x."id" = t."taxonomy_id"
+      where x."site_id" = ? and x."key" in ('category', 'tag') order by x."key", t."slug"`,
+    [siteId],
+  );
+  return rows.map((r) => `${String(r["key"])}/${String(r["slug"])}`);
 }
 
 /** Every published address, for the export build (static mode), which makes one file per page. */

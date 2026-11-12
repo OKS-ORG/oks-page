@@ -1,9 +1,10 @@
 // The page for the export build (static mode): the same output as the server build's page, plus the list of pages to
 // write. Used in place of app/[[...slug]]/page.tsx by scripts/build-export.mjs.
-import { allSlugParams, getPublishedEntry, slugOf } from "./data/export";
+import { allSlugParams, getPublishedEntry, getTermArchive, slugOf } from "./data/export";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
+import { ArchiveView, archiveTitle } from "./archive-view";
 import { canonicalFor } from "./site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
@@ -15,12 +16,21 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const slug = slugOf((await params).slug);
   const entry = await getPublishedEntry(slug);
-  return entry ? { title: entry.title, alternates: { canonical: canonicalFor(slug) } } : {};
+  if (entry) return { title: entry.title, alternates: { canonical: canonicalFor(slug) } };
+  const archive = await getTermArchive(slug);
+  return archive
+    ? { title: archiveTitle(archive), alternates: { canonical: canonicalFor(slug) } }
+    : {};
 }
 
 export default async function Page({ params }: Props) {
-  const entry = await getPublishedEntry(slugOf((await params).slug));
-  if (!entry) notFound();
+  const slug = slugOf((await params).slug);
+  const entry = await getPublishedEntry(slug);
+  if (!entry) {
+    const archive = await getTermArchive(slug);
+    if (!archive) notFound();
+    return <ArchiveView archive={archive} />;
+  }
   return (
     <main data-pagefind-body>
       <h1>{entry.title}</h1>

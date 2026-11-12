@@ -436,6 +436,22 @@ for (const { kind, skip } of openers) {
       await s.entry("docs/intro", "Intro");
       await s.entry("hidden", "Hidden", "draft");
       await s.entry("secret", "Secret", "private");
+      // One category with one published post, so the export has a category page to write.
+      const taxonomy = `TAX${"0".repeat(22)}1`;
+      await db.run(
+        "insert into taxonomies (id, site_id, key, label, hierarchical, applies_to) values (?, ?, 'category', 'Categories', ?, '[\"post\"]')",
+        [taxonomy, s.site, true],
+      );
+      const term = `TRM${"0".repeat(22)}1`;
+      await db.run(
+        "insert into terms (id, taxonomy_id, slug, name, description) values (?, ?, 'news', 'News', '')",
+        [term, taxonomy],
+      );
+      const post = await s.entry("blog/first", "First post", "published", "post");
+      await db.run("insert into entry_terms (entry_id, term_id, position) values (?, ?, 0)", [
+        post,
+        term,
+      ]);
       site = await startSite(kind, db, { OKS_SITE_URL: SITE_URL });
       out = mkdtempSync(join(tmpdir(), "oks-exp-out-"));
       buildExport(kind, db, out, { OKS_SITE_URL: SITE_URL });
@@ -457,6 +473,19 @@ for (const { kind, skip } of openers) {
         expect(written, path).toEqual(served);
         expect(written.canonical, path).toBe(path === "/" ? `${SITE_URL}/` : `${SITE_URL}${path}`);
       }
+    });
+
+    test("the export writes the category pages too, with the same heading and title as the server build", async () => {
+      const served = await (await fetch(site.base + "/category/news")).text();
+      const written = readFileSync(join(out, "category/news.html"), "utf8");
+      expect(pick(written)).toMatchObject({
+        title: "Category: News",
+        heading: "Category: News",
+        canonical: `${SITE_URL}/category/news`,
+      });
+      expect(written).toContain('href="/blog/first"');
+      expect(pick(written).heading).toBe(pick(served).heading);
+      expect(pick(written).title).toBe(pick(served).title);
     });
 
     test("ST-02 the export holds only published pages, and a 404 page", () => {
@@ -1217,6 +1246,99 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       });
       expect(response.status, method).toBe(401);
     }
+  });
+
+  test("the public category and tag pages list published posts, include child categories, refresh at once and 404 when unknown", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const termId = async (slug: string) =>
+      String((await db.run("select id from terms where slug = ?", [slug]))[0]!["id"]);
+
+    const rail = await call("POST", "/api/admin/taxonomies/category", { name: "Rail Trips" });
+    expect(rail.status).toBe(201);
+    const trains = await call("POST", "/api/admin/taxonomies/category", {
+      name: "Trains",
+      parentId: await termId("rail-trips"),
+    });
+    expect(trains.status).toBe(201);
+
+    // A published post and a draft, both in Trains, with the tag "Window Seat".
+    const addPost = async (title: string, publish: boolean) => {
+      const made = await call("POST", "/api/admin/entries", { type: "post", title });
+      const id = String(made.json!["id"]);
+      if (publish) {
+        const saved = await call("PUT", `/api/admin/entries/${id}`, {
+          title,
+          slugPart: String(made.json!["slug"]).replace(/^blog\//, ""),
+          status: "published",
+          blocks: [],
+          revision: made.json!["revision"],
+        });
+        expect(saved.status).toBe(200);
+      }
+      const terms = await call("PUT", `/api/admin/entries/${id}/terms`, {
+        categoryIds: [await termId("trains")],
+        tags: ["Window Seat"],
+      });
+      expect(terms.status).toBe(200);
+      return id;
+    };
+    const published = await addPost("Night train to Vienna", true);
+    await addPost("Unfinished train notes", false);
+
+    for (const path of ["/category/trains", "/category/rail-trips", "/tag/window-seat"]) {
+      const { status: code, body } = await text(path);
+      expect(code, path).toBe(200);
+      expect(body, path).toContain("Night train to Vienna");
+      expect(body, path).toContain('href="/blog/night-train-to-vienna"');
+      expect(body, path).not.toContain("Unfinished train notes");
+    }
+    const trainsPage = await text("/category/trains");
+    expect(trainsPage.body).toContain("<h1>Category: Trains</h1>");
+    expect(trainsPage.body).toContain("<title>Category: Trains</title>");
+    expect((await text("/tag/window-seat")).body).toContain("<h1>Tag: Window Seat</h1>");
+    // Not in another category.
+    expect((await text("/category/uncategorised")).body).not.toContain("Night train to Vienna");
+    // A tag with no posts is an empty page, not a 404.
+    await call("POST", "/api/admin/taxonomies/tag", { name: "Empty One" });
+    const empty = await text("/tag/empty-one");
+    expect(empty.status).toBe(200);
+    expect(empty.body).toContain("There are no posts here yet.");
+
+    // Unknown archives are real 404s with noindex, like any unknown address.
+    for (const path of ["/category/nope", "/tag/nope", "/category", "/tag/window-seat/extra"]) {
+      const response = await fetch(site.base + path);
+      expect(response.status, path).toBe(404);
+      expect(response.headers.get("x-robots-tag"), path).toContain("noindex");
+    }
+
+    // A change shows at once: a new name, then the post leaving the site.
+    const renamed = await call("PATCH", `/api/admin/terms/${await termId("trains")}`, {
+      name: "Locomotives",
+    });
+    expect(renamed.status).toBe(200);
+    expect((await text("/category/trains")).body).toContain("Category: Locomotives");
+    expect((await call("DELETE", `/api/admin/entries/${published}`)).status).toBe(200);
+    expect((await text("/category/trains")).body).not.toContain("Night train to Vienna");
+    // Deleting the category: the address goes away.
+    expect((await call("DELETE", `/api/admin/terms/${await termId("trains")}`)).status).toBe(200);
+    expect((await fetch(site.base + "/category/trains")).status).toBe(404);
+    await page.close();
   });
 
   const addPageNamed = async (page: Page, title: string) => {

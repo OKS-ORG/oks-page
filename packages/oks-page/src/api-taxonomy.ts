@@ -11,6 +11,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { refreshArchives } from "./refresh-cache";
 
 type Context = { params: Promise<{ key: string }> };
 
@@ -68,5 +69,6 @@ export async function POST(request: Request, context: Context) {
     termInputFrom(input),
   );
   if (!result.ok) return failed(result);
+  refreshArchives();
   return NextResponse.json({ ok: true, id: result.id, slug: result.slug }, { status: 201 });
 }

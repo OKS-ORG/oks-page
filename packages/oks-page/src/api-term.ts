@@ -6,6 +6,7 @@ import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { failed, termInputFrom } from "./api-taxonomy";
 import { getRunner } from "./db";
+import { refreshArchives } from "./refresh-cache";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -29,6 +30,7 @@ export async function PATCH(request: Request, context: Context) {
     termInputFrom(input),
   );
   if (!result.ok) return failed(result);
+  refreshArchives();
   return NextResponse.json({ ok: true, slug: result.slug });
 }
 
@@ -40,5 +42,6 @@ export async function DELETE(request: Request, context: Context) {
   const { id } = await context.params;
   const result = await deleteTerm(getRunner(), await actorOf(member), member.siteId, id);
   if (!result.ok) return failed(result);
+  refreshArchives();
   return NextResponse.json({ ok: true, moved: result.moved });
 }
