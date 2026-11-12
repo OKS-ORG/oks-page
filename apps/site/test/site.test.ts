@@ -1031,6 +1031,117 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     expect(save.status).toBe(401);
   });
 
+  test("categories and tags: add, nest, change and delete; a deleted category's posts fall back to Uncategorised; signed-out requests are refused", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    await page.getByRole("link", { name: "Categories and tags", exact: true }).first().click();
+    await page.getByRole("heading", { name: "Categories", level: 1 }).waitFor();
+    const row = (name: string) => page.getByRole("row").filter({ hasText: name });
+    await row("Uncategorised").first().waitFor();
+    // Uncategorised can be changed but never deleted.
+    expect(await row("Uncategorised").getByRole("button", { name: "Delete" }).count()).toBe(0);
+
+    const add = async (name: string, parent?: string) => {
+      await page.getByLabel(/^Name of the new category/).fill(name);
+      if (parent) await page.getByLabel("Parent category").first().selectOption({ label: parent });
+      await page.getByRole("button", { name: "Add new category" }).click();
+      await row(name).first().waitFor();
+    };
+    await add("News");
+    await add("Sports", "News");
+    await row("– Sports").first().waitFor();
+
+    const axeProblems = async (label: string) => {
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        label,
+      ).toEqual([]);
+    };
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await axeProblems(`categories ${width}px`);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // Change a name; the address stays.
+    await row("News").first().getByRole("button", { name: "Edit" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Name").fill("News and views");
+    await axeProblems("the change window");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await row("News and views").first().waitFor();
+    const termId = async (slug: string) =>
+      String((await db.run("select id from terms where slug = ?", [slug]))[0]!["id"]);
+    expect(await termId("news")).toBeTruthy();
+
+    // An address that is taken is refused in words, and the window stays open.
+    await row("News and views").first().getByRole("button", { name: "Edit" }).click();
+    await dialog.getByLabel("Address").fill("sports");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await dialog.getByText("Another one already has this address.").waitFor();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+
+    // A post in the category, then the category is deleted: the post falls back and its child moves up.
+    const postId = String(
+      (await db.run("select id from entries where slug = 'blog/hello-world'"))[0]!["id"],
+    );
+    await db.run("insert into entry_terms (entry_id, term_id, position) values (?, ?, 0)", [
+      postId,
+      await termId("news"),
+    ]);
+    await page.reload();
+    await row("News and views").first().waitFor();
+    await row("News and views").first().getByRole("button", { name: "Delete" }).click();
+    const confirm = page.getByRole("alertdialog");
+    await confirm.getByText(/Posts that have only this category move to Uncategorised/).waitFor();
+    await confirm.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByText("News and views").first().waitFor({ state: "detached" });
+    await row("Sports").first().waitFor();
+    expect(await page.getByText("– Sports").count()).toBe(0);
+    const after = await db.run(
+      "select t.slug from entry_terms et join terms t on t.id = et.term_id where et.entry_id = ?",
+      [postId],
+    );
+    expect(after.map((r) => r["slug"])).toEqual(["uncategorised"]);
+
+    // Tags: flat, no parent choice.
+    await page.getByRole("link", { name: "Tags", exact: true }).first().click();
+    await page.getByRole("heading", { name: "Tags", level: 1 }).waitFor();
+    expect(await page.getByLabel("Parent category").count()).toBe(0);
+    await page.getByLabel(/^Name of the new tag/).fill("Garden");
+    await page.getByRole("button", { name: "Add new tag" }).click();
+    await row("Garden").first().waitFor();
+    await axeProblems("tags");
+    await page.close();
+
+    // Signed out: the screens send to sign-in and the API says 401.
+    const visitor = await browser.newPage();
+    await visitor.goto(site.base + "/admin/categories");
+    await visitor.waitForURL("**/admin/login");
+    await visitor.close();
+    for (const [url, method] of [
+      ["/api/admin/taxonomies/tag", "GET"],
+      ["/api/admin/taxonomies/tag", "POST"],
+      ["/api/admin/terms/anything", "PATCH"],
+      ["/api/admin/terms/anything", "DELETE"],
+    ] as const) {
+      const response = await fetch(site.base + url, {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "GET" || method === "DELETE" ? {} : { body: "{}" }),
+      });
+      expect(response.status, `${method} ${url}`).toBe(401);
+    }
+  });
+
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill(title);

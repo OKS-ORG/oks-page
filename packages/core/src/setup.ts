@@ -4,6 +4,7 @@
 import { newId, type SqlRunner } from "@oks-page/db";
 import { DEFAULT_ROLES } from "./roles.js";
 import { BUILT_IN_TYPES, STARTER_ENTRIES, starterBody } from "./starter.js";
+import { ensureDefaultTaxonomies } from "./taxonomies.js";
 
 export const SITE_PURPOSES = ["blog", "business", "portfolio", "other"] as const;
 export type SitePurpose = (typeof SITE_PURPOSES)[number];
@@ -175,6 +176,7 @@ export async function runSetup(
           `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, ?, ?)`,
           [siteId, key, JSON.stringify(value), 1, at],
         );
+      await ensureDefaultTaxonomies(tx, siteId);
       return { siteId, userId };
     });
   } catch (error) {

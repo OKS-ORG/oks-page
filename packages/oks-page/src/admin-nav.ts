@@ -23,6 +23,12 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["content.create", "content.edit_own", "content.edit_any"],
   },
   {
+    key: "taxonomies",
+    label: "Categories and tags",
+    href: "/admin/categories",
+    needs: ["content.edit_any"],
+  },
+  {
     key: "media",
     label: "Media",
     href: "/admin/media",

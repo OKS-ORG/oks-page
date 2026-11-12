@@ -163,6 +163,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("posts-list-page")};\n`,
     },
     {
+      path: "app/admin/categories/page.tsx",
+      content: `export { default, metadata } from ${from("categories-page")};\n`,
+    },
+    {
+      path: "app/admin/tags/page.tsx",
+      content: `export { default, metadata } from ${from("tags-page")};\n`,
+    },
+    {
       path: "app/admin/pages/[id]/page.tsx",
       content: `export { default, metadata } from ${from("entry-edit-page")};\n`,
     },
@@ -205,6 +213,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/security/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-security")};\n`,
+    },
+    {
+      path: "app/api/admin/taxonomies/[key]/route.ts",
+      content: `export { GET, POST } from ${from("api-taxonomy")};\n`,
+    },
+    {
+      path: "app/api/admin/terms/[id]/route.ts",
+      content: `export { PATCH, DELETE } from ${from("api-term")};\n`,
     },
     {
       path: "app/uploads/[...key]/route.ts",

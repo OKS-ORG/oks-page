@@ -9,10 +9,17 @@ const keysOf = (role: string) => {
 
 describe("the menu for each default role", () => {
   test("administrator sees everything", () => {
-    expect(keysOf("administrator")).toEqual(["home", "pages", "posts", "media", "settings"]);
+    expect(keysOf("administrator")).toEqual([
+      "home",
+      "pages",
+      "posts",
+      "taxonomies",
+      "media",
+      "settings",
+    ]);
   });
-  test("editor has no settings", () => {
-    expect(keysOf("editor")).toEqual(["home", "pages", "posts", "media"]);
+  test("editor manages categories and tags but has no settings", () => {
+    expect(keysOf("editor")).toEqual(["home", "pages", "posts", "taxonomies", "media"]);
   });
   test("author writes and uploads, but has no settings", () => {
     expect(keysOf("author")).toEqual(["home", "pages", "posts", "media"]);
