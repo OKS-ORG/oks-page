@@ -26,6 +26,7 @@ const RESERVED = new Set([
   "favicon.ico",
   "not-found-handler",
   "maintenance-handler",
+  "search",
   "test-form",
 ]);
 const SLUG_PART = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

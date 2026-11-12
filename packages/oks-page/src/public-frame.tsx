@@ -3,12 +3,21 @@
 import type { PublicMenuItem } from "@oks-page/core";
 import type { ReactNode } from "react";
 
+// A link is at least 24 px high so it is easy to hit with a finger or a mouse (WCAG 2.2, target size).
+const LINK: React.CSSProperties = {
+  display: "inline-block",
+  minBlockSize: "24px",
+  paddingBlock: "2px",
+};
+
 function MenuList({ items }: { items: PublicMenuItem[] }) {
   return (
     <ul>
       {items.map((item) => (
         <li key={item.id}>
-          <a href={item.href}>{item.label}</a>
+          <a href={item.href} style={LINK}>
+            {item.label}
+          </a>
           {item.children.length > 0 ? <MenuList items={item.children} /> : null}
         </li>
       ))}

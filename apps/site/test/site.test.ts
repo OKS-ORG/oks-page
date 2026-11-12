@@ -501,8 +501,10 @@ for (const { kind, skip } of openers) {
       ] as const) {
         const served = await (await fetch(site.base + path)).text();
         const written = readFileSync(join(out, file), "utf8");
-        expect(menu(written), path).toContain('<a href="/about">About</a>');
-        expect(menu(written), path).toContain('<a href="https://shop.example.com">Shop</a>');
+        expect(menu(written), path).toMatch(/<a href="\/about"[^>]*>About<\/a>/);
+        expect(menu(written), path).toMatch(
+          /<a href="https:\/\/shop\.example\.com"[^>]*>Shop<\/a>/,
+        );
         expect(menu(written), path).toBe(menu(served));
         expect(written, path).not.toContain('aria-label="Footer menu"');
       }
@@ -1505,7 +1507,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       [
         ...(
           new RegExp(`<nav aria-label="${label}">(.*?)</nav>`, "s").exec(html)?.[1] ?? ""
-        ).matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g),
+        ).matchAll(/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/g),
       ].map((m) => `${m[2]} -> ${m[1]}`);
 
     // The menu was saved by the earlier menu test or is empty: start from a known one.
@@ -1552,6 +1554,28 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     expect(links((await text("/")).body, "Main menu")).toHaveLength(4);
     expect(links((await text("/category/uncategorised")).body, "Main menu")).toHaveLength(4);
 
+    // The public pages with a header and a footer menu have no accessibility violation (links are big enough).
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const path of ["/", "/category/uncategorised"]) {
+        await page.goto(site.base + path);
+        await page.getByRole("navigation", { name: "Main menu" }).waitFor();
+        await page.addScriptTag({ content: axe.source });
+        const result = await page.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `${path} ${width}px`,
+        ).toEqual([]);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
     // A page's address changes: the menu follows it at once.
     const aboutId = await entryId("about");
     const renamed = await call("PUT", `/api/admin/entries/${aboutId}`, {
@@ -1584,6 +1608,170 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     const footerVersion = (current.json!["menu"] as { updatedAt: number }).updatedAt;
     await call("PUT", "/api/admin/menus/footer", { updatedAt: footerVersion, items: [] });
     expect((await text("/")).body).not.toContain('aria-label="Footer menu"');
+    await page.close();
+  });
+
+  test("site search: finds published posts by title and text, ignores accents, helps with typos, marks the matches, shows 10 a page, and is fresh at once", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const paragraph = (text: string) => [
+      {
+        id: "p1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text, styles: {} }],
+        children: [],
+      },
+    ];
+    const addPost = async (title: string, text: string, publish: boolean) => {
+      const made = await call("POST", "/api/admin/entries", { type: "post", title });
+      const id = String(made.json!["id"]);
+      const saved = await call("PUT", `/api/admin/entries/${id}`, {
+        title,
+        slugPart: String(made.json!["slug"]).replace(/^blog\//, ""),
+        status: publish ? "published" : "draft",
+        blocks: paragraph(text),
+        revision: made.json!["revision"],
+      });
+      expect(saved.status).toBe(200);
+      return { id, slug: String(made.json!["slug"]) };
+    };
+    const starter = await addPost(
+      "Sourdough starter guide",
+      "Mix flour and water in a jar every day. A Café in Paris taught me this.",
+      true,
+    );
+    const notes = await addPost(
+      "Weekend notes",
+      "We visited the sourdough bakery and bought fresh bread.",
+      true,
+    );
+    await addPost("Secret sourdough plans", "Nobody may read about the bakery yet.", false);
+    const results = async (query: string) => {
+      const { status: code, body } = await text(`/search?q=${encodeURIComponent(query)}`);
+      expect(code, query).toBe(200);
+      return body;
+    };
+    const links = (body: string) =>
+      [...body.matchAll(/<h2><a href="\/(blog\/[^"]*)">/g)].map((m) => m[1]);
+
+    // A title match ranks above a text match; the draft is never found.
+    let body = await results("sourdough");
+    expect(links(body)).toEqual([starter.slug, notes.slug]);
+    expect(body).toContain("<mark>sourdough</mark>");
+    expect(body).not.toContain("Secret sourdough plans");
+    expect(body).toContain("2 results");
+    // Accents are ignored both ways; the end of the last word may be missing.
+    expect(links(await results("cafe"))).toEqual([starter.slug]);
+    expect(links(await results("CAFÉ paris"))).toEqual([starter.slug]);
+    expect(links(await results("bake"))).toEqual([notes.slug]);
+    expect(links(await results("flour bread"))).toEqual([]); // two different posts: every word must be in one
+    // Typo help, and the way back to the exact words.
+    body = await results("sourdogh");
+    expect(body).toContain("Showing results for");
+    expect(body).toContain("<strong>sourdough</strong>");
+    expect(links(body)).toEqual([starter.slug, notes.slug]);
+    const exact = (await text("/search?q=sourdogh&exact=1")).body;
+    expect(exact).toContain("No results for");
+    expect(body).toContain('href="/search?q=sourdogh&amp;exact=1"');
+    // Empty query, no result, and markup in the query is shown as text.
+    expect((await text("/search")).body).toContain("Type a word or two");
+    body = await results("zzzzzzzz");
+    expect(body).toContain("No results for");
+    expect(body).toContain("Check the spelling");
+    body = await results("<script>alert(1)</script>");
+    expect(body).not.toContain("<script>alert(1)</script>");
+    expect(body).toContain("&lt;script&gt;");
+
+    // The search page is not indexed and never cached.
+    const response = await fetch(`${site.base}/search?q=sourdough`);
+    expect(response.headers.get("x-robots-tag")).toContain("noindex");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.text()).toContain('<meta name="robots" content="noindex');
+
+    // Fresh at once: a changed title, a trashed post.
+    const retitled = await call("PUT", `/api/admin/entries/${notes.id}`, {
+      title: "Weekend market diary",
+      slugPart: notes.slug.replace(/^blog\//, ""),
+      status: "published",
+      blocks: paragraph("We visited the sourdough bakery and bought fresh bread."),
+      revision: Number(
+        (await db.run("select revision from entries where id = ?", [notes.id]))[0]!["revision"],
+      ),
+    });
+    expect(retitled.status).toBe(200);
+    expect(links(await results("diary"))).toEqual([notes.slug]);
+    expect((await call("DELETE", `/api/admin/entries/${notes.id}`)).status).toBe(200);
+    expect(links(await results("diary"))).toEqual([]);
+    expect(links(await results("bakery"))).toEqual([]);
+
+    // Ten to a page, with Previous and Next, and a page number that is too big shows the last page.
+    const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    for (let n = 1; n <= 12; n++)
+      await db.run(
+        `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+         values (?, ?, 'post', 'published', ?, ?, ?, '{}', '{"version":1,"blocks":[]}', 'pagetest words', '', '{}', '{}', ?, ?, ?)`,
+        [
+          `PGE${String(n).padStart(23, "0")}`,
+          siteId,
+          `Pagetest ${n}`,
+          `blog/pagetest-${n}`,
+          userId,
+          new Date(10_000 + n),
+          new Date(),
+          new Date(),
+        ],
+      );
+    const first = (await text("/search?q=pagetest")).body;
+    expect(links(first)).toHaveLength(10);
+    expect(first).toContain("12 results");
+    expect(first).toContain("Page 1 of 2");
+    expect(first).toContain('href="/search?q=pagetest&amp;page=2">Next');
+    const second = (await text("/search?q=pagetest&page=2")).body;
+    expect(links(second)).toHaveLength(2);
+    expect(second).toContain(">Previous</a>");
+    expect(links((await text("/search?q=pagetest&page=99")).body)).toHaveLength(2);
+    expect(links((await text("/search?q=pagetest&page=abc")).body)).toHaveLength(10);
+
+    // No accessibility violation on a wide and a narrow screen.
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`${site.base}/search?q=pagetest`);
+      await page.getByRole("heading", { name: "Search", level: 1 }).waitFor();
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `search ${width}px`,
+      ).toEqual([]);
+    }
+    // The form works in a browser.
+    await page.getByLabel("Search this site").fill("pagetest 3");
+    await page.getByRole("button", { name: "Search" }).click();
+    await page.waitForURL(/\/search\?q=pagetest\+3|\/search\?q=pagetest%203/);
+    await page.getByRole("link", { name: "Pagetest 3" }).waitFor();
     await page.close();
   });
 

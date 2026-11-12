@@ -123,6 +123,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, generateMetadata } from ${from("site")};\n`,
     },
     {
+      path: "app/search/page.tsx",
+      content: `export { default, metadata } from ${from("search-page")};\n`,
+    },
+    {
       path: "app/maintenance-handler/route.ts",
       content: `export { GET } from ${from("maintenance-handler")};\n`,
     },

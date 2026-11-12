@@ -1,5 +1,6 @@
 // After a save the public pages that show the entry are made fresh at once (decision D82: tags, not time).
 import { revalidateTag } from "next/cache";
+import { forgetSearchIndex } from "./search-index";
 
 /** The header and footer menus on every page: a changed menu is shown on the next visit. */
 export function refreshMenus(): void {
@@ -13,6 +14,8 @@ export function refreshMenus(): void {
 export function refreshArchives(): void {
   revalidateTag("archive:posts", { expire: 0 });
   refreshMenus();
+  // The search index holds titles, texts and term names too: this process builds it again at the next search.
+  forgetSearchIndex();
 }
 
 export function refreshEntry(id: string, ...slugs: string[]): void {

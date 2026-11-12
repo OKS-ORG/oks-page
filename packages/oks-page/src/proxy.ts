@@ -6,7 +6,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { findPublished, findTermArchive, slugOf } from "./data/entries";
 import { getSiteId, NO_SITE } from "./db";
-import { NOT_FOUND_CACHE_HEADER, notFoundHeaders, pageHeaders, visitorOf } from "./headers";
+import {
+  NOT_FOUND_CACHE_HEADER,
+  PRIVATE,
+  notFoundHeaders,
+  pageHeaders,
+  visitorOf,
+} from "./headers";
 import { mayPassMaintenance } from "./maintenance-gate";
 import { cdnEnabled, maintenanceSettings } from "./settings";
 
@@ -52,6 +58,10 @@ export async function proxy(request: NextRequest) {
     return apply(NextResponse.rewrite(new URL("/maintenance-handler", request.url)), {
       "x-robots-tag": "noindex",
     });
+  // The search page is a route of its own. Its answers depend on the query, so they carry no cache tags, and search
+  // engines are told not to index them (spec 08, section 9).
+  if (slug === "search")
+    return apply(NextResponse.next(), { "x-robots-tag": "noindex", "cache-control": PRIVATE });
   if (found) {
     const tags = [
       `site:${await getSiteId()}`,
