@@ -57,6 +57,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
           actor.can("content.delete_any", entry.type) ||
           (actor.can("content.delete_own", entry.type) && entry.authorId === actor.userId)
         }
+        showTerms={entry.type === "post"}
         listHref={`/admin/${segment}`}
       />
     </AdminFrame>

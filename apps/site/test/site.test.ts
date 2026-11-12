@@ -1142,6 +1142,83 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     }
   });
 
+  test("choosing categories and tags on a post: saved and shown again, no choice means Uncategorised, pages have no box, signed-out is refused", async () => {
+    const page = await browser.newPage();
+    await signIn(page);
+    const made = await page.evaluate(async () => {
+      const response = await fetch("/api/admin/taxonomies/category", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Travel" }),
+      });
+      return response.status;
+    });
+    expect(made).toBe(201);
+    const postId = String(
+      (await db.run("select id from entries where slug = 'blog/hello-world'"))[0]!["id"],
+    );
+    const slugsOfPost = async () =>
+      (
+        await db.run(
+          "select t.slug from entry_terms et join terms t on t.id = et.term_id where et.entry_id = ? order by et.position",
+          [postId],
+        )
+      ).map((r) => String(r["slug"]));
+    await page.goto(site.base + `/admin/posts/${postId}`);
+    await page.getByRole("heading", { name: "Categories and tags", level: 2 }).waitFor();
+    // An earlier test may have left the post in Uncategorised: start from no choice.
+    await page.getByLabel("Travel").waitFor();
+    if (await page.getByLabel("Uncategorised").isChecked())
+      await page.getByLabel("Uncategorised").uncheck();
+    await page.getByLabel("Travel").check();
+    await page.getByLabel(/^Tags/).fill("Garden, Fresh Air");
+    await page.getByRole("button", { name: "Save categories and tags" }).click();
+    await page.getByText("Categories and tags saved.").waitFor();
+    expect(await slugsOfPost()).toEqual(["travel", "garden", "fresh-air"]);
+
+    // The choice is there after a reload.
+    await page.reload();
+    await page.getByRole("heading", { name: "Categories and tags", level: 2 }).waitFor();
+    await page.getByLabel("Travel").waitFor();
+    expect(await page.getByLabel("Travel").isChecked()).toBe(true);
+    expect(await page.getByLabel(/^Tags/).inputValue()).toBe("Garden, Fresh Air");
+
+    // No category chosen: the post gets Uncategorised, and the box shows it.
+    await page.getByLabel("Travel").uncheck();
+    await page.getByLabel(/^Tags/).fill("");
+    await page.getByRole("button", { name: "Save categories and tags" }).click();
+    await page.getByText("Categories and tags saved.").waitFor();
+    expect(await slugsOfPost()).toEqual(["uncategorised"]);
+    expect(await page.getByLabel("Uncategorised").isChecked()).toBe(true);
+
+    // A page has no box.
+    const aboutId = String((await db.run("select id from entries where slug = 'about'"))[0]!["id"]);
+    await page.goto(site.base + `/admin/pages/${aboutId}`);
+    await page.getByRole("heading", { name: "Edit: About", level: 1 }).waitFor();
+    expect(await page.getByRole("heading", { name: "Categories and tags", level: 2 }).count()).toBe(
+      0,
+    );
+    const refused = await page.evaluate(async (id) => {
+      const response = await fetch(`/api/admin/entries/${id}/terms`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ categoryIds: [], tags: [] }),
+      });
+      return response.status;
+    }, aboutId);
+    expect(refused).toBe(400);
+    await page.close();
+
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await fetch(site.base + `/api/admin/entries/${postId}/terms`, {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body: "{}" } : {}),
+      });
+      expect(response.status, method).toBe(401);
+    }
+  });
+
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill(title);

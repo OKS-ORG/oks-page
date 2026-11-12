@@ -13,6 +13,7 @@ import {
   useUnsavedCopy,
 } from "./entry-editing";
 import { EntryRevisions } from "./entry-revisions";
+import { EntryTermsPanel } from "./entry-terms-panel";
 import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
 
@@ -28,6 +29,8 @@ export interface EntryEditScreenProps {
   blocks: Block[];
   canPublish: boolean;
   canTrash: boolean;
+  /** Posts have categories and tags; pages do not. */
+  showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
   listHref: string;
 }
@@ -214,6 +217,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           return { repairs: body.repairs ?? [] };
         }}
       />
+      {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
       <AutosaveStatus savedAt={keptAt} />
       <EntryRevisions id={props.id} revision={revisionNo} />
       {props.canTrash ? (

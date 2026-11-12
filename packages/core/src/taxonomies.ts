@@ -3,7 +3,7 @@
 // moves its posts to "Uncategorised", which always exists and cannot be deleted.
 import { newId, type SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
-import { slugFromTitle } from "./content.js";
+import { loadForEdit, slugFromTitle } from "./content.js";
 
 export const DEFAULT_TAXONOMIES = [
   { key: "category", label: "Categories", hierarchical: true },

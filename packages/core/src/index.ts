@@ -9,6 +9,7 @@ export * from "./media-html.js";
 export * from "./media-settings.js";
 export * from "./security.js";
 export * from "./taxonomies.js";
+export * from "./entry-terms.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

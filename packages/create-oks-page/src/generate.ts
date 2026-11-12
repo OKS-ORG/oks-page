@@ -199,6 +199,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { POST, DELETE } from ${from("api-editing")};\n`,
     },
     {
+      path: "app/api/admin/entries/[id]/terms/route.ts",
+      content: `export { GET, PUT } from ${from("api-entry-terms")};\n`,
+    },
+    {
       path: "app/api/admin/media/route.ts",
       content: `export { GET, POST } from ${from("api-media")};\n`,
     },
