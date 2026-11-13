@@ -4268,3 +4268,355 @@ describe.skipIf(!findBrowser())("general settings and the time zone", { timeout:
     await page.context().close();
   });
 });
+
+// THE CORE DEFINITION OF M2 (docs/03-product/features.md, "MVP definition"): a non-technical owner, without help, can
+//   1. finish the setup wizard,
+//   2. write, schedule and publish posts and pages with images,
+//   3. organise posts with categories and tags,
+//   4. build the main menu,
+//   5. set the site title, logo, colors and fonts within the default theme,
+//   6. get a fast, SEO-ready site with sitemap, feeds and meta tags,
+//   7. invite an editor with a limited role.
+// This is one journey on one site, from an empty install, through the real screens in a real browser. The steps run in
+// order and share the site. What is not built yet is listed at the end as `todo`, so this file always says how far M2 is.
+describe.skipIf(!findBrowser())(
+  "the core definition of M2: an owner's first hour",
+  { timeout: 240_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    type Page = Awaited<ReturnType<Browser["newPage"]>>;
+    let page: Page;
+    const owner = { email: "maple@example.com", password: "a-long-password" };
+
+    beforeAll(async () => {
+      db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-journey-")), "site.sqlite"));
+      site = await startSite("sqlite", db, {
+        OKS_SECRET: "j".repeat(40),
+        OKS_SCHEDULER_SECONDS: "1",
+        // The pictures the owner uploads go to a temporary folder, never into the project.
+        OKS_UPLOADS_DIR: mkdtempSync(join(tmpdir(), "oks-journey-uploads-")),
+      });
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+      page = await browser.newPage();
+    }, 600_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+    });
+
+    const get = async (path: string) => {
+      const response = await fetch(site.base + path);
+      return { response, body: await response.text() };
+    };
+    const saved = () =>
+      expect
+        .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
+        .toBe("Saved.");
+    const picture = (color: string) =>
+      sharp({ create: { width: 120, height: 80, channels: 3, background: color } })
+        .png()
+        .toBuffer();
+    /** Opens the editor for a new post or page from its list: the owner types a title and presses "Add new". */
+    const startEntry = async (kind: "posts" | "pages", title: string) => {
+      await page.goto(`${site.base}/admin/${kind}`);
+      await page
+        .getByLabel(new RegExp(`^Title of the new ${kind === "posts" ? "post" : "page"}`))
+        .fill(title);
+      await page.getByRole("button", { name: "Add new", exact: true }).click();
+      await page.getByRole("heading", { name: `Edit: ${title}`, level: 1 }).waitFor();
+    };
+    const write = async (text: string) => {
+      await page.locator("[contenteditable=true]").first().click();
+      await page.keyboard.type(text);
+    };
+    const publishNow = async () => {
+      await page.getByLabel("Published (everyone sees it)").check({ force: true });
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await saved();
+    };
+    const navLinks = (html: string, label: string) =>
+      [
+        ...(
+          new RegExp(`<nav aria-label="${label}">(.*?)</nav>`, "s").exec(html)?.[1] ?? ""
+        ).matchAll(/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/g),
+      ].map((m) => `${m[2]} -> ${m[1]}`);
+
+    test("1. the first visit goes to the setup wizard; two questions about the site, two about the owner, and the owner is signed in", async () => {
+      const first = await fetch(site.base + "/", { redirect: "manual" });
+      expect(first.status).toBe(307);
+      await page.goto(site.base + "/");
+      await page.waitForURL("**/admin/setup");
+      await page.getByLabel("Site name").fill("Maple Street Bakery");
+      await page.getByLabel("Tagline").fill("Bread, baked slowly");
+      await page.getByRole("button", { name: "Next" }).click();
+      await page.getByLabel("Your name").fill("Mira");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Next" }).click();
+      await page.getByRole("button", { name: "Finish setup" }).click();
+      await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
+      await page.getByRole("link", { name: "Skip for now: open the dashboard" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      await page.getByText("Maple Street Bakery").first().waitFor();
+      // The site is live with its sample content.
+      expect((await get("/")).body).toContain("This is your home page");
+    });
+
+    test("3. the owner makes a category, and posts can be organised with it", async () => {
+      await page.goto(`${site.base}/admin/categories`);
+      await page.getByRole("heading", { name: "Categories", level: 1 }).waitFor();
+      await page.getByLabel(/^Name of the new category/).fill("Recipes");
+      await page.getByRole("button", { name: "Add new category" }).click();
+      await page.getByRole("row").filter({ hasText: "Recipes" }).first().waitFor();
+    });
+
+    test("2. write a post with a picture, put it in the category with tags, and publish it", async () => {
+      await startEntry("posts", "Sourdough for beginners");
+      await write("Mix flour and water, wait a day, and feed it again.");
+      // A picture from the computer, uploaded in the picker's window: it is inserted at once.
+      await page.getByRole("button", { name: "Insert image from the library" }).click();
+      await page
+        .getByRole("dialog")
+        .locator("input[type=file]")
+        .setInputFiles({
+          name: "Starter jar.png",
+          mimeType: "image/png",
+          buffer: await picture("#c80"),
+        });
+      await page.getByRole("dialog").waitFor({ state: "detached" });
+      await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
+      // Organise it: the category and two tags.
+      await page.getByRole("heading", { name: "Categories and tags", level: 2 }).waitFor();
+      await page.getByLabel("Recipes").check();
+      await page.getByLabel(/^Tags/).fill("bread, baking");
+      await page.getByRole("button", { name: "Save categories and tags" }).click();
+      await page.getByText("Categories and tags saved.").waitFor();
+      await publishNow();
+
+      // The public page: the title, the text and the picture, which is a real file that is served.
+      const post = await get("/blog/sourdough-for-beginners");
+      expect(post.response.status).toBe(200);
+      expect(post.body).toContain("<h1>Sourdough for beginners</h1>");
+      expect(post.body).toContain("Mix flour and water");
+      const src = /src="(\/uploads\/[^"]*Starter-jar\.png)"/.exec(post.body)?.[1];
+      expect(src).toBeTruthy();
+      expect((await fetch(site.base + src!)).status).toBe(200);
+      // The sizes are made in the background, and then the page uses them.
+      await expect
+        .poll(async () => (await get("/blog/sourdough-for-beginners")).body, { timeout: 30_000 })
+        .toContain("<picture");
+
+      // The category and tag pages list it.
+      for (const path of ["/category/recipes", "/tag/bread", "/tag/baking"]) {
+        const archive = await get(path);
+        expect(archive.response.status, path).toBe(200);
+        expect(archive.body, path).toContain('href="/blog/sourdough-for-beginners"');
+      }
+    });
+
+    test("2. write and publish a page", async () => {
+      await startEntry("pages", "Opening hours");
+      await write("Open every day from seven until three.");
+      await publishNow();
+      const hours = await get("/opening-hours");
+      expect(hours.response.status).toBe(200);
+      expect(hours.body).toContain("<h1>Opening hours</h1>");
+      expect(hours.body).toContain("Open every day from seven until three.");
+    });
+
+    test("2. schedule: a post set for the future is kept and not live; a post set a moment ahead goes live by itself", async () => {
+      await startEntry("posts", "Winter menu");
+      await write("Soup and rye bread.");
+      await page.getByLabel(/^Scheduled/).check({ force: true });
+      await page.getByLabel("Publish at").fill("2090-12-01T08:00");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await saved();
+      expect((await get("/blog/winter-menu")).response.status).toBe(404);
+      await page.goto(`${site.base}/admin/posts`);
+      await page
+        .getByRole("row", { name: /Winter menu/ })
+        .getByText("scheduled")
+        .waitFor();
+
+      // A second one is scheduled for 2.5 seconds ahead (the minute-sized box cannot do that, so the same route the box uses).
+      const made = await page.evaluate(async () => {
+        const post = await fetch("/api/admin/entries", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "post", title: "Spring special" }),
+        });
+        const body = (await post.json()) as { id: string; slug: string; revision: number };
+        const soon = new Date(Date.now() + 2500).toISOString();
+        const put = await fetch(`/api/admin/entries/${body.id}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: "Spring special",
+            slugPart: "spring-special",
+            status: "scheduled",
+            scheduledAt: soon,
+            blocks: [],
+            revision: body.revision,
+          }),
+        });
+        return put.status;
+      });
+      expect(made).toBe(200);
+      expect((await get("/blog/spring-special")).response.status).toBe(404);
+      await expect
+        .poll(async () => (await get("/blog/spring-special")).response.status, { timeout: 20_000 })
+        .toBe(200);
+    });
+
+    test("4. build the main menu: a page, a category and a link; and a footer menu", async () => {
+      await page.goto(`${site.base}/admin/menus`);
+      await page.getByRole("heading", { name: "Header menu", level: 2 }).waitFor();
+      await page.getByLabel("Page or post").selectOption({ label: "Page: Opening hours" });
+      await page.getByRole("button", { name: "Add to menu" }).click();
+      await page.getByLabel("Add", { exact: true }).selectOption("term");
+      await page.getByLabel("Category or tag").selectOption({ label: "Category: Recipes" });
+      await page.getByRole("button", { name: "Add to menu" }).click();
+      await page.getByLabel("Add", { exact: true }).selectOption("url");
+      await page.getByLabel("Label of the link").fill("Order online");
+      await page.getByLabel("Address of the link").fill("https://orders.example.com");
+      await page.getByRole("button", { name: "Add to menu" }).click();
+      await page.getByRole("button", { name: "Save menu" }).click();
+      await page.getByText("Menu saved.").waitFor();
+      await page.getByRole("link", { name: "Footer menu" }).click();
+      await page.getByRole("heading", { name: "Footer menu", level: 2 }).waitFor();
+      await page.getByLabel("Page or post").selectOption({ label: "Page: Contact" });
+      await page.getByRole("button", { name: "Add to menu" }).click();
+      await page.getByRole("button", { name: "Save menu" }).click();
+      await page.getByText("Menu saved.").waitFor();
+
+      for (const path of [
+        "/",
+        "/opening-hours",
+        "/blog/sourdough-for-beginners",
+        "/category/recipes",
+      ]) {
+        const html = (await get(path)).body;
+        expect(navLinks(html, "Main menu"), path).toEqual([
+          "Opening hours -> /opening-hours",
+          "Recipes -> /category/recipes",
+          "Order online -> https://orders.example.com",
+        ]);
+        expect(navLinks(html, "Footer menu"), path).toEqual(["Contact -> /contact"]);
+      }
+    });
+
+    test("5. (the part that exists) set the site title and tagline", async () => {
+      await page.goto(`${site.base}/admin/settings/general`);
+      await page.getByRole("heading", { name: "General settings", level: 1 }).waitFor();
+      await page.getByLabel("Site name").fill("Maple Street Bakery & Café");
+      await page.getByLabel("Tagline").fill("Bread, baked slowly, every morning");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByText("Saved.", { exact: true }).waitFor();
+      await page.goto(`${site.base}/admin`);
+      await page.getByText("Maple Street Bakery & Café").first().waitFor();
+    });
+
+    test("6. (the part that exists) a site that search engines can read: addresses, sitemap, robots, real 404s, and visitors can search", async () => {
+      // Every published page has its own title and canonical address.
+      const post = (await get("/blog/sourdough-for-beginners")).body;
+      expect(post).toContain("<title>Sourdough for beginners</title>");
+      expect(post).toMatch(/<link rel="canonical" href="[^"]*\/blog\/sourdough-for-beginners"/);
+      // The sitemap lists what is public and nothing that is not (the scheduled winter post is not live yet).
+      const sitemap = (await get("/sitemap.xml")).body;
+      const paths = [...sitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map(
+        (m) => new URL(m[1]!).pathname,
+      );
+      for (const wanted of [
+        "/",
+        "/opening-hours",
+        "/contact",
+        "/blog/sourdough-for-beginners",
+        "/blog/spring-special",
+        "/category/recipes",
+        "/tag/bread",
+      ])
+        expect(paths, wanted).toContain(wanted);
+      expect(paths).not.toContain("/blog/winter-menu");
+      // robots.txt names the sitemap and keeps crawlers out of the admin.
+      const robots = (await get("/robots.txt")).body;
+      expect(robots).toContain("Disallow: /admin");
+      expect(robots).toMatch(/Sitemap: .*\/sitemap\.xml/);
+      // An address that does not exist is a real 404 that is not indexed.
+      const missing = await get("/no-such-page");
+      expect(missing.response.status).toBe(404);
+      expect(missing.response.headers.get("x-robots-tag")).toContain("noindex");
+      // A draft is not reachable, but the owner can preview it and share a link for it.
+      await startEntry("posts", "Secret recipe");
+      await write("Only for the family.");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await saved();
+      expect((await get("/blog/secret-recipe")).response.status).toBe(404);
+      await page.getByRole("button", { name: "Create a share link" }).click();
+      const link = await page.getByLabel("Share link", { exact: true }).inputValue();
+      expect((await get(link.replace(site.base, ""))).body).toContain("Only for the family.");
+      // Visitors can search.
+      const found = (await get("/search?q=sourdough")).body;
+      expect(found).toContain('href="/blog/sourdough-for-beginners"');
+      expect(found).not.toContain("Secret recipe");
+      // A page that gets a new address keeps the old one working.
+      await page.goto(`${site.base}/admin/pages`);
+      await page.getByRole("link", { name: "Opening hours" }).click();
+      await page.getByRole("heading", { name: "Edit: Opening hours", level: 1 }).waitFor();
+      await page.getByLabel("Address").fill("hours");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await saved();
+      const moved = await fetch(site.base + "/opening-hours", { redirect: "manual" });
+      expect(moved.status).toBe(301);
+      expect(new URL(moved.headers.get("location")!, site.base).pathname).toBe("/hours");
+      expect((await get("/hours")).response.status).toBe(200);
+    });
+
+    test("the whole journey leaves a site with no accessibility violation on its public pages", async () => {
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        for (const path of [
+          "/",
+          "/hours",
+          "/blog/sourdough-for-beginners",
+          "/category/recipes",
+          "/search?q=bread",
+        ]) {
+          await page.goto(site.base + path);
+          await page
+            .getByRole("navigation", { name: "Main menu" })
+            .waitFor({ state: "visible", timeout: 15_000 })
+            .catch(() => {
+              throw new Error(`There is no header menu on ${path} at ${width}px`);
+            });
+          await page.addScriptTag({ content: axe.source });
+          const result = await page.evaluate(() =>
+            (window as unknown as { axe: typeof axe }).axe.run(document, {
+              runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+            }),
+          );
+          expect(
+            result.violations.map(
+              (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+            ),
+            `${path} ${width}px`,
+          ).toEqual([]);
+        }
+      }
+    });
+
+    // What the definition asks for and M2 does not do yet. Each one is a gap, not a bug.
+    test.todo(
+      "5. set the logo, the colors and the fonts within the default theme (there is no theme system and no logo yet)",
+    );
+    test.todo(
+      "6. the blog feed (RSS and Atom) and each page's description, Open Graph and structured data tags",
+    );
+    test.todo(
+      "7. invite an editor with a limited role (there is no Users screen and no invitation yet)",
+    );
+  },
+);
