@@ -2,16 +2,17 @@
 // nothing in it draws nothing. Used by the server build and the export build, so both write the same page.
 import { getLook } from "@data";
 import type { PublicMenuItem } from "@oks-page/core";
+import type { Look } from "./data/types";
 import type { ReactNode } from "react";
 
 // A link is at least 24 px high so it is easy to hit with a finger or a mouse (WCAG 2.2, target size).
-const LINK: React.CSSProperties = {
+export const LINK: React.CSSProperties = {
   display: "inline-block",
   minBlockSize: "24px",
   paddingBlock: "2px",
 };
 
-function MenuList({ items }: { items: PublicMenuItem[] }) {
+export function MenuList({ items }: { items: PublicMenuItem[] }) {
   return (
     <ul>
       {items.map((item) => (
@@ -26,6 +27,19 @@ function MenuList({ items }: { items: PublicMenuItem[] }) {
   );
 }
 
+/**
+ * The theme's CSS file first (checked when the theme was installed, served from the site with its fingerprint in the
+ * name), then the owner's colors and fonts, written by the core from checked values only, so they win.
+ */
+export function LookStyles({ look }: { look: Look }) {
+  return (
+    <>
+      {look.themeCssUrl ? <link rel="stylesheet" href={look.themeCssUrl} /> : null}
+      {look.css ? <style dangerouslySetInnerHTML={{ __html: look.css }} /> : null}
+    </>
+  );
+}
+
 export async function PublicFrame({
   header,
   footer,
@@ -35,13 +49,11 @@ export async function PublicFrame({
   footer: PublicMenuItem[];
   children: ReactNode;
 }) {
-  // The theme's CSS file first (checked when the theme was installed, served from the site with its fingerprint in the
-  // name), then the owner's colors and fonts, written by the core from checked values only, so they win.
-  const { themeCssUrl, css: themeCss, logo } = await getLook();
+  const look = await getLook();
+  const { logo } = look;
   return (
     <>
-      {themeCssUrl ? <link rel="stylesheet" href={themeCssUrl} /> : null}
-      {themeCss ? <style dangerouslySetInnerHTML={{ __html: themeCss }} /> : null}
+      <LookStyles look={look} />
       {header.length > 0 || logo ? (
         <header>
           {logo ? (

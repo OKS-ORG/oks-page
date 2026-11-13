@@ -1,0 +1,98 @@
+import type { Block } from "@oks-page/content-safety";
+import { describe, expect, test } from "vitest";
+import { layoutCandidates, pickLayout, toDrawNodes, type ThemeLayouts } from "./theme-layouts.js";
+
+const block = (
+  type: string,
+  props: Record<string, unknown> = {},
+  children: Block[] = [],
+  content: unknown = null,
+): Block => ({ id: Math.random().toString(36).slice(2, 10), type, props, content, children });
+const paragraph = (text: string) => block("paragraph", {}, [], [{ type: "text", text }]);
+
+describe("which layout a page uses", () => {
+  test("the most specific layout first, then the general ones, then index", () => {
+    expect(layoutCandidates({ kind: "entry", type: "page", slug: "home" })).toEqual([
+      "front-page",
+      "page-home",
+      "page",
+      "index",
+    ]);
+    expect(layoutCandidates({ kind: "entry", type: "page", slug: "about/team" })).toEqual([
+      "page-about-team",
+      "page",
+      "index",
+    ]);
+    expect(layoutCandidates({ kind: "entry", type: "post", slug: "hello" })).toEqual([
+      "single-post-hello",
+      "single-post",
+      "single",
+      "index",
+    ]);
+    expect(layoutCandidates({ kind: "archive", termKind: "tag" })).toEqual([
+      "tag",
+      "archive",
+      "index",
+    ]);
+    expect(layoutCandidates({ kind: "search" })).toEqual(["search", "index"]);
+    // An address with letters a layout name cannot hold is simply not tried.
+    expect(layoutCandidates({ kind: "entry", type: "post", slug: "café" })).toEqual([
+      "single-post",
+      "single",
+      "index",
+    ]);
+  });
+
+  test("the first layout the theme has wins; no theme or no match means the built-in page", () => {
+    const layouts: ThemeLayouts = {
+      templates: {
+        index: [{ kind: "html", html: "<p>i</p>" }],
+        single: [{ kind: "html", html: "<p>s</p>" }],
+      },
+      parts: {},
+    };
+    expect(pickLayout(layouts, ["single-post", "single", "index"])).toBe(
+      layouts.templates["single"],
+    );
+    expect(pickLayout(layouts, ["page", "index"])).toBe(layouts.templates["index"]);
+    expect(pickLayout({ templates: {}, parts: {} }, ["index"])).toBeNull();
+    expect(pickLayout(null, ["index"])).toBeNull();
+    // Names that are not the theme's own layouts are never found.
+    expect(pickLayout(layouts, ["constructor", "toString"])).toBeNull();
+  });
+});
+
+describe("turning a layout into a draw tree", () => {
+  test("content runs become HTML from the block writer; site blocks stay; sections keep their children", () => {
+    const nodes = toDrawNodes([
+      block("part", { name: "header" }),
+      paragraph("one"),
+      paragraph("two"),
+      block("section", { tag: "main" }, [
+        block("post-title"),
+        paragraph("inside"),
+        block("post-content"),
+      ]),
+      block("menu", { place: "footer" }, [paragraph("children of a site block are not drawn")]),
+    ]);
+    expect(nodes.map((n) => (n.kind === "html" ? "html" : n.type))).toEqual([
+      "part",
+      "html",
+      "section",
+      "menu",
+    ]);
+    const html = nodes[1]!;
+    expect(html.kind === "html" && html.html).toContain("one");
+    expect(html.kind === "html" && html.html).toContain("two");
+    const section = nodes[2]!;
+    if (section.kind !== "site") throw new Error("not a site block");
+    expect(section.props).toEqual({ tag: "main" });
+    expect(section.children.map((n) => (n.kind === "html" ? "html" : n.type))).toEqual([
+      "post-title",
+      "html",
+      "post-content",
+    ]);
+    const menu = nodes[3]!;
+    expect(menu.kind === "site" && menu.children).toEqual([]);
+  });
+});

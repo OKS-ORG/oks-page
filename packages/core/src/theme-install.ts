@@ -182,12 +182,19 @@ export async function loadActiveThemeCssKey(
   runner: SqlRunner,
   siteId: string,
 ): Promise<string | null> {
+  return (await loadActiveThemeVersion(runner, siteId))?.cssKey ?? null;
+}
+
+/** The version of the theme in use, or null (no theme in use, or its row is damaged). */
+export async function loadActiveThemeVersion(
+  runner: SqlRunner,
+  siteId: string,
+): Promise<ThemeVersion | null> {
   const rows = await runner.all(
     `select "settings" from "themes" where "site_id" = ? and "is_active" = ? and "source" = 'runtime'`,
     [siteId, true],
   );
-  const stored = rows[0] ? readStored(rows[0]["settings"]) : null;
-  return stored?.current.cssKey ?? null;
+  return (rows[0] ? readStored(rows[0]["settings"]) : null)?.current ?? null;
 }
 
 /** The CSS file of one version: the fonts, the design values, then the theme's own CSS with its addresses filled in. */

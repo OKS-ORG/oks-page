@@ -20,6 +20,7 @@ import {
   themeFileType,
   useTheme,
 } from "./theme-install.js";
+import { loadActiveThemeLayouts } from "./theme-layouts.js";
 
 // ----- a tiny tar writer (plain files only)
 
@@ -50,11 +51,11 @@ function tgz(files: Record<string, string | Buffer>): Buffer {
 }
 
 const png = Buffer.from("iVBORw0KGgo=", "base64");
-const block = (type: string, props: Record<string, unknown> = {}) => ({
+const block = (type: string, props: Record<string, unknown> = {}, content: unknown = null) => ({
   id: Math.random().toString(36).slice(2, 10),
   type,
   props,
-  content: null,
+  content,
   children: [],
 });
 /** A theme package; `version` and `css` change between the versions in the tests. */
@@ -370,6 +371,59 @@ for (const { kind, open, skip } of openers) {
       );
       expect(await listThemes(db.runner, siteId)).toEqual([]);
       expect(await loadActiveThemeCssKey(db.runner, siteId)).toBeNull();
+    });
+
+    test("the layouts of the theme in use are read for drawing, checked again on the way", async () => {
+      expect(await loadActiveThemeLayouts(db.runner, siteId)).toBeNull();
+      const installed = await installTheme(db.runner, storage, admin, siteId, maple());
+      if (!installed.ok) throw new Error(installed.message);
+      // Installed is not in use: still nothing to draw.
+      expect(await loadActiveThemeLayouts(db.runner, siteId)).toBeNull();
+      await useTheme(db.runner, admin, siteId, installed.theme.id);
+      const layouts = await loadActiveThemeLayouts(db.runner, siteId);
+      expect(Object.keys(layouts!.templates)).toEqual(["index"]);
+      expect(Object.keys(layouts!.parts)).toEqual(["header"]);
+      expect(layouts!.templates["index"]).toEqual([
+        { kind: "site", type: "part", props: { name: "header" }, children: [] },
+      ]);
+
+      // A row changed by hand: an unsafe link in a layout is repaired before anything is drawn.
+      const row = (
+        await db.run(`select "settings" from "themes" where "id" = ?`, [installed.theme.id])
+      )[0]!;
+      const settings = (
+        typeof row["settings"] === "string" ? JSON.parse(row["settings"]) : row["settings"]
+      ) as { current: { templates: { name: string; blocks: unknown[] }[] } };
+      settings.current.templates = [
+        {
+          name: "index",
+          blocks: [
+            block("paragraph", {}, [
+              { type: "link", href: "javascript:alert(1)", content: [{ type: "text", text: "x" }] },
+            ]),
+          ],
+        },
+      ];
+      await db.run(`update "themes" set "settings" = ? where "id" = ?`, [
+        JSON.stringify(settings),
+        installed.theme.id,
+      ]);
+      const changed = await loadActiveThemeLayouts(db.runner, siteId);
+      const html = changed!.templates["index"]![0]!;
+      expect(html.kind).toBe("html");
+      expect(JSON.stringify(html)).not.toContain("javascript:");
+
+      // A theme without layouts draws nothing of its own.
+      const plain = await installTheme(
+        db.runner,
+        storage,
+        admin,
+        siteId,
+        tgz({ "theme.json": JSON.stringify({ key: "birch", name: "Birch", version: "1.0.0" }) }),
+      );
+      if (!plain.ok) throw new Error(plain.message);
+      await useTheme(db.runner, admin, siteId, plain.theme.id);
+      expect(await loadActiveThemeLayouts(db.runner, siteId)).toBeNull();
     });
   });
 }

@@ -1,14 +1,16 @@
 // The data module for the server build: answers are kept in the Next.js cache, tagged so a publish can refresh
 // exactly the pages that changed. Pages import this as "@data"; the export build swaps in `export.ts`.
 import { cacheTag } from "next/cache";
-import type { PublicMenuItem } from "@oks-page/core";
+import type { FeedItem, PublicMenuItem, ThemeLayouts } from "@oks-page/core";
 import { slugTag } from "../cache-tags";
 import {
   loadPublishedEntry,
   loadSiteInfo,
+  loadLatestPosts,
   loadLook,
   loadSiteMenu,
   loadTermArchive,
+  loadThemeLayouts,
   slugOf,
 } from "./entries";
 import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
@@ -28,6 +30,20 @@ export async function getLook(): Promise<Look> {
   "use cache";
   cacheTag("theme", "settings");
   return loadLook();
+}
+
+/** The layouts of the theme in use. Tagged "theme": refreshed when a theme is used, updated or rolled back. */
+export async function getThemeLayouts(): Promise<ThemeLayouts | null> {
+  "use cache";
+  cacheTag("theme");
+  return loadThemeLayouts();
+}
+
+/** The newest posts, for a theme's list of latest posts. Tagged "feed": every change to a post refreshes it. */
+export async function getLatestPosts(): Promise<FeedItem[]> {
+  "use cache";
+  cacheTag("feed");
+  return loadLatestPosts();
 }
 
 // Test builds count how often a page is really read from the database.

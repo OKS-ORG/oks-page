@@ -11,6 +11,15 @@ export function ArchiveView({ archive }: { archive: TermArchive }) {
   return (
     <main>
       <h1>{archiveTitle(archive)}</h1>
+      <ArchiveContent archive={archive} />
+    </main>
+  );
+}
+
+/** The archive without its heading: what a theme's layout shows as the page's content. */
+export function ArchiveContent({ archive }: { archive: TermArchive }) {
+  return (
+    <>
       {archive.description ? <p>{archive.description}</p> : null}
       {archive.posts.length === 0 ? (
         <p>There are no posts here yet.</p>
@@ -25,6 +34,6 @@ export function ArchiveView({ archive }: { archive: TermArchive }) {
         </ul>
       )}
       {archive.more ? <p>Only the newest posts are shown.</p> : null}
-    </main>
+    </>
   );
 }

@@ -1,10 +1,20 @@
-import { getPublishedEntry, getSiteInfo, getSiteMenu, getTermArchive, slugOf } from "@data";
+import {
+  getPublishedEntry,
+  getSiteInfo,
+  getSiteMenu,
+  getTermArchive,
+  getThemeLayouts,
+  slugOf,
+} from "@data";
+import { layoutCandidates, pickLayout, type PageKind } from "@oks-page/core";
+import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
-import { ArchiveView } from "./archive-view";
+import { ArchiveContent, ArchiveView, archiveTitle } from "./archive-view";
 import { EntryJsonLd, archiveMetadata, entryMetadata } from "./page-meta";
 import { PublicFrame } from "./public-frame";
+import { ThemedPage, type ThemedPageInfo } from "./theme-layout";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
@@ -23,6 +33,16 @@ export default async function Page({ params }: Props) {
     // An address that is not an entry may be a category or tag archive ("category/travel").
     const archive = await getTermArchive(slug);
     if (!archive) notFound();
+    const drawn = await themed(
+      { kind: "archive", termKind: archive.kind },
+      {
+        title: archiveTitle(archive),
+        content: <ArchiveContent archive={archive} />,
+        meta: null,
+        isFront: false,
+      },
+    );
+    if (drawn) return drawn;
     const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
     return (
       <PublicFrame header={header} footer={footer}>
@@ -30,6 +50,25 @@ export default async function Page({ params }: Props) {
       </PublicFrame>
     );
   }
+  const drawn = await themed(
+    { kind: "entry", type: entry.type, slug },
+    {
+      title: entry.title,
+      content: <article dangerouslySetInnerHTML={{ __html: entry.html }} />,
+      meta:
+        entry.type === "post"
+          ? { publishedAt: entry.publishedAt, authorName: entry.authorName }
+          : null,
+      isFront: slug === "home",
+    },
+  );
+  if (drawn)
+    return (
+      <>
+        {drawn}
+        <EntryJsonLd entry={entry} site={await getSiteInfo()} />
+      </>
+    );
   const [header, footer, site] = await Promise.all([
     getSiteMenu("primary"),
     getSiteMenu("footer"),
@@ -48,4 +87,13 @@ export default async function Page({ params }: Props) {
       <EntryJsonLd entry={entry} site={site} />
     </PublicFrame>
   );
+}
+
+/** The page drawn from the theme's layout for it, or null when the theme has none (or no theme is in use). */
+async function themed(kind: PageKind, page: ThemedPageInfo): Promise<ReactNode | null> {
+  const layouts = await getThemeLayouts();
+  const layout = pickLayout(layouts, layoutCandidates(kind));
+  return layout && layouts ? (
+    <ThemedPage layout={layout} parts={layouts.parts} page={page} />
+  ) : null;
 }

@@ -5620,5 +5620,155 @@ describe.skipIf(!findBrowser())(
       await editor.waitForURL((url) => url.pathname === "/admin");
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
+
+    test("theme layouts: public pages are drawn from the layouts of the theme in use, with live data, and the built-in pages come back when it is not", async () => {
+      const page = await signedIn(owner);
+      const b = (
+        type: string,
+        props: Record<string, unknown> = {},
+        children: unknown[] = [],
+        content: unknown = null,
+      ) => ({
+        id: Math.random().toString(36).slice(2, 10),
+        type,
+        props,
+        content,
+        children,
+      });
+      const text = (t: string) => [{ type: "text", text: t }];
+      const main = (...inner: unknown[]) => b("section", { tag: "main", name: "content" }, inner);
+      const layout = (...blocks: unknown[]) => JSON.stringify({ blocks });
+      const theme = tgz({
+        "theme.json": JSON.stringify({ key: "willow", name: "Willow", version: "1.0.0" }),
+        "parts/header.json": layout(
+          b("section", { tag: "header" }, [
+            b("site-title"),
+            b("menu", { place: "primary" }),
+            b("search-form"),
+          ]),
+        ),
+        "parts/footer.json": layout(
+          b("section", { tag: "footer" }, [
+            b("menu", { place: "footer" }),
+            b("paragraph", {}, [], text("Made with Willow")),
+          ]),
+        ),
+        "templates/index.json": layout(
+          b("part", { name: "header" }),
+          main(b("breadcrumbs"), b("post-title"), b("post-meta"), b("post-content")),
+          b("part", { name: "footer" }),
+        ),
+        "templates/front-page.json": layout(
+          b("part", { name: "header" }),
+          main(
+            b("post-title"),
+            b("post-content"),
+            b("heading", { level: 2 }, [], text("Latest posts")),
+            b("query-loop", { count: 3 }),
+          ),
+          b("part", { name: "footer" }),
+        ),
+        "templates/archive.json": layout(
+          b("part", { name: "header" }),
+          main(b("paragraph", {}, [], text("Willow archive")), b("post-title"), b("post-content")),
+          b("part", { name: "footer" }),
+        ),
+      });
+      // A category with the starter post in it, for an archive page.
+      const made = await call(page, "POST", "/api/admin/taxonomies/category", {
+        name: "Garden notes",
+      });
+      expect(made.status).toBe(201);
+      const termId = String(
+        (await db.run("select id from terms where slug = 'garden-notes'"))[0]!["id"],
+      );
+      const postId = String(
+        (await db.run("select id from entries where slug = 'blog/hello-world'"))[0]!["id"],
+      );
+      expect(
+        (
+          await call(page, "PUT", `/api/admin/entries/${postId}/terms`, {
+            categoryIds: [termId],
+            tags: [],
+          })
+        ).status,
+      ).toBe(200);
+
+      const before = await (await fetch(site.base + "/")).text();
+      expect(before).not.toContain("oks-site-title");
+
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "willow.tgz",
+        mimeType: "application/gzip",
+        buffer: theme,
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Willow 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page.getByRole("button", { name: "Use Willow" }).click();
+      await page.getByText("Your site uses Willow now.").waitFor();
+
+      const html = async (path: string) => {
+        const response = await fetch(site.base + path);
+        expect(response.status, path).toBe(200);
+        return response.text();
+      };
+      // The front page: its own layout, with the header and footer parts, the page and the newest posts.
+      const front = await html("/");
+      expect(front).toContain('class="oks-site-title"');
+      expect(front).toContain("Anna&#x27;s Garden");
+      expect(front).toContain("Made with Willow");
+      expect(front).toMatch(
+        /<main class="oks-section oks-section-content"><h1 class="oks-title">Home<\/h1>/,
+      );
+      expect(front).toContain(
+        '<ul class="oks-latest-posts"><li><a href="/blog/hello-world">Hello world</a>',
+      );
+      expect(front).not.toContain('aria-label="Breadcrumb"');
+      // A post uses "index": breadcrumbs, its date and author, its text.
+      const post = await html("/blog/hello-world");
+      expect(post).toContain('aria-label="Breadcrumb"');
+      expect(post).toMatch(/<p class="oks-post-meta"><time dateTime="\d{4}-\d\d-\d\d">/);
+      expect(post).toContain('<h1 class="oks-title">Hello world</h1>');
+      expect(post).toContain("Made with Willow");
+      // A page has no post details.
+      expect(await html("/about")).not.toContain("oks-post-meta");
+      // A category page uses "archive", with the list of posts as its content.
+      const archive = await html("/category/garden-notes");
+      expect(archive).toContain("Willow archive");
+      expect(archive).toContain('<h1 class="oks-title">Category: Garden notes</h1>');
+      expect(archive).toContain('href="/blog/hello-world"');
+      // Search has no layout of its own and uses "index", with the results as its content.
+      const results = await html("/search?q=hello");
+      expect(results).toContain('<h1 class="oks-title">Search</h1>');
+      expect(results).toContain("Made with Willow");
+      expect(results).toMatch(/result/);
+
+      // In a real browser, at desktop and phone width: no accessibility problems, and the search form works.
+      const visitor = await browser.newPage();
+      for (const [path, width] of [
+        ["/", 1280],
+        ["/", 390],
+        ["/blog/hello-world", 1280],
+        ["/category/garden-notes", 390],
+      ] as const) {
+        await visitor.setViewportSize({ width, height: 900 });
+        await visitor.goto(site.base + path);
+        expect(await axeViolations(visitor), `${path} at ${width} px`).toEqual([]);
+      }
+      await visitor.goto(site.base + "/");
+      await visitor.getByRole("searchbox", { name: "Search this site" }).fill("hello");
+      await visitor.getByRole("button", { name: "Search" }).click();
+      await visitor.waitForURL(/\/search\?q=hello/);
+      await visitor.getByRole("link", { name: "Hello world" }).first().waitFor();
+      await visitor.close();
+
+      // Back to the built-in design: the built-in pages, at once.
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      const after = await html("/");
+      expect(after).not.toContain("oks-site-title");
+      expect(after).not.toContain("Made with Willow");
+    });
   },
 );

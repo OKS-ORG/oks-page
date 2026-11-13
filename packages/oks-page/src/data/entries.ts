@@ -6,6 +6,10 @@ import {
   loadGeneralSettings,
   loadPublicMenu,
   loadActiveThemeCssKey,
+  loadActiveThemeLayouts,
+  loadFeedPosts,
+  type FeedItem,
+  type ThemeLayouts,
   loadThemeStyles,
   stylesToCss,
   readEntrySeo,
@@ -47,6 +51,16 @@ export async function loadLook(): Promise<Look> {
     css: stylesToCss(styles),
     logo,
   };
+}
+
+/** The layouts of the theme in use, ready to draw, or null (pages are then drawn the built-in way). */
+export async function loadThemeLayouts(): Promise<ThemeLayouts | null> {
+  return loadActiveThemeLayouts(getRunner(), await getSiteId());
+}
+
+/** The newest published posts (at most 20), for a theme's list of latest posts. */
+export async function loadLatestPosts(): Promise<FeedItem[]> {
+  return (await loadFeedPosts(getRunner(), await getSiteId(), null))?.items ?? [];
 }
 
 /** The site's name and tagline (Settings, General). */
