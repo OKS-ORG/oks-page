@@ -21,7 +21,13 @@ export interface CssProblem {
   message: string;
 }
 
-export type CssCheck = { ok: true; css: string } | { ok: false; errors: CssProblem[] };
+export type CssCheck =
+  | {
+      ok: true;
+      css: string;
+      /** The files inside the theme that `url()` points to. */ files: string[];
+    }
+  | { ok: false; errors: CssProblem[] };
 
 const ALLOWED_AT = new Set([
   "media",
@@ -51,6 +57,7 @@ const lineOf = (text: string, index: number): number => {
 /** Checks CSS and returns it without its comments, or the problems with the line of each. */
 export function checkThemeCss(source: string, options: CssCheckOptions = {}): CssCheck {
   const errors: CssProblem[] = [];
+  const files: string[] = [];
   const problem = (line: number, message: string) => {
     if (errors.length < 20) errors.push({ line, message });
   };
@@ -175,7 +182,7 @@ export function checkThemeCss(source: string, options: CssCheckOptions = {}): Cs
         !address.includes("..") &&
         !address.includes("//")
       ) {
-        // A file inside the theme.
+        files.push(address);
       } else {
         problem(
           line,
@@ -220,7 +227,7 @@ export function checkThemeCss(source: string, options: CssCheckOptions = {}): Cs
   }
 
   if (errors.length > 0) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
-  return { ok: true, css: kept.trim() };
+  return { ok: true, css: kept.trim(), files };
 }
 
 /** The problems as plain sentences, for a message. */

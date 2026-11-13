@@ -25,6 +25,8 @@ export * from "./seo-settings.js";
 export * from "./css-check.js";
 export * from "./theme.js";
 export * from "./theme-settings.js";
+export * from "./tar.js";
+export * from "./theme-package.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";
