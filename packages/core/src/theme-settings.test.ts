@@ -32,6 +32,7 @@ describe("reading a stored look", () => {
     ).toEqual({
       mainColor: "#2a6f4f",
       logoMediaId: null,
+      customCss: "",
       bodyFont: "system-serif",
       headingFont: "system-sans",
     });
@@ -87,6 +88,7 @@ for (const { kind, open, skip } of openers) {
         styles: {
           mainColor: "#2a6f4f",
           logoMediaId: null,
+          customCss: "",
           bodyFont: "system-serif",
           headingFont: "system-sans",
         },
@@ -95,6 +97,7 @@ for (const { kind, open, skip } of openers) {
       expect(await loadThemeStyles(db.runner, siteId)).toEqual({
         mainColor: "#2a6f4f",
         logoMediaId: null,
+        customCss: "",
         bodyFont: "system-serif",
         headingFont: "system-mono",
       });
@@ -126,6 +129,55 @@ for (const { kind, open, skip } of openers) {
         expect(result, JSON.stringify(input)).toMatchObject({ ok: false, code: "invalid" });
       }
       expect((await loadThemeStyles(db.runner, siteId)).mainColor).toBe("#2a6f4f");
+    });
+
+    test("custom CSS is checked, kept without its comments, written after the look, and cleared with an empty text", async () => {
+      const saved = await saveThemeStyles(db.runner, admin, siteId, {
+        mainColor: "#2a6f4f",
+        customCss: "/* mine */ h1 { letter-spacing: .1em }",
+      });
+      expect(saved).toMatchObject({
+        ok: true,
+        styles: { customCss: "h1 { letter-spacing: .1em }" },
+      });
+      const css = await loadThemeCss(db.runner, siteId);
+      expect(css.indexOf("--oks-color-primary-700")).toBeLessThan(css.indexOf("letter-spacing"));
+      await saveThemeStyles(db.runner, admin, siteId, { customCss: "" });
+      expect(await loadThemeCss(db.runner, siteId)).not.toContain("letter-spacing");
+    });
+
+    test("custom CSS that fails the check is refused with the line, and what was saved stays", async () => {
+      await saveThemeStyles(db.runner, admin, siteId, { customCss: "h1{color:red}" });
+      for (const customCss of [
+        "@import 'x.css';",
+        "a{background:url(https://evil.example/x)}",
+        "a{color:red}</style><script>x</script>",
+        "a{color:red",
+        "a{color:red}".repeat(6000),
+        5 as unknown as string,
+      ]) {
+        const result = await saveThemeStyles(db.runner, admin, siteId, { customCss });
+        expect(result, String(customCss).slice(0, 40)).toMatchObject({
+          ok: false,
+          code: "invalid",
+          field: "customCss",
+        });
+      }
+      const refused = await saveThemeStyles(db.runner, admin, siteId, {
+        customCss: "a{}\nb{}\n@import 'x';",
+      });
+      expect(refused).toMatchObject({ ok: false, message: expect.stringContaining("Line 3") });
+      expect((await loadThemeStyles(db.runner, siteId)).customCss).toBe("h1{color:red}");
+    });
+
+    test("stored custom CSS that is not safe is never written", async () => {
+      const bad = JSON.stringify({ customCss: "@import 'x.css'; a{}</style>" });
+      await db.run(
+        `insert into settings (site_id, key, value, revision, updated_at) values (?, 'theme', ?, 1, ?)`,
+        [siteId, bad, new Date()],
+      );
+      expect((await loadThemeStyles(db.runner, siteId)).customCss).toBe("");
+      expect(await loadThemeCss(db.runner, siteId)).toBe("");
     });
 
     test("only people who manage the settings may change it", async () => {

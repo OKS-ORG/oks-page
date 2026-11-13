@@ -2,6 +2,7 @@
 // the key `theme`. The CSS is always written from the checked values by `theme.ts`, never stored or typed.
 import type { SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
+import { checkThemeCss, describeCssProblems } from "./css-check.js";
 import {
   DEFAULT_THEME_STYLES,
   FONT_CHOICES,
@@ -22,6 +23,13 @@ const isFont = (value: unknown): value is FontChoice =>
 const isMainColor = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) && parseHex(value) !== null;
 
+/** Stored custom CSS is checked again when read; damaged or unsafe text means no custom CSS. */
+function readCustomCss(raw: unknown): string {
+  if (typeof raw !== "string" || !raw) return "";
+  const checked = checkThemeCss(raw);
+  return checked.ok ? checked.css : "";
+}
+
 /** What a stored value means. Anything damaged or unknown falls back to the built-in look, field by field. */
 export function readThemeStyles(raw: unknown): ThemeStyles {
   let value = raw;
@@ -40,6 +48,7 @@ export function readThemeStyles(raw: unknown): ThemeStyles {
         ? saved["logoMediaId"]
         : null,
     bodyFont: isFont(saved["bodyFont"]) ? saved["bodyFont"] : DEFAULT_THEME_STYLES.bodyFont,
+    customCss: readCustomCss(saved["customCss"]),
     headingFont: isFont(saved["headingFont"])
       ? saved["headingFont"]
       : DEFAULT_THEME_STYLES.headingFont,
@@ -67,6 +76,7 @@ export async function saveThemeStyles(
   input: Partial<{
     mainColor: string | null;
     logoMediaId: string | null;
+    customCss: string;
     bodyFont: string;
     headingFont: string;
   }>,
@@ -101,6 +111,13 @@ export async function saveThemeStyles(
       logoMediaId = input.logoMediaId;
     }
   }
+  let customCss = current.customCss;
+  if (input.customCss !== undefined) {
+    if (typeof input.customCss !== "string") return bad("customCss", "The CSS was not understood.");
+    const checked = checkThemeCss(input.customCss);
+    if (!checked.ok) return bad("customCss", describeCssProblems(checked.errors));
+    customCss = checked.css;
+  }
   let bodyFont = current.bodyFont;
   if (input.bodyFont !== undefined) {
     if (!isFont(input.bodyFont)) return bad("bodyFont", "Choose a font from the list.");
@@ -112,7 +129,7 @@ export async function saveThemeStyles(
     headingFont = input.headingFont;
   }
 
-  const styles: ThemeStyles = { mainColor, logoMediaId, bodyFont, headingFont };
+  const styles: ThemeStyles = { mainColor, logoMediaId, customCss, bodyFont, headingFont };
   await runner.all(
     `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
      on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,

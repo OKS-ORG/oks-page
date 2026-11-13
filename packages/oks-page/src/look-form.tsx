@@ -31,6 +31,7 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
   const [color, setColor] = useState<string | null>(initial.mainColor);
   const [bodyFont, setBodyFont] = useState<FontChoice>(initial.bodyFont);
   const [headingFont, setHeadingFont] = useState<FontChoice>(initial.headingFont);
+  const [customCss, setCustomCss] = useState(initial.customCss);
   const [logoId, setLogoId] = useState<string | null>(initial.logoMediaId);
   const [logoShown, setLogoShown] = useState<LogoPreview | null>(logo);
   const [picking, setPicking] = useState(false);
@@ -45,7 +46,13 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
       const response = await fetch("/api/admin/settings/theme", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mainColor: color, logoMediaId: logoId, bodyFont, headingFont }),
+        body: JSON.stringify({
+          mainColor: color,
+          logoMediaId: logoId,
+          customCss,
+          bodyFont,
+          headingFont,
+        }),
       });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(failure(body, "It could not be saved."));
@@ -156,6 +163,34 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
           }}
         />
       </fieldset>
+
+      <details open={customCss.length > 0}>
+        <summary>For developers: your own CSS</summary>
+        <p>
+          <label htmlFor="look-css">CSS for the public pages</label>
+          <br />
+          <textarea
+            id="look-css"
+            rows={10}
+            spellCheck={false}
+            aria-describedby="look-css-hint"
+            style={{
+              inlineSize: "100%",
+              maxInlineSize: "48rem",
+              fontFamily: FONT_STACKS["system-mono"],
+              paddingInline: "0.5rem",
+            }}
+            value={customCss}
+            onChange={(event) => setCustomCss(event.target.value)}
+          />
+        </p>
+        <p id="look-css-hint">
+          It is checked when you save, and comes after the look above. Up to 50 KB. These are not
+          allowed: @import, addresses of other sites, scripts, and anything that could break out of
+          the style tag. Images can only be small PNG, JPEG, GIF, WebP or AVIF files written into
+          the CSS.
+        </p>
+      </details>
 
       <section aria-label="Sample" style={sample}>
         <h2 style={{ fontFamily: FONT_STACKS[headingFont], marginBlockStart: 0 }}>

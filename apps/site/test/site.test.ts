@@ -4661,6 +4661,11 @@ describe.skipIf(!findBrowser())(
         });
       await page.getByRole("dialog").waitFor({ state: "detached" });
       await page.getByRole("button", { name: "Change the logo" }).waitFor();
+      // A developer's own CSS: the box is folded away until it is opened.
+      await page.getByText("For developers: your own CSS").click();
+      await page
+        .getByLabel("CSS for the public pages")
+        .fill("/* wider letters */ h1 { letter-spacing: 0.2em }");
       await page.getByRole("button", { name: "Save the look" }).click();
       await page.getByText("Saved. Your site shows the new look now.").waitFor();
 
@@ -4674,6 +4679,8 @@ describe.skipIf(!findBrowser())(
         const shown = await get(path);
         expect(shown.response.status, path).toBe(200);
         expect(shown.body, path).toContain("--oks-color-primary-700:");
+        expect(shown.body, path).toContain("h1 { letter-spacing: 0.2em }");
+        expect(shown.body, path).not.toContain("wider letters");
         expect(shown.body, path).toMatch(
           /<header><a href="\/"[^>]*><img src="\/uploads\/[^"]*Maple-logo\.png"[^>]*alt="Maple Street Bakery[^"]*"/,
         );
@@ -4696,6 +4703,7 @@ describe.skipIf(!findBrowser())(
         return {
           body: getComputedStyle(document.body).fontFamily,
           heading: getComputedStyle(document.querySelector("h1")!).fontFamily,
+          spacing: getComputedStyle(document.querySelector("h1")!).letterSpacing,
           link: getComputedStyle(link).color,
           expected: `rgb(${rgb.join(", ")})`,
         };
@@ -4703,6 +4711,7 @@ describe.skipIf(!findBrowser())(
       expect(used.body).toContain("Iowan Old Style");
       expect(used.heading).toContain("ui-monospace");
       expect(used.link).toBe(used.expected);
+      expect(parseFloat(used.spacing)).toBeGreaterThan(0); // the developer's CSS is used
       for (const width of [1280, 390]) {
         await visitor.setViewportSize({ width, height: 900 });
         await visitor.addScriptTag({ content: axe.source });
@@ -4725,6 +4734,18 @@ describe.skipIf(!findBrowser())(
       expect(await page.getByLabel("Pick the color of links and buttons").inputValue()).toBe(
         "#2a6f4f",
       );
+      // CSS that fails the check is refused with the line, and the saved CSS stays.
+      expect(await page.getByLabel("CSS for the public pages").inputValue()).toBe(
+        "h1 { letter-spacing: 0.2em }",
+      );
+      await page
+        .getByLabel("CSS for the public pages")
+        .fill("h1 { color: red }\n@import url(https://evil.example/x.css);");
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await page.getByText("Line 2:").waitFor();
+      expect((await get("/")).body).not.toContain("evil.example");
+      expect((await get("/")).body).toContain("letter-spacing");
+      await page.getByLabel("CSS for the public pages").fill("");
       await page.getByRole("button", { name: "Remove the logo" }).click();
       await page.getByRole("button", { name: "Use the built-in color" }).click();
       await page.getByLabel("Font for text").selectOption("system-sans");
@@ -4734,6 +4755,7 @@ describe.skipIf(!findBrowser())(
       const plain = (await get("/")).body;
       expect(plain).not.toContain("--oks-color-primary-700");
       expect(plain).not.toContain("Maple-logo");
+      expect(plain).not.toContain("letter-spacing");
     });
 
     /** A request made from inside the signed-in page, so it carries the owner's session. */
@@ -5300,6 +5322,7 @@ describe.skipIf(!findBrowser())(
         styles: {
           mainColor: null,
           logoMediaId: null,
+          customCss: "",
           bodyFont: "system-sans",
           headingFont: "system-sans",
         },
@@ -5371,6 +5394,33 @@ describe.skipIf(!findBrowser())(
       expect((await call(page, "GET", "/api/admin/settings/theme")).json).toMatchObject({
         styles: { mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-mono" },
       });
+
+      // Custom CSS: written after the look on every public page; hostile CSS is refused and never written.
+      const withCss = await call(page, "PUT", "/api/admin/settings/theme", {
+        customCss: ".x { color: red } /* note */ h1 { letter-spacing: 0.3em }",
+      });
+      expect(withCss.status).toBe(200);
+      const styled = (await publicStyle())!;
+      expect(styled.indexOf("--oks-color-primary-700")).toBeLessThan(
+        styled.indexOf("letter-spacing"),
+      );
+      expect(styled).not.toContain("note");
+      for (const customCss of [
+        "@import 'x.css';",
+        "a { background: url(https://evil.example/x.png) }",
+        "a { color: red }</style><script>window.pwned=1</script>",
+        "a { color: red",
+        "a { width: expression(alert(1)) }",
+      ]) {
+        const refusal = await call(page, "PUT", "/api/admin/settings/theme", { customCss });
+        expect(refusal.status, customCss).toBe(400);
+      }
+      const afterRefusals = (await fetch(site.base + "/")).headers.get("content-type");
+      expect(afterRefusals).toContain("text/html");
+      const html = await (await fetch(site.base + "/")).text();
+      expect(html).not.toContain("evil.example");
+      expect(html).not.toContain("window.pwned");
+      expect(html).toContain("letter-spacing");
 
       // An editor may not see or change it; a signed-out request is refused.
       const editor = await signedIn(cara);

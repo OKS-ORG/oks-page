@@ -2,6 +2,7 @@
 // core checks every value and writes the CSS itself, so nothing an author or an owner types can reach the style sheet as
 // code. The owner's simple controls (one main color, two fonts) and, later, a theme package's `theme.json` both end here.
 // This file knows nothing about databases; it is pure.
+import { checkThemeCss } from "./css-check.js";
 
 /** The 11 steps of every color role in oks-ui (`--oks-color-<role>-<step>`). */
 export const COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
@@ -310,6 +311,8 @@ export interface ThemeStyles {
   mainColor: string | null;
   /** The id of the logo in the media library, or null for no logo. */
   logoMediaId: string | null;
+  /** The developer's own CSS (already checked and without comments), or an empty text. Written after the look. */
+  customCss: string;
   bodyFont: FontChoice;
   headingFont: FontChoice;
 }
@@ -317,6 +320,7 @@ export interface ThemeStyles {
 export const DEFAULT_THEME_STYLES: ThemeStyles = {
   mainColor: null,
   logoMediaId: null,
+  customCss: "",
   bodyFont: "system-sans",
   headingFont: "system-sans",
 };
@@ -350,5 +354,8 @@ export function stylesToTokens(styles: ThemeStyles): ThemeTokens {
 /** The CSS for the owner's controls; empty when everything is still the built-in look. */
 export function stylesToCss(styles: ThemeStyles): string {
   const checked = checkTokens(stylesToTokens(styles));
-  return checked.ok ? tokensToCss(checked.tokens) : "";
+  const look = checked.ok ? tokensToCss(checked.tokens) : "";
+  // The custom CSS is checked again here, so only checked text is ever written, whatever was stored.
+  const custom = styles.customCss ? checkThemeCss(styles.customCss) : null;
+  return custom?.ok && custom.css ? (look ? `${look}\n${custom.css}` : custom.css) : look;
 }
