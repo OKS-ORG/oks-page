@@ -14,6 +14,7 @@ export * from "./menus.js";
 export * from "./maintenance.js";
 export * from "./search.js";
 export * from "./redirects.js";
+export * from "./preview.js";
 export * from "./sitemap.js";
 export * from "./seo-settings.js";
 export * from "./trash.js";

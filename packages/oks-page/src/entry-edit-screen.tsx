@@ -13,6 +13,7 @@ import {
   useUnsavedCopy,
 } from "./entry-editing";
 import { EntryRevisions } from "./entry-revisions";
+import { EntryPreview } from "./entry-preview";
 import { EntryTermsPanel } from "./entry-terms-panel";
 import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
@@ -218,6 +219,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
         }}
       />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
+      <EntryPreview id={props.id} />
       <AutosaveStatus savedAt={keptAt} />
       <EntryRevisions id={props.id} revision={revisionNo} />
       {props.canTrash ? (

@@ -28,6 +28,7 @@ const RESERVED = new Set([
   "not-found-handler",
   "maintenance-handler",
   "search",
+  "preview",
   "test-form",
 ]);
 // A part of an address is made of letters, combining marks and numbers of any script, joined by single hyphens

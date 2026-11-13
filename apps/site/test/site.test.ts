@@ -1,7 +1,7 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -3751,5 +3751,280 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
       expect(refused.status, bad).toBe(400);
     }
     await page.close();
+  });
+});
+
+// Previews on a site of its own: a draft stays private, and is shown by a signed link or to an editor who may edit it.
+describe.skipIf(!findBrowser())("previews", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const SECRET = "p".repeat(40);
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-preview-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: SECRET });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    // Cara is a contributor: she writes her own drafts and may not touch anyone else's.
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'contributor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  const signedIn = async (who: { email: string; password: string }) => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    return page;
+  };
+  const call = (page: Page, method: string, url: string, body?: unknown) =>
+    page.evaluate(
+      async ([m, u, b]) => {
+        const response = await fetch(u as string, {
+          method: m as string,
+          headers: { "content-type": "application/json" },
+          ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+        });
+        return {
+          status: response.status,
+          json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+        };
+      },
+      [method, url, body] as const,
+    );
+  const blocks = (text: string) => [
+    {
+      id: "p1",
+      type: "paragraph",
+      props: {},
+      content: [{ type: "text", text, styles: {} }],
+      children: [],
+    },
+  ];
+  const draft = async (page: Page, title: string, text: string, type = "post") => {
+    const made = await call(page, "POST", "/api/admin/entries", { type, title });
+    const id = String(made.json!["id"]);
+    const slug = String(made.json!["slug"]);
+    const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+      title,
+      slugPart: slug.replace(/^blog\//, ""),
+      status: "draft",
+      blocks: blocks(text),
+      revision: made.json!["revision"],
+    });
+    expect(saved.status).toBe(200);
+    return { id, slug, revision: Number(saved.json!["revision"]) };
+  };
+  const get = async (path: string) => {
+    const response = await fetch(path.startsWith("http") ? path : site.base + path);
+    return { response, body: await response.text() };
+  };
+  /** A link token made the way the site makes it, to test links the site would never make. */
+  const token = (id: string, expiresAt: number) =>
+    `${expiresAt}.${createHmac("sha256", SECRET).update(`oks-preview:${id}:${expiresAt}`).digest("base64url")}`;
+
+  test("a draft is private; a signed link and the editor show the saved version, never cached; bad, expired and altered links are plain 404s", async () => {
+    const page = await signedIn(owner);
+    const secret = await draft(page, "Secret plans", "The launch is on Friday.");
+    // The public cannot see a draft.
+    expect((await get(`/${secret.slug}`)).response.status).toBe(404);
+
+    // The signed-in editor opens the preview: the saved text, the notice, not indexed, not cached, no Referer.
+    const opened = await page.goto(`${site.base}/preview/${secret.id}`);
+    expect(opened!.status()).toBe(200);
+    await page.getByRole("heading", { name: "Secret plans", level: 1 }).waitFor();
+    await page.getByText("The launch is on Friday.").waitFor();
+    await page.getByText("Preview: this page is not published.").waitFor();
+    const headers = opened!.headers();
+    expect(headers["x-robots-tag"]).toBe("noindex, nofollow");
+    expect(headers["cache-control"]).toContain("no-store");
+    expect(headers["referrer-policy"]).toBe("no-referrer");
+    expect(await page.locator('meta[name="robots"]').getAttribute("content")).toContain("noindex");
+
+    // Someone who is not signed in and has no link gets a real 404 and learns nothing.
+    const stranger = await get(`/preview/${secret.id}`);
+    expect(stranger.response.status).toBe(404);
+    expect(stranger.body).not.toContain("Secret plans");
+    expect((await get(`/preview/${secret.id}?t=nonsense`)).response.status).toBe(404);
+    expect((await get(`/preview/${newIdLike()}`)).response.status).toBe(404);
+
+    // The edit screen makes a share link.
+    await page.goto(`${site.base}/admin/posts/${secret.id}`);
+    await page.getByRole("heading", { name: "Preview", level: 2 }).waitFor();
+    await page.getByLabel("Share link lasts").selectOption("14");
+    await page.getByRole("button", { name: "Create a share link" }).click();
+    const input = page.getByLabel("Share link", { exact: true });
+    await input.waitFor();
+    const link = await input.inputValue();
+    expect(link).toMatch(
+      new RegExp(`^${site.base}/preview/${secret.id}\\?t=\\d+\\.[A-Za-z0-9_-]{43}$`),
+    );
+    await page.getByText(/Anyone with this link can see the saved version/).waitFor();
+    const shared = await get(link);
+    expect(shared.response.status).toBe(200);
+    expect(shared.body).toContain("The launch is on Friday.");
+    expect(shared.response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(shared.response.headers.get("cache-control")).toContain("no-store");
+
+    // It always shows the last saved version: a change is there at once.
+    const changed = await call(page, "PUT", `/api/admin/entries/${secret.id}`, {
+      title: "Secret plans",
+      slugPart: secret.slug.replace(/^blog\//, ""),
+      status: "draft",
+      blocks: blocks("The launch moved to Monday."),
+      revision: secret.revision,
+    });
+    expect(changed.status).toBe(200);
+    expect((await get(link)).body).toContain("The launch moved to Monday.");
+    expect((await get(link)).body).not.toContain("Friday");
+
+    // Links that are altered, made for another entry, expired, or too far in the future are refused.
+    const [expires, signature] = link.split("?t=")[1]!.split(".");
+    const flipped = signature!.slice(0, -1) + (signature!.endsWith("A") ? "B" : "A");
+    const base = `${site.base}/preview/${secret.id}`;
+    expect((await get(`${base}?t=${expires}.${flipped}`)).response.status).toBe(404);
+    expect(
+      (await get(`${base}?t=${Number(expires) + 86_400_000}.${signature}`)).response.status,
+    ).toBe(404);
+    const other = await draft(page, "Other draft", "Nothing to see.");
+    expect((await get(`/preview/${other.id}?t=${link.split("?t=")[1]}`)).response.status).toBe(404);
+    expect((await get(`${base}?t=${token(secret.id, Date.now() - 1000)}`)).response.status).toBe(
+      404,
+    );
+    expect(
+      (await get(`${base}?t=${token(secret.id, Date.now() + 40 * 86_400_000)}`)).response.status,
+    ).toBe(404);
+    // A link made the way the site makes it works (the control for the refusals above).
+    expect(
+      (await get(`${base}?t=${token(secret.id, Date.now() + 86_400_000)}`)).response.status,
+    ).toBe(200);
+
+    // Accessibility of the preview page.
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`${site.base}/preview/${secret.id}`);
+      await page.getByRole("heading", { name: "Secret plans", level: 1 }).waitFor();
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `preview ${width}px`,
+      ).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // Publishing: the link keeps working and says so; the trash ends every preview.
+    const published = await call(page, "PUT", `/api/admin/entries/${secret.id}`, {
+      title: "Secret plans",
+      slugPart: secret.slug.replace(/^blog\//, ""),
+      status: "published",
+      blocks: blocks("The launch moved to Monday."),
+      revision: Number(changed.json!["revision"]),
+    });
+    expect(published.status).toBe(200);
+    expect((await get(link)).body).toContain("the saved version of a published page");
+    expect((await get(`/${secret.slug}`)).response.status).toBe(200);
+    expect((await call(page, "DELETE", `/api/admin/entries/${secret.id}`)).status).toBe(200);
+    expect((await get(link)).response.status).toBe(404);
+    const gone = await page.goto(`${site.base}/preview/${secret.id}`);
+    expect(gone!.status()).toBe(404);
+
+    // A page of the site (not a post) previews too.
+    const aboutId = String((await db.run("select id from entries where slug = 'about'"))[0]!["id"]);
+    const about = await page.goto(`${site.base}/preview/${aboutId}`);
+    expect(about!.status()).toBe(200);
+    await page.getByRole("heading", { name: "About", level: 1 }).waitFor();
+    await page.close();
+  });
+
+  function newIdLike(): string {
+    return "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  }
+
+  test("the link route: who may make one, how long it lasts, and signed-out requests", async () => {
+    const owner1 = await signedIn(owner);
+    const ownersDraft = await draft(owner1, "Owner draft", "Owner words.");
+    const caras = await signedIn(cara);
+    const carasDraft = await draft(caras, "Cara draft", "Cara words.");
+
+    // A contributor makes a link for her own draft, and sees it; not for the owner's draft, and not the owner's preview.
+    const mine = await call(caras, "POST", `/api/admin/entries/${carasDraft.id}/preview-link`, {});
+    expect(mine.status).toBe(201);
+    expect(String(mine.json!["url"])).toContain(`/preview/${carasDraft.id}?t=`);
+    const previewOfMine = await caras.goto(`${site.base}/preview/${carasDraft.id}`);
+    expect(previewOfMine!.status()).toBe(200);
+    expect(
+      (await call(caras, "POST", `/api/admin/entries/${ownersDraft.id}/preview-link`, {})).status,
+    ).toBe(403);
+    const previewOfTheirs = await caras.goto(`${site.base}/preview/${ownersDraft.id}`);
+    expect(previewOfTheirs!.status()).toBe(404);
+
+    // How long: 7 days when nothing is said, 1 to 30 when asked, nothing else.
+    const days = async (value: unknown) =>
+      call(
+        owner1,
+        "POST",
+        `/api/admin/entries/${ownersDraft.id}/preview-link`,
+        value === undefined ? {} : { days: value },
+      );
+    const week = await days(undefined);
+    expect(week.status).toBe(201);
+    const left = (Date.parse(String(week.json!["expiresAt"])) - Date.now()) / 86_400_000;
+    expect(left).toBeGreaterThan(6.9);
+    expect(left).toBeLessThan(7.1);
+    expect((await days(1)).status).toBe(201);
+    expect((await days(30)).status).toBe(201);
+    for (const bad of [0, 31, -3, 1.5, "soon"])
+      expect((await days(bad)).status, String(bad)).toBe(400);
+    expect(
+      (await call(owner1, "POST", `/api/admin/entries/${newIdLike()}/preview-link`, {})).status,
+    ).toBe(404);
+
+    // Signed out: refused. (The same-origin check comes first, as everywhere.)
+    const signedOut = await fetch(`${site.base}/api/admin/entries/${ownersDraft.id}/preview-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(signedOut.status).toBe(401);
+    await owner1.close();
+    await caras.close();
   });
 });

@@ -15,6 +15,7 @@ import {
   visitorOf,
 } from "./headers";
 import { mayPassMaintenance } from "./maintenance-gate";
+import { mayPreview } from "./preview-gate";
 import { cdnEnabled, maintenanceSettings, seoSettings } from "./settings";
 
 /** Every page shows the header and footer menus, so a CDN purge of a menu reaches every page. */
@@ -77,6 +78,19 @@ export async function proxy(request: NextRequest) {
   if (maintenance.enabled && !(visitor === "signed-in" && (await mayPassMaintenance(request))))
     return apply(NextResponse.rewrite(new URL("/maintenance-handler", request.url)), {
       "x-robots-tag": "noindex",
+    });
+  // A preview ("/preview/<id>") is for someone with a preview link or a signed-in editor of that entry. Anyone else falls
+  // through to the plain 404 below, so nobody learns that a draft exists. Never cached, never indexed, and the link is
+  // not passed on to other sites in a Referer header.
+  const preview = /^preview\/([^/]+)$/.exec(slug);
+  if (
+    preview &&
+    (await mayPreview(request.headers, preview[1]!, request.nextUrl.searchParams.get("t")))
+  )
+    return apply(NextResponse.next(), {
+      "x-robots-tag": "noindex, nofollow",
+      "cache-control": PRIVATE,
+      "referrer-policy": "no-referrer",
     });
   // The search page is a route of its own. Its answers depend on the query, so they carry no cache tags, and search
   // engines are told not to index them (spec 08, section 9).

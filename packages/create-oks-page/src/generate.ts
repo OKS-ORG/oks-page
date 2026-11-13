@@ -123,6 +123,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, generateMetadata } from ${from("site")};\n`,
     },
     {
+      path: "app/preview/[id]/page.tsx",
+      content: `export { default, metadata } from ${from("preview-page")};\n`,
+    },
+    {
       path: "app/search/page.tsx",
       content: `export { default, metadata } from ${from("search-page")};\n`,
     },
@@ -221,6 +225,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/entries/[id]/editing/route.ts",
       content: `export { POST, DELETE } from ${from("api-editing")};\n`,
+    },
+    {
+      path: "app/api/admin/entries/[id]/preview-link/route.ts",
+      content: `export { POST } from ${from("api-entry-preview")};\n`,
     },
     {
       path: "app/api/admin/entries/[id]/terms/route.ts",
