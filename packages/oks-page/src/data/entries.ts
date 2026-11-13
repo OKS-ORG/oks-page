@@ -5,17 +5,39 @@ import {
   firstImageOf,
   loadGeneralSettings,
   loadPublicMenu,
-  loadThemeCss,
+  loadThemeStyles,
+  stylesToCss,
   readEntrySeo,
   type PublicMenuItem,
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
-import type { EntryView, SiteInfo, TermArchive } from "./types";
+import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
 
-/** The CSS of the owner's look (colors and fonts); empty while the site has the built-in look. */
-export async function loadThemeCssText(): Promise<string> {
-  return loadThemeCss(getRunner(), await getSiteId());
+/** The owner's look: the CSS for the colors and fonts, and the logo (its address and size) when one is chosen. */
+export async function loadLook(): Promise<Look> {
+  const runner = getRunner();
+  const siteId = await getSiteId();
+  const styles = await loadThemeStyles(runner, siteId);
+  let logo: Look["logo"] = null;
+  if (styles.logoMediaId) {
+    const rows = await runner.all(
+      `select "storage_key", "width", "height", "alt" from "media"
+        where "site_id" = ? and "id" = ? and "status" = 'ready'`,
+      [siteId, styles.logoMediaId],
+    );
+    const row = rows[0];
+    if (row) {
+      const name = (await loadSiteInfo()).siteName;
+      logo = {
+        url: mediaContext().storage.publicUrl(String(row["storage_key"])),
+        width: row["width"] == null ? null : Number(row["width"]),
+        height: row["height"] == null ? null : Number(row["height"]),
+        alt: String(row["alt"]) || name,
+      };
+    }
+  }
+  return { css: stylesToCss(styles), logo };
 }
 
 /** The site's name and tagline (Settings, General). */

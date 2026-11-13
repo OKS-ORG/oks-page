@@ -26,8 +26,14 @@ export async function PUT(request: Request) {
   } catch {
     return reply({ code: "invalid", message: "The request was not understood." }, 400);
   }
-  const patch: { mainColor?: string | null; bodyFont?: string; headingFont?: string } = {};
+  const patch: {
+    mainColor?: string | null;
+    logoMediaId?: string | null;
+    bodyFont?: string;
+    headingFont?: string;
+  } = {};
   if ("mainColor" in input) patch.mainColor = input["mainColor"] as string | null;
+  if ("logoMediaId" in input) patch.logoMediaId = input["logoMediaId"] as string | null;
   if ("bodyFont" in input) patch.bodyFont = input["bodyFont"] as string;
   if ("headingFont" in input) patch.headingFont = input["headingFont"] as string;
   const result = await saveThemeStyles(getRunner(), await actorOf(member), member.siteId, patch);

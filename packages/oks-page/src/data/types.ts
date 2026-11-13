@@ -24,6 +24,12 @@ export interface SiteInfo {
   tagline: string;
 }
 
+/** The owner's look as the public pages use it: the CSS, and the logo if there is one. */
+export interface Look {
+  css: string;
+  logo: { url: string; width: number | null; height: number | null; alt: string } | null;
+}
+
 /** A category or tag archive: the posts that carry the term (for a category, also those in the categories under it). */
 export interface TermArchive {
   id: string;

@@ -12,6 +12,7 @@ import {
 
 const styles = (over: Partial<ThemeStyles> = {}): ThemeStyles => ({
   mainColor: null,
+  logoMediaId: null,
   bodyFont: "system-sans",
   headingFont: "system-sans",
   ...over,

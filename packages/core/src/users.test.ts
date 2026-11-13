@@ -199,7 +199,7 @@ for (const { kind, open, skip } of openers) {
         for (const bad of [
           "",
           "x",
-          made.token.slice(0, -1) + "A",
+          made.token.slice(0, -1) + (made.token.endsWith("A") ? "B" : "A"),
           made.token + "A",
           "a".repeat(101),
         ])

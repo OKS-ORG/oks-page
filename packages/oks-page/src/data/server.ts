@@ -6,15 +6,15 @@ import { slugTag } from "../cache-tags";
 import {
   loadPublishedEntry,
   loadSiteInfo,
-  loadThemeCssText,
+  loadLook,
   loadSiteMenu,
   loadTermArchive,
   slugOf,
 } from "./entries";
-import type { EntryView, SiteInfo, TermArchive } from "./types";
+import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
-export type { EntryView, SiteInfo, TermArchive };
+export type { EntryView, Look, SiteInfo, TermArchive };
 
 /** The site's name and tagline, for every page's title and tags. Tagged `settings`: refreshed when they are saved. */
 export async function getSiteInfo(): Promise<SiteInfo> {
@@ -23,11 +23,11 @@ export async function getSiteInfo(): Promise<SiteInfo> {
   return loadSiteInfo();
 }
 
-/** The CSS of the owner's look. Tagged "theme": refreshed when the look is saved. */
-export async function getThemeCss(): Promise<string> {
+/** The owner's look (colors, fonts, logo). Tagged "theme": refreshed when the look is saved. */
+export async function getLook(): Promise<Look> {
   "use cache";
-  cacheTag("theme");
-  return loadThemeCssText();
+  cacheTag("theme", "settings");
+  return loadLook();
 }
 
 // Test builds count how often a page is really read from the database.

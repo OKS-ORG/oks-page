@@ -1,6 +1,7 @@
 // The small menu between the settings groups (General, Media, Security, Maintenance, Redirects, Search engines).
 const GROUPS = [
   { key: "general", label: "General", href: "/admin/settings/general" },
+  { key: "look", label: "Look", href: "/admin/settings/look" },
   { key: "media", label: "Media", href: "/admin/settings/media" },
   { key: "security", label: "Security", href: "/admin/settings/security" },
   { key: "maintenance", label: "Maintenance", href: "/admin/settings/maintenance" },

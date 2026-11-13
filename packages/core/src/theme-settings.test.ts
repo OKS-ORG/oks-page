@@ -29,7 +29,12 @@ describe("reading a stored look", () => {
       readThemeStyles(
         JSON.stringify({ mainColor: "#2A6F4F", bodyFont: "system-serif", headingFont: "x" }),
       ),
-    ).toEqual({ mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-sans" });
+    ).toEqual({
+      mainColor: "#2a6f4f",
+      logoMediaId: null,
+      bodyFont: "system-serif",
+      headingFont: "system-sans",
+    });
   });
 });
 
@@ -79,11 +84,17 @@ for (const { kind, open, skip } of openers) {
         }),
       ).toEqual({
         ok: true,
-        styles: { mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-sans" },
+        styles: {
+          mainColor: "#2a6f4f",
+          logoMediaId: null,
+          bodyFont: "system-serif",
+          headingFont: "system-sans",
+        },
       });
       await saveThemeStyles(db.runner, admin, siteId, { headingFont: "system-mono" });
       expect(await loadThemeStyles(db.runner, siteId)).toEqual({
         mainColor: "#2a6f4f",
+        logoMediaId: null,
         bodyFont: "system-serif",
         headingFont: "system-mono",
       });
@@ -108,6 +119,8 @@ for (const { kind, open, skip } of openers) {
         { mainColor: 42 as unknown as string },
         { bodyFont: "Comic Sans" },
         { headingFont: 'x"; } body { display: none' },
+        { logoMediaId: "no-such-picture" },
+        { logoMediaId: 5 as unknown as string },
       ]) {
         const result = await saveThemeStyles(db.runner, admin, siteId, input);
         expect(result, JSON.stringify(input)).toMatchObject({ ok: false, code: "invalid" });

@@ -10,9 +10,12 @@ export interface MediaPickerProps {
   isOpen: boolean;
   onClose: () => void;
   onPick: (item: MediaItem) => void;
+  /** The window's title and the picking button's words; the editor's wording when left out. */
+  title?: string;
+  pickLabel?: string;
 }
 
-function Picker({ onClose, onPick }: Omit<MediaPickerProps, "isOpen">) {
+function Picker({ onClose, onPick, pickLabel }: Omit<MediaPickerProps, "isOpen" | "title">) {
   const lib = useLibrary();
   const [selected, setSelected] = useState<string | null>(null);
   const images = lib.items.filter((i) => i.mimeType.startsWith("image/"));
@@ -66,7 +69,7 @@ function Picker({ onClose, onPick }: Omit<MediaPickerProps, "isOpen">) {
       />
       <p>
         <Button color="primary" isDisabled={!selected} onPress={() => choose(selected)}>
-          Insert image
+          {pickLabel ?? "Insert image"}
         </Button>{" "}
         <Button onPress={onClose}>Cancel</Button>
       </p>
@@ -74,10 +77,17 @@ function Picker({ onClose, onPick }: Omit<MediaPickerProps, "isOpen">) {
   );
 }
 
-export function MediaPicker({ isOpen, onClose, onPick }: MediaPickerProps) {
+export function MediaPicker({ isOpen, onClose, onPick, title, pickLabel }: MediaPickerProps) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Insert an image from the library" size="lg">
-      {isOpen ? <Picker onClose={onClose} onPick={onPick} /> : null}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title ?? "Insert an image from the library"}
+      size="lg"
+    >
+      {isOpen ? (
+        <Picker onClose={onClose} onPick={onPick} {...(pickLabel ? { pickLabel } : {})} />
+      ) : null}
     </Modal>
   );
 }

@@ -315,6 +315,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, PUT } from ${from("api-settings-seo")};\n`,
     },
     {
+      path: "app/admin/settings/look/page.tsx",
+      content: `export { default, metadata } from ${from("settings-look-page")};\n`,
+    },
+    {
       path: "app/api/admin/settings/theme/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-theme")};\n`,
     },

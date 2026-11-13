@@ -308,12 +308,15 @@ export function colorScale(
 export interface ThemeStyles {
   /** One main color as "#rrggbb", or null for the built-in look. */
   mainColor: string | null;
+  /** The id of the logo in the media library, or null for no logo. */
+  logoMediaId: string | null;
   bodyFont: FontChoice;
   headingFont: FontChoice;
 }
 
 export const DEFAULT_THEME_STYLES: ThemeStyles = {
   mainColor: null,
+  logoMediaId: null,
   bodyFont: "system-sans",
   headingFont: "system-sans",
 };

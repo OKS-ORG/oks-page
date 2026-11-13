@@ -243,8 +243,22 @@ for (const { kind, skip } of openers) {
     test("SEO-59 a change made through process A shows in process B on its next request", async () => {
       for (const s of [a, b, c]) expect(await text(s, "/about")).toContain("About us");
       await retitle(ids["about"]!, "About v2");
+      const mark = Date.now();
       await refresh(a, { tag: `entry:${ids["about"]}`, mode: "expire0" });
       expect(await text(a, "/about")).toContain("About v2");
+      // Next.js writes the refresh to the shared table after A has answered, so wait until it is there. (Asking B at
+      // once could beat the write and read the old page: that made this test fail now and then.)
+      await expect
+        .poll(
+          async () =>
+            (
+              await db.run("select updated_at from cache_tags where tag = ?", [
+                `entry:${ids["about"]}`,
+              ])
+            ).some((r) => new Date(r["updated_at"] as string | number | Date).getTime() >= mark),
+          { timeout: 10_000, interval: 20 },
+        )
+        .toBe(true);
       expect(await text(b, "/about")).toContain("About v2"); // within one request
     });
 
@@ -4610,10 +4624,118 @@ describe.skipIf(!findBrowser())(
       }
     });
 
-    // What the definition asks for and M2 does not do yet. Each one is a gap, not a bug.
-    test.todo(
-      "5. set the logo, the colors and the fonts within the default theme (there is no theme system and no logo yet)",
-    );
+    test("5. set the logo, the main color and the fonts, and the whole public site shows them", async () => {
+      // Settings has a Look page; the screen is accessible at a wide and a narrow width.
+      await page.goto(`${site.base}/admin/settings/general`);
+      await page.getByRole("link", { name: "Look", exact: true }).click();
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.addScriptTag({ content: axe.source });
+        const result = await page.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `look ${width}px`,
+        ).toEqual([]);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+
+      // The owner picks a color and fonts, and uploads a logo in the picker's window.
+      await page.getByLabel("Pick the color of links and buttons").fill("#2a6f4f");
+      await page.getByLabel("Font for text").selectOption("system-serif");
+      await page.getByLabel("Font for headings").selectOption("system-mono");
+      await page.getByRole("button", { name: "Choose a logo" }).click();
+      await page
+        .getByRole("dialog")
+        .locator("input[type=file]")
+        .setInputFiles({
+          name: "Maple logo.png",
+          mimeType: "image/png",
+          buffer: await picture("#2a6f4f"),
+        });
+      await page.getByRole("dialog").waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "Change the logo" }).waitFor();
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await page.getByText("Saved. Your site shows the new look now.").waitFor();
+
+      // The next visit to any public page: the logo links home, and the colors and fonts are written.
+      for (const path of [
+        "/",
+        "/opening-hours",
+        "/blog/sourdough-for-beginners",
+        "/category/recipes",
+      ]) {
+        const shown = await get(path);
+        expect(shown.response.status, path).toBe(200);
+        expect(shown.body, path).toContain("--oks-color-primary-700:");
+        expect(shown.body, path).toMatch(
+          /<header><a href="\/"[^>]*><img src="\/uploads\/[^"]*Maple-logo\.png"[^>]*alt="Maple Street Bakery[^"]*"/,
+        );
+      }
+      const logo = /<img src="(\/uploads\/[^"]*Maple-logo\.png)"/.exec((await get("/")).body)?.[1];
+      expect((await fetch(site.base + logo!)).status).toBe(200);
+
+      // In a real browser the fonts and the color are really used, and the page is still accessible.
+      const visitor = await browser.newPage();
+      await visitor.goto(site.base + "/");
+      const used = await visitor.evaluate(() => {
+        const hex = getComputedStyle(document.documentElement)
+          .getPropertyValue("--oks-color-primary-700")
+          .trim();
+        const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+        const link = document.createElement("a");
+        link.href = "/x";
+        link.textContent = "a link";
+        document.body.append(link);
+        return {
+          body: getComputedStyle(document.body).fontFamily,
+          heading: getComputedStyle(document.querySelector("h1")!).fontFamily,
+          link: getComputedStyle(link).color,
+          expected: `rgb(${rgb.join(", ")})`,
+        };
+      });
+      expect(used.body).toContain("Iowan Old Style");
+      expect(used.heading).toContain("ui-monospace");
+      expect(used.link).toBe(used.expected);
+      for (const width of [1280, 390]) {
+        await visitor.setViewportSize({ width, height: 900 });
+        await visitor.addScriptTag({ content: axe.source });
+        const result = await visitor.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `public ${width}px`,
+        ).toEqual([]);
+      }
+      await visitor.close();
+
+      // The screen shows what was saved; removing the logo and the color takes them away at once.
+      await page.reload();
+      expect(await page.getByLabel("Pick the color of links and buttons").inputValue()).toBe(
+        "#2a6f4f",
+      );
+      await page.getByRole("button", { name: "Remove the logo" }).click();
+      await page.getByRole("button", { name: "Use the built-in color" }).click();
+      await page.getByLabel("Font for text").selectOption("system-sans");
+      await page.getByLabel("Font for headings").selectOption("system-sans");
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await page.getByText("Saved. Your site shows the new look now.").waitFor();
+      const plain = (await get("/")).body;
+      expect(plain).not.toContain("--oks-color-primary-700");
+      expect(plain).not.toContain("Maple-logo");
+    });
+
     /** A request made from inside the signed-in page, so it carries the owner's session. */
     const call = (who: Page, method: string, url: string, body?: unknown) =>
       who.evaluate(
@@ -5175,7 +5297,12 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       expect(await publicStyle()).toBeNull();
       expect((await call(page, "GET", "/api/admin/settings/theme")).json).toEqual({
-        styles: { mainColor: null, bodyFont: "system-sans", headingFont: "system-sans" },
+        styles: {
+          mainColor: null,
+          logoMediaId: null,
+          bodyFont: "system-sans",
+          headingFont: "system-sans",
+        },
       });
 
       const saved = await call(page, "PUT", "/api/admin/settings/theme", {

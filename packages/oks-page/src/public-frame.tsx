@@ -1,6 +1,6 @@
 // What every public page has around its content: the header menu above it and the footer menu below it. A menu with
 // nothing in it draws nothing. Used by the server build and the export build, so both write the same page.
-import { getThemeCss } from "@data";
+import { getLook } from "@data";
 import type { PublicMenuItem } from "@oks-page/core";
 import type { ReactNode } from "react";
 
@@ -36,15 +36,27 @@ export async function PublicFrame({
   children: ReactNode;
 }) {
   // The owner's colors and fonts. The CSS is written by the core from checked values only, so it holds nothing else.
-  const themeCss = await getThemeCss();
+  const { css: themeCss, logo } = await getLook();
   return (
     <>
       {themeCss ? <style dangerouslySetInnerHTML={{ __html: themeCss }} /> : null}
-      {header.length > 0 ? (
+      {header.length > 0 || logo ? (
         <header>
-          <nav aria-label="Main menu">
-            <MenuList items={header} />
-          </nav>
+          {logo ? (
+            <a href="/" style={LINK}>
+              <img
+                src={logo.url}
+                alt={logo.alt}
+                {...(logo.width && logo.height ? { width: logo.width, height: logo.height } : {})}
+                style={{ maxBlockSize: "4rem", inlineSize: "auto" }}
+              />
+            </a>
+          ) : null}
+          {header.length > 0 ? (
+            <nav aria-label="Main menu">
+              <MenuList items={header} />
+            </nav>
+          ) : null}
         </header>
       ) : null}
       {children}

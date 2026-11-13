@@ -3,22 +3,22 @@ import type { PublicMenuItem } from "@oks-page/core";
 import {
   loadPublishedEntry,
   loadSiteInfo,
-  loadThemeCssText,
+  loadLook,
   loadSiteMenu,
   loadTermArchive,
   slugOf,
 } from "./entries";
-import type { EntryView, SiteInfo, TermArchive } from "./types";
+import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
-export type { EntryView, SiteInfo, TermArchive };
+export type { EntryView, Look, SiteInfo, TermArchive };
 
 export async function getSiteInfo(): Promise<SiteInfo> {
   return loadSiteInfo();
 }
 
-export async function getThemeCss(): Promise<string> {
-  return loadThemeCssText();
+export async function getLook(): Promise<Look> {
+  return loadLook();
 }
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {

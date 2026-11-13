@@ -35,6 +35,10 @@ export function readThemeStyles(raw: unknown): ThemeStyles {
   const saved = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     mainColor: isMainColor(saved["mainColor"]) ? saved["mainColor"].toLowerCase() : null,
+    logoMediaId:
+      typeof saved["logoMediaId"] === "string" && saved["logoMediaId"].length <= 64
+        ? saved["logoMediaId"]
+        : null,
     bodyFont: isFont(saved["bodyFont"]) ? saved["bodyFont"] : DEFAULT_THEME_STYLES.bodyFont,
     headingFont: isFont(saved["headingFont"])
       ? saved["headingFont"]
@@ -60,7 +64,12 @@ export async function saveThemeStyles(
   runner: SqlRunner,
   actor: Actor,
   siteId: string,
-  input: Partial<{ mainColor: string | null; bodyFont: string; headingFont: string }>,
+  input: Partial<{
+    mainColor: string | null;
+    logoMediaId: string | null;
+    bodyFont: string;
+    headingFont: string;
+  }>,
 ): Promise<ThemeResult<{ styles: ThemeStyles }>> {
   if (!actor.can("settings.manage"))
     return { ok: false, code: "forbidden", message: "You may not change the design." };
@@ -75,6 +84,23 @@ export async function saveThemeStyles(
       return bad("mainColor", "Choose a color as six letters or digits, like #2a6f4f.");
     else mainColor = input.mainColor.toLowerCase();
   }
+  let logoMediaId = current.logoMediaId;
+  if (input.logoMediaId !== undefined) {
+    if (input.logoMediaId === null) logoMediaId = null;
+    else {
+      const rows =
+        typeof input.logoMediaId === "string"
+          ? await runner.all(
+              `select "id" from "media" where "site_id" = ? and "id" = ? and "status" = 'ready'
+                and "mime_type" like 'image/%' and "mime_type" <> 'image/svg+xml'`,
+              [siteId, input.logoMediaId],
+            )
+          : [];
+      if (!rows[0])
+        return bad("logoMediaId", "Choose a picture from the media library for the logo.");
+      logoMediaId = input.logoMediaId;
+    }
+  }
   let bodyFont = current.bodyFont;
   if (input.bodyFont !== undefined) {
     if (!isFont(input.bodyFont)) return bad("bodyFont", "Choose a font from the list.");
@@ -86,7 +112,7 @@ export async function saveThemeStyles(
     headingFont = input.headingFont;
   }
 
-  const styles: ThemeStyles = { mainColor, bodyFont, headingFont };
+  const styles: ThemeStyles = { mainColor, logoMediaId, bodyFont, headingFont };
   await runner.all(
     `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
      on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,
