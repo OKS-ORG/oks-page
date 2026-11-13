@@ -15,7 +15,7 @@ import {
   visitorOf,
 } from "./headers";
 import { mayPassMaintenance } from "./maintenance-gate";
-import { cdnEnabled, maintenanceSettings } from "./settings";
+import { cdnEnabled, maintenanceSettings, seoSettings } from "./settings";
 
 /** Every page shows the header and footer menus, so a CDN purge of a menu reaches every page. */
 const MENU_TAGS = ["menu:primary", "menu:footer"];
@@ -29,11 +29,13 @@ export async function proxy(request: NextRequest) {
   let moved: Awaited<ReturnType<typeof findRedirect>> = null;
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
+  let seo: Awaited<ReturnType<typeof seoSettings>>;
   try {
-    [found, cdn, maintenance] = await Promise.all([
+    [found, cdn, maintenance, seo] = await Promise.all([
       findPublished(slug),
       cdnEnabled(),
       maintenanceSettings(),
+      seoSettings(),
     ]);
     // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
     if (!found) archive = await findTermArchive(slug);
@@ -52,8 +54,13 @@ export async function proxy(request: NextRequest) {
     );
   const visitor = visitorOf(request.cookies.getAll().map((c) => c.name));
 
+  // When the owner asked search engines to stay away, every public answer says so (robots.txt says it too).
+  const stayAway: Record<string, string> = seo.discourageIndexing
+    ? { "x-robots-tag": "noindex, nofollow" }
+    : {};
   const apply = (response: NextResponse, headers: Record<string, string>) => {
-    for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+    for (const [name, value] of Object.entries({ ...stayAway, ...headers }))
+      response.headers.set(name, value);
     return response;
   };
   // Maintenance mode: visitors get the 503 page. Only a signed-in administrator sees the real site, and the session is

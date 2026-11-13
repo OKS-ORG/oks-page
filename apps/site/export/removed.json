@@ -5,6 +5,8 @@
     "app/not-found-handler",
     "app/maintenance-handler",
     "app/search",
+    "app/sitemap.xml",
+    "app/robots.txt",
     "app/test-form",
     "app/admin",
     "app/uploads"

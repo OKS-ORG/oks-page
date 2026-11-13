@@ -167,6 +167,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-redirects-page")};\n`,
     },
     {
+      path: "app/admin/settings/search-engines/page.tsx",
+      content: `export { default, metadata } from ${from("settings-seo-page")};\n`,
+    },
+    {
       path: "app/admin/account/page.tsx",
       content: `export { default, metadata } from ${from("account-page")};\n`,
     },
@@ -245,6 +249,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/redirects/[id]/route.ts",
       content: `export { DELETE } from ${from("api-redirect")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/seo/route.ts",
+      content: `export { GET, PUT } from ${from("api-settings-seo")};\n`,
+    },
+    {
+      path: "app/sitemap.xml/route.ts",
+      content: `export { GET } from ${from("sitemap-xml")};\n`,
+    },
+    {
+      path: "app/robots.txt/route.ts",
+      content: `export { GET } from ${from("robots-txt")};\n`,
     },
     {
       path: "app/api/admin/settings/security/route.ts",

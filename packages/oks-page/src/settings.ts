@@ -1,8 +1,11 @@
 // Site settings the proxy needs on every request, read at most once per few seconds in each process.
 import {
   MAINTENANCE_SETTINGS_KEY,
+  SEO_SETTINGS_KEY,
   readMaintenanceSettings,
+  readSeoSettings,
   type MaintenanceSettings,
+  type SeoSettings,
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "./db";
 
@@ -40,6 +43,11 @@ export function forgetSetting(key: string): void {
 /** Maintenance mode (on or off, and the message for visitors). Off unless the owner turns it on. */
 export async function maintenanceSettings(): Promise<MaintenanceSettings> {
   return readMaintenanceSettings(await readSetting(MAINTENANCE_SETTINGS_KEY));
+}
+
+/** Whether the owner asked search engines to stay away (robots.txt, the sitemap and a `noindex` header). Off by default. */
+export async function seoSettings(): Promise<SeoSettings> {
+  return readSeoSettings(await readSetting(SEO_SETTINGS_KEY));
 }
 
 /** The "I use a CDN" setting (decision D81). Off unless the owner turns it on. */

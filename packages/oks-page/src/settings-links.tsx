@@ -1,9 +1,10 @@
-// The small menu between the settings groups (Media, Security, Maintenance, Redirects).
+// The small menu between the settings groups (Media, Security, Maintenance, Redirects, Search engines).
 const GROUPS = [
   { key: "media", label: "Media", href: "/admin/settings/media" },
   { key: "security", label: "Security", href: "/admin/settings/security" },
   { key: "maintenance", label: "Maintenance", href: "/admin/settings/maintenance" },
   { key: "redirects", label: "Redirects", href: "/admin/settings/redirects" },
+  { key: "seo", label: "Search engines", href: "/admin/settings/search-engines" },
 ];
 
 export function SettingsLinks({ current }: { current: string }) {

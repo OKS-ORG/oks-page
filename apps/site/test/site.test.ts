@@ -3471,3 +3471,180 @@ describe.skipIf(!findBrowser())("maintenance mode", { timeout: 120_000 }, () => 
     expect((await visit("/about")).response.status).toBe(200);
   });
 });
+
+// The sitemap and robots.txt on a site of its own, so the list of addresses is known.
+describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-seo-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "q".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const get = async (path: string) => {
+    const response = await fetch(site.base + path);
+    return { response, body: await response.text() };
+  };
+  const locs = (xml: string) => [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]!);
+
+  test("robots.txt and the sitemap list what search engines may index and update at once; closing the site to search engines closes both", async () => {
+    // robots.txt.
+    const robots = await get("/robots.txt");
+    expect(robots.response.status).toBe(200);
+    expect(robots.response.headers.get("content-type")).toContain("text/plain");
+    expect(robots.body).toBe(
+      `User-agent: *\nDisallow: /admin\nDisallow: /api/\nDisallow: /search\n\nSitemap: ${site.base}/sitemap.xml\n`,
+    );
+
+    // The sitemap of the starter site: Home, About, Contact and the first post.
+    const first = await get("/sitemap.xml");
+    expect(first.response.status).toBe(200);
+    expect(first.response.headers.get("content-type")).toContain("application/xml");
+    expect(locs(first.body)).toEqual([
+      `${site.base}/`,
+      `${site.base}/about`,
+      `${site.base}/blog/hello-world`,
+      `${site.base}/contact`,
+    ]);
+    expect(first.body).toMatch(/<lastmod>\d{4}-\d{2}-\d{2}T[\d:.]+Z<\/lastmod>/);
+
+    // Well-formed XML, as a browser reads it.
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    const parsed = await page.evaluate(async () => {
+      const text = await (await fetch("/sitemap.xml")).text();
+      const doc = new DOMParser().parseFromString(text, "application/xml");
+      return {
+        error: doc.querySelector("parsererror")?.textContent ?? null,
+        urls: doc.getElementsByTagName("url").length,
+      };
+    });
+    expect(parsed).toEqual({ error: null, urls: 4 });
+
+    // Sign in to change things through the API.
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const addPost = async (title: string, publish: boolean) => {
+      const made = await call("POST", "/api/admin/entries", { type: "post", title });
+      const id = String(made.json!["id"]);
+      const slug = String(made.json!["slug"]);
+      const save = (status: string, revision: number) =>
+        call("PUT", `/api/admin/entries/${id}`, {
+          title,
+          slugPart: slug.replace(/^blog\//, ""),
+          status,
+          blocks: [],
+          revision,
+        });
+      if (publish)
+        expect((await save("published", Number(made.json!["revision"]))).status).toBe(200);
+      return { id, slug, revision: Number(made.json!["revision"]) };
+    };
+
+    // A draft is not listed; publishing it lists it at once, with its category and tag pages.
+    const draft = await addPost("Fresh sourdough", false);
+    expect(locs((await get("/sitemap.xml")).body)).not.toContain(`${site.base}/${draft.slug}`);
+    const notes = await addPost("Window notes", true);
+    const after = locs((await get("/sitemap.xml")).body);
+    expect(after).toContain(`${site.base}/${notes.slug}`);
+    const tagged = await call("PUT", `/api/admin/entries/${notes.id}/terms`, {
+      categoryIds: [],
+      tags: ["Window Seat"],
+    });
+    expect(tagged.status).toBe(200);
+    const withArchives = locs((await get("/sitemap.xml")).body);
+    expect(withArchives).toContain(`${site.base}/tag/window-seat`);
+    expect(withArchives).toContain(`${site.base}/category/uncategorised`);
+    // Moving it to the trash takes it and its archives out at once.
+    expect((await call("DELETE", `/api/admin/entries/${notes.id}`)).status).toBe(200);
+    const gone = locs((await get("/sitemap.xml")).body);
+    expect(gone).not.toContain(`${site.base}/${notes.slug}`);
+    expect(gone).not.toContain(`${site.base}/tag/window-seat`);
+    expect(gone).not.toContain(`${site.base}/category/uncategorised`);
+
+    // The settings screen: closed to search engines.
+    await page.goto(site.base + "/admin/settings/search-engines");
+    await page.getByRole("heading", { name: "Search engine settings", level: 1 }).waitFor();
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    expect(
+      result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`),
+    ).toEqual([]);
+    await page.getByText(/^Closed: ask search engines/).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByText(/Search engines are asked to stay away/).waitFor();
+    expect((await get("/robots.txt")).body).toBe("User-agent: *\nDisallow: /\n");
+    expect((await get("/sitemap.xml")).response.status).toBe(404);
+    for (const path of ["/", "/about", "/blog/hello-world", "/category/uncategorised"]) {
+      const answer = await get(path);
+      expect(answer.response.headers.get("x-robots-tag"), path).toBe("noindex, nofollow");
+    }
+    // The 404 and the search page keep their own, stricter or equal, header.
+    const missing = await get("/nope");
+    expect(missing.response.status).toBe(404);
+    expect(missing.response.headers.get("x-robots-tag")).toBe("noindex");
+    expect((await get("/search?q=a")).response.headers.get("x-robots-tag")).toBe("noindex");
+
+    // Open again: everything is back.
+    await page.getByText(/^Open: search engines may index/).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByText(/Search engines may index the site/).waitFor();
+    expect((await get("/robots.txt")).body).toContain(`Sitemap: ${site.base}/sitemap.xml`);
+    expect((await get("/sitemap.xml")).response.status).toBe(200);
+    expect((await get("/about")).response.headers.get("x-robots-tag")).toBeNull();
+    await page.close();
+  });
+
+  test("the settings routes refuse signed-out requests", async () => {
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await fetch(site.base + "/api/admin/settings/seo", {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body: JSON.stringify({ discourageIndexing: true }) } : {}),
+      });
+      expect(response.status, method).toBe(401);
+    }
+    expect((await get("/robots.txt")).body).toContain("Sitemap:");
+  });
+});
