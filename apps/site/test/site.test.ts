@@ -3647,4 +3647,109 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
     }
     expect((await get("/robots.txt")).body).toContain("Sitemap:");
   });
+
+  test("addresses in other scripts and with accents: made from the title, reachable in every written form, followed by a redirect, in the sitemap and found by search (SEO-20 to SEO-22)", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const blocks = (text: string) => [
+      {
+        id: "p1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text, styles: {} }],
+        children: [],
+      },
+    ];
+    const publish = async (title: string, text: string) => {
+      const made = await call("POST", "/api/admin/entries", { type: "post", title });
+      const id = String(made.json!["id"]);
+      const slug = String(made.json!["slug"]);
+      const saved = await call("PUT", `/api/admin/entries/${id}`, {
+        title,
+        slugPart: slug.replace(/^blog\//, ""),
+        status: "published",
+        blocks: blocks(text),
+        revision: made.json!["revision"],
+      });
+      expect(saved.status).toBe(200);
+      return { id, slug, revision: Number(saved.json!["revision"]) };
+    };
+
+    // The address is made from the title and keeps the letters.
+    const hindi = await publish("नमस्ते दुनिया", "यह पहला लेख है।");
+    expect(hindi.slug).toBe("blog/नमस्ते-दुनिया");
+    const cafe = await publish("Café Münster", "Coffee in the old town.");
+    expect(cafe.slug).toBe("blog/café-münster");
+    // The page opens by the percent-encoded address a browser sends, and by the decomposed accents a keyboard may type.
+    const hindiUrl = `/blog/${encodeURIComponent("नमस्ते-दुनिया")}`;
+    expect(hindiUrl).toContain("%E0%A4%A8");
+    const opened = await get(hindiUrl);
+    expect(opened.response.status).toBe(200);
+    expect(opened.body).toContain("नमस्ते दुनिया");
+    expect((await get(`/blog/${encodeURIComponent("café-münster")}`)).response.status).toBe(200);
+    expect((await get(`/blog/${encodeURIComponent("café-münster")}`)).response.status).toBe(200);
+    // The same page in the browser, the way a visitor reaches it.
+    await page.goto(site.base + "/blog/नमस्ते-दुनिया");
+    await page.getByRole("heading", { name: "नमस्ते दुनिया", level: 1 }).waitFor();
+    // A broken percent-encoding is a bad request, not a server error; an address that does not exist is a 404.
+    expect((await fetch(site.base + "/blog/%E0%A4%A")).status).toBe(400);
+    expect((await get(`/blog/${encodeURIComponent("नहीं-है")}`)).response.status).toBe(404);
+
+    // The sitemap names it percent-encoded; search finds it by its own letters.
+    const sitemap = (await get("/sitemap.xml")).body;
+    expect(sitemap).toContain(`${site.base}${hindiUrl}`);
+    expect(sitemap).toContain(`${site.base}/blog/caf%C3%A9-m%C3%BCnster`);
+    const found = (await get(`/search?q=${encodeURIComponent("दुनिया")}`)).body;
+    expect(found).toContain('href="/blog/नमस्ते-दुनिया"');
+
+    // A new address keeps the old one working: the redirect is followed from the Hindi address.
+    const renamed = await call("PUT", `/api/admin/entries/${hindi.id}`, {
+      title: "नमस्ते दुनिया",
+      slugPart: "नमस्कार",
+      status: "published",
+      blocks: blocks("यह पहला लेख है।"),
+      revision: hindi.revision,
+    });
+    expect(renamed.status).toBe(200);
+    const moved = await fetch(site.base + hindiUrl, { redirect: "manual" });
+    expect(moved.status).toBe(301);
+    expect(new URL(moved.headers.get("location")!, site.base).pathname).toBe(
+      `/blog/${encodeURIComponent("नमस्कार")}`,
+    );
+    const followed = await fetch(site.base + hindiUrl);
+    expect(followed.status).toBe(200);
+    expect(decodeURIComponent(new URL(followed.url).pathname)).toBe("/blog/नमस्कार");
+
+    // The admin refuses what is not an address: upper case, the decomposed form, a symbol.
+    for (const bad of ["Café", "café", "a b", "a_b"]) {
+      const refused = await call("PUT", `/api/admin/entries/${cafe.id}`, {
+        title: "Café Münster",
+        slugPart: bad,
+        status: "published",
+        blocks: blocks("Coffee."),
+        revision: cafe.revision,
+      });
+      expect(refused.status, bad).toBe(400);
+    }
+    await page.close();
+  });
 });

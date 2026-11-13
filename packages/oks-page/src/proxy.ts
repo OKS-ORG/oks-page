@@ -21,7 +21,15 @@ import { cdnEnabled, maintenanceSettings, seoSettings } from "./settings";
 const MENU_TAGS = ["menu:primary", "menu:footer"];
 
 export async function proxy(request: NextRequest) {
-  const path = decodeURIComponent(request.nextUrl.pathname).replace(/\/+$/, "");
+  // The address as stored: decoded, and in the composed Unicode form (a browser may send the same word decomposed).
+  // A broken percent-encoding is a bad request (400), not a server error (spec 08, section 4).
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(request.nextUrl.pathname);
+  } catch {
+    return new NextResponse("Bad request", { status: 400, headers: { "x-robots-tag": "noindex" } });
+  }
+  const path = decoded.normalize("NFC").replace(/\/+$/, "");
   const slug = slugOf(path === "" ? undefined : path.slice(1).split("/"));
   const started = performance.now();
   let found: Awaited<ReturnType<typeof findPublished>>;

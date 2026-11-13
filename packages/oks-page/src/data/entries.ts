@@ -4,9 +4,24 @@ import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import type { EntryView, TermArchive } from "./types";
 
-/** "/" is the entry with the slug "home"; other paths use the path without the leading slash. */
-export const slugOf = (path: string[] | undefined) =>
-  path && path.length > 0 ? path.join("/") : "home";
+/**
+ * "/" is the entry with the slug "home"; other paths use the path without the leading slash. Addresses may hold letters
+ * of any script, so the path is read in the composed Unicode form (NFC) that addresses are stored in: a browser or a
+ * keyboard may send the same word in the decomposed form. A "%" can never be in an address, so a path that still has
+ * one is percent-encoded and is decoded first.
+ */
+export const slugOf = (path: string[] | undefined) => {
+  if (!path || path.length === 0) return "home";
+  const joined = path.join("/");
+  let decoded = joined;
+  if (joined.includes("%"))
+    try {
+      decoded = decodeURIComponent(joined);
+    } catch {
+      decoded = joined; // not valid encoding: it will not be found, which is the right answer
+    }
+  return decoded.normalize("NFC");
+};
 
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {
   const siteId = await getSiteId();

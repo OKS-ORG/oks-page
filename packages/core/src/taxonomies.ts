@@ -3,7 +3,7 @@
 // moves its posts to "Uncategorised", which always exists and cannot be deleted.
 import { newId, type SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
-import { slugFromTitle } from "./content.js";
+import { isSlugPart, slugFromTitle } from "./content.js";
 
 export const DEFAULT_TAXONOMIES = [
   { key: "category", label: "Categories", hierarchical: true },
@@ -13,7 +13,6 @@ export const DEFAULT_TAXONOMIES = [
 /** The term every post falls back to when it has no category. */
 export const DEFAULT_CATEGORY_SLUG = "uncategorised";
 
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const NAME_MAX = 80;
 const DESCRIPTION_MAX = 500;
 
@@ -156,7 +155,7 @@ function checkText(input: TermInput): string | null {
   }
   if (input.description !== undefined && input.description.length > DESCRIPTION_MAX)
     return `The description may have at most ${DESCRIPTION_MAX} characters.`;
-  if (input.slug !== undefined && !SLUG.test(input.slug))
+  if (input.slug !== undefined && !isSlugPart(input.slug))
     return "The address may have only lower-case letters, numbers and single dashes.";
   return null;
 }

@@ -102,6 +102,25 @@ for (const { kind, open, skip } of openers) {
       ).toMatchObject({ ok: true, slug: "news-views" });
     });
 
+    test("names and addresses in other scripts and with accents are kept", async () => {
+      expect(
+        await createTerm(db.runner, editor, siteId, "category", { name: "समाचार" }),
+      ).toMatchObject({ ok: true, slug: "समाचार" });
+      expect(
+        await createTerm(db.runner, editor, siteId, "tag", { name: "Café Münster" }),
+      ).toMatchObject({ ok: true, slug: "café-münster" });
+      // An address typed by hand may be in any script too, but it must be lower case and composed.
+      expect(
+        await createTerm(db.runner, editor, siteId, "tag", { name: "x", slug: "नमस्ते-दुनिया" }),
+      ).toMatchObject({ ok: true, slug: "नमस्ते-दुनिया" });
+      expect(
+        await createTerm(db.runner, editor, siteId, "tag", { name: "y", slug: "Café" }),
+      ).toMatchObject({ ok: false, code: "invalid" });
+      expect(
+        await createTerm(db.runner, editor, siteId, "tag", { name: "z", slug: "café" }),
+      ).toMatchObject({ ok: false, code: "invalid" });
+    });
+
     test("bad input is refused", async () => {
       const bad = (input: object, key = "category") =>
         createTerm(db.runner, editor, siteId, key, input);

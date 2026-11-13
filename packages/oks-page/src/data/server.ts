@@ -2,6 +2,7 @@
 // exactly the pages that changed. Pages import this as "@data"; the export build swaps in `export.ts`.
 import { cacheTag } from "next/cache";
 import type { PublicMenuItem } from "@oks-page/core";
+import { slugTag } from "../cache-tags";
 import { loadPublishedEntry, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
 import type { EntryView, TermArchive } from "./types";
 
@@ -17,7 +18,7 @@ const count = (key: string) => {
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {
   "use cache";
-  cacheTag(`slug:${slug}`);
+  cacheTag(slugTag(slug));
   count(`entry:${slug}`);
   const entry = await loadPublishedEntry(slug);
   if (entry) cacheTag(`entry:${entry.id}`);

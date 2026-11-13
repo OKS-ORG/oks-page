@@ -33,9 +33,12 @@ const SYSTEM = /^\/(admin|api|_next|uploads|search|sitemap\.xml|robots\.txt|favi
 const FROM = /^\/(?!\/)[^\s?#]*$/;
 const TO = /^(\/(?!\/)[^\s]*|https?:\/\/[^\s]+)$/i;
 
-/** A path as stored: leading slash, no trailing slash (except the front page "/"). */
+/**
+ * A path as stored: leading slash, no trailing slash (except the front page "/"), and in the composed Unicode form (NFC)
+ * that addresses are stored in, so "/café" typed in the decomposed form is the same address.
+ */
 export function cleanPath(path: string): string {
-  const trimmed = path.trim();
+  const trimmed = path.trim().normalize("NFC");
   return trimmed.length > 1 ? trimmed.replace(/\/+$/, "") || "/" : trimmed;
 }
 

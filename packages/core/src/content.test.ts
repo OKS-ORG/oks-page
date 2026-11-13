@@ -87,9 +87,9 @@ for (const { kind, open, skip } of openers) {
     });
     afterEach(async () => db.close());
 
-    test("slugs are made from the title: lower case, hyphens, no accents", () => {
+    test("slugs are made from the title: lower case, hyphens, accents kept (more in slug.test.ts)", () => {
       expect(slugFromTitle("Hello, World!")).toBe("hello-world");
-      expect(slugFromTitle("Crème brûlée  recipe")).toBe("creme-brulee-recipe");
+      expect(slugFromTitle("Crème brûlée  recipe")).toBe("crème-brûlée-recipe");
       expect(slugFromTitle("???")).toBe("untitled");
       expect(slugFromTitle("Anna's Garden")).toBe("annas-garden");
     });

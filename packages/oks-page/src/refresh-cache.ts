@@ -1,5 +1,6 @@
 // After a save the public pages that show the entry are made fresh at once (decision D82: tags, not time).
 import { revalidateTag } from "next/cache";
+import { slugTag } from "./cache-tags";
 import { forgetSearchIndex } from "./search-index";
 
 /** The header and footer menus on every page: a changed menu is shown on the next visit. */
@@ -22,6 +23,6 @@ export function refreshArchives(): void {
 
 export function refreshEntry(id: string, ...slugs: string[]): void {
   revalidateTag(`entry:${id}`, { expire: 0 });
-  for (const slug of new Set(slugs)) revalidateTag(`slug:${slug}`, { expire: 0 });
+  for (const slug of new Set(slugs)) revalidateTag(slugTag(slug), { expire: 0 });
   refreshArchives();
 }

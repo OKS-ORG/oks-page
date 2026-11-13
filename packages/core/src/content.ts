@@ -30,17 +30,36 @@ const RESERVED = new Set([
   "search",
   "test-form",
 ]);
-const SLUG_PART = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// A part of an address is made of letters, combining marks and numbers of any script, joined by single hyphens
+// (spec 08, section 3). The marks belong to the letters: without them Hindi "नमस्ते" falls apart.
+const SLUG_CHARS = String.raw`[\p{L}\p{N}\p{M}]`;
+const SLUG_PART = new RegExp(`^${SLUG_CHARS}+(?:-${SLUG_CHARS}+)*$`, "u");
+const NOT_SLUG = /[^\p{L}\p{N}\p{M}]+/gu;
 
-export const slugFromTitle = (title: string): string =>
-  title
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+/**
+ * True for an address part the site accepts: lower case, in the composed Unicode form (NFC), and made only of letters,
+ * marks and numbers joined by single hyphens. "café-münster" and "नमस्ते-दुनिया" pass; "Café" and "a--b" do not.
+ */
+export const isSlugPart = (slug: string): boolean =>
+  slug === slug.normalize("NFC") && slug === slug.toLowerCase() && SLUG_PART.test(slug);
+
+/**
+ * An address part made from a title: composed (NFC), lower case, apostrophes removed, every run of anything that is not a
+ * letter, mark or number becomes one hyphen, at most 80 characters, no hyphen at either end. Accents and other scripts
+ * are kept ("Café Münster" gives "café-münster", "नमस्ते दुनिया" gives "नमस्ते-दुनिया"). A title with nothing usable
+ * gives "untitled".
+ */
+export const slugFromTitle = (title: string): string => {
+  const made = title
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/['\u2019]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "untitled";
+    .normalize("NFC")
+    .replace(/['’]/g, "")
+    .replace(NOT_SLUG, "-")
+    .replace(/^-+|-+$/g, "");
+  // Cut by characters, not by code units, so a letter outside the basic plane is never split.
+  return Array.from(made).slice(0, 80).join("").replace(/-+$/, "") || "untitled";
+};
 
 export type ContentErrorCode =
   "forbidden" | "not_found" | "invalid" | "slug_taken" | "conflict" | "no_such_type";
@@ -306,7 +325,7 @@ export async function saveContent(
   if (title.length > 200)
     return fail("invalid", "The title can be at most 200 characters.", { field: "title" });
   const slugPart = String(input.slugPart ?? "").trim();
-  if (!SLUG_PART.test(slugPart))
+  if (!isSlugPart(slugPart))
     return fail(
       "invalid",
       "The address can only have lower-case letters, numbers and single hyphens.",
