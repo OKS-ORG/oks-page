@@ -17,6 +17,7 @@ export * from "./redirects.js";
 export * from "./preview.js";
 export * from "./timezone.js";
 export * from "./general-settings.js";
+export * from "./users.js";
 export * from "./sitemap.js";
 export * from "./seo-settings.js";
 export * from "./trash.js";

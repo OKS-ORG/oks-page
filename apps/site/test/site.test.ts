@@ -4615,8 +4615,262 @@ describe.skipIf(!findBrowser())(
     test.todo(
       "6. the blog feed (RSS and Atom) and each page's description, Open Graph and structured data tags",
     );
-    test.todo(
-      "7. invite an editor with a limited role (there is no Users screen and no invitation yet)",
-    );
+    test("7. invite an editor with a limited role: a link, a password of their own, the right menu, no way into users and settings, then a changed role and removal", async () => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const call = (who: Page, method: string, url: string, body?: unknown) =>
+        who.evaluate(
+          async ([m, u, b]) => {
+            const response = await fetch(u as string, {
+              method: m as string,
+              headers: { "content-type": "application/json" },
+              ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+            });
+            return {
+              status: response.status,
+              json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+            };
+          },
+          [method, url, body] as const,
+        );
+      const menuHrefs = async (who: Page) => {
+        await who.locator('a[href="/admin/pages"]').first().waitFor({ state: "attached" });
+        const found: string[] = [];
+        for (const href of [
+          "/admin/pages",
+          "/admin/posts",
+          "/admin/categories",
+          "/admin/menus",
+          "/admin/media",
+          "/admin/users",
+          "/admin/settings/general",
+        ])
+          if ((await who.locator(`a[href="${href}"]`).count()) > 0) found.push(href);
+        return found;
+      };
+      const axeOf = async (who: Page, label: string) => {
+        await who.addScriptTag({ content: axe.source });
+        const result = await who.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          result.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          label,
+        ).toEqual([]);
+      };
+
+      // The owner opens Users, sees themselves, and makes an invitation for Eli as an editor.
+      await page.goto(`${site.base}/admin/users`);
+      await page.getByRole("heading", { name: "Users", level: 1 }).waitFor();
+      await page.getByRole("cell", { name: "Mira (you)" }).waitFor();
+      await page.getByLabel(/^Name/).fill("Eli");
+      await page.getByLabel("Email").fill("eli@example.com");
+      expect(await page.getByLabel("Role", { exact: true }).inputValue()).toBe("editor");
+      await page.getByRole("button", { name: "Make an invitation link" }).click();
+      const link = await page.locator("#invite-link").inputValue();
+      expect(link).toMatch(new RegExp(`^${site.base}/admin/invite/[A-Za-z0-9_-]{30,}$`));
+      await page.getByText("It stops working on").waitFor();
+      await page.getByRole("cell", { name: "eli@example.com" }).waitFor();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        await axeOf(page, `users ${width}px`);
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+
+      // Eli opens the link on their own computer (a browser with no session), and chooses a password.
+      const eli = await (await browser.newContext()).newPage();
+      await eli.goto(link);
+      await eli
+        .getByRole("heading", { name: "Join Maple Street Bakery & Café", level: 1 })
+        .waitFor();
+      await eli.getByText("You are invited as").waitFor();
+      expect(await eli.getByLabel("Your name").inputValue()).toBe("Eli");
+      for (const width of [1280, 390]) {
+        await eli.setViewportSize({ width, height: 800 });
+        await axeOf(eli, `invitation page ${width}px`);
+      }
+      // Back to a desktop width: on a phone the menu is folded away.
+      await eli.setViewportSize({ width: 1280, height: 800 });
+      await eli.getByLabel(/^Password/).fill("short");
+      await eli.getByRole("button", { name: "Join" }).click();
+      await eli
+        .getByText(/at least 10 characters/)
+        .first()
+        .waitFor();
+      await eli.getByLabel("Your name").fill("Eli Stone");
+      await eli.getByLabel(/^Password/).fill("eli-has-a-long-password");
+      await eli.getByRole("button", { name: "Join" }).click();
+      await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      // The link works once: opened again it says so, in one plain message.
+      const again = await (await browser.newContext()).newPage();
+      await again.goto(link);
+      await again.getByRole("heading", { name: "This invitation link does not work" }).waitFor();
+      await again.close();
+
+      // Eli has the editor's menu: the content, the categories, the menus and the library. Not users, not settings.
+      expect(await menuHrefs(eli)).toEqual([
+        "/admin/pages",
+        "/admin/posts",
+        "/admin/categories",
+        "/admin/menus",
+        "/admin/media",
+      ]);
+      // Eli can write and publish.
+      const eliPost = await call(eli, "POST", "/api/admin/entries", {
+        type: "post",
+        title: "Eli's notes",
+      });
+      expect(eliPost.status).toBe(200);
+      // And cannot reach the people or the settings, by the screen or by the API.
+      for (const path of ["/admin/users", "/admin/settings/general"]) {
+        await eli.goto(site.base + path);
+        await eli.waitForURL(site.base + "/admin");
+      }
+      expect((await call(eli, "GET", "/api/admin/users")).status).toBe(403);
+      expect(
+        (
+          await call(eli, "POST", "/api/admin/users", {
+            name: "X",
+            email: "x@example.com",
+            roleKey: "administrator",
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (await call(eli, "PATCH", `/api/admin/users/${"x".repeat(26)}`, { role: "administrator" }))
+          .status,
+      ).toBe(403);
+      expect(
+        (await call(eli, "PUT", "/api/admin/settings/general", { siteName: "Mine" })).status,
+      ).toBe(403);
+
+      // The owner sees Eli in the list with the editor role and changes it to author: the menu shrinks at the next load.
+      await page.reload();
+      const row = page.getByRole("row", { name: /Eli Stone/ });
+      await row.waitFor();
+      await row.getByLabel("Role of Eli Stone").selectOption("author");
+      await page
+        .getByRole("row", { name: /Eli Stone/ })
+        .getByLabel("Role of Eli Stone")
+        .waitFor();
+      await expect
+        .poll(
+          async () =>
+            (
+              await db.run(
+                "select r.key as k from site_members m join roles r on r.id = m.role_id join users u on u.id = m.user_id where u.email = 'eli@example.com'",
+              )
+            )[0]!["k"],
+        )
+        .toBe("author");
+      await eli.goto(`${site.base}/admin`);
+      await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      expect(await menuHrefs(eli)).toEqual(["/admin/pages", "/admin/posts", "/admin/media"]);
+
+      // The last administrator is protected: the owner cannot step down or be removed.
+      const miraId = String(
+        (await db.run("select id from users where email = ?", [owner.email]))[0]!["id"],
+      );
+      const demote = await call(page, "PATCH", `/api/admin/users/${miraId}`, { role: "editor" });
+      expect(demote.status).toBe(409);
+      expect(String((demote.json!["error"] as { message: string }).message)).toContain(
+        "last administrator",
+      );
+      expect((await call(page, "DELETE", `/api/admin/users/${miraId}`)).status).toBe(409);
+
+      // An invitation that is cancelled stops working at once.
+      const zed = await call(page, "POST", "/api/admin/users", {
+        name: "Zed",
+        email: "zed@example.com",
+        roleKey: "contributor",
+        days: 1,
+      });
+      expect(zed.status).toBe(201);
+      const zedLink = String(zed.json!["link"]);
+      const zedId = String((zed.json!["invitation"] as { id: string }).id);
+      expect(
+        (
+          await call(page, "POST", "/api/admin/users", {
+            name: "Zed again",
+            email: "ZED@example.com",
+            roleKey: "editor",
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await call(page, "POST", "/api/admin/users", {
+            name: "Mira",
+            email: owner.email,
+            roleKey: "editor",
+          })
+        ).status,
+      ).toBe(409);
+      await page.reload();
+      await page.getByRole("button", { name: "Cancel the invitation for Zed" }).click();
+      await page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Cancel the invitation" })
+        .click();
+      await page.getByText("The invitation for Zed is cancelled").waitFor();
+      const dead = await (await browser.newContext()).newPage();
+      await dead.goto(zedLink);
+      await dead.getByRole("heading", { name: "This invitation link does not work" }).waitFor();
+      await dead.close();
+      expect((await call(page, "DELETE", `/api/admin/invitations/${zedId}`)).status).toBe(404);
+
+      // Removing Eli ends their access at once, and keeps what they wrote.
+      await page.reload();
+      await page.getByRole("button", { name: "Remove Eli Stone" }).click();
+      await page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Remove", exact: true })
+        .click();
+      await page.getByRole("row", { name: /Eli Stone/ }).waitFor({ state: "detached" });
+      await eli.goto(`${site.base}/admin`);
+      await eli.waitForURL("**/admin/login");
+      expect(
+        Number(
+          (await db.run("select count(*) as n from entries where title = 'Eli''s notes'"))[0]!["n"],
+        ),
+      ).toBe(1);
+      expect(
+        Number(
+          (await db.run("select count(*) as n from users where email = 'eli@example.com'"))[0]![
+            "n"
+          ],
+        ),
+      ).toBe(1);
+      await eli.context().close();
+
+      // Signed out, none of this is reachable.
+      for (const [method, url] of [
+        ["GET", "/api/admin/users"],
+        ["POST", "/api/admin/users"],
+        ["PATCH", `/api/admin/users/${miraId}`],
+        ["DELETE", `/api/admin/users/${miraId}`],
+        ["DELETE", `/api/admin/invitations/${zedId}`],
+      ] as const) {
+        const response = await fetch(site.base + url, {
+          method,
+          headers: { "content-type": "application/json" },
+          ...(method === "POST" || method === "PATCH" ? { body: "{}" } : {}),
+        });
+        expect(response.status, `${method} ${url}`).toBe(401);
+      }
+      // A wrong link on the accept route gets one plain answer.
+      const wrong = await fetch(`${site.base}/api/invite/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "this-link-was-never-made-at-all",
+          password: "a-long-password",
+        }),
+      });
+      expect(wrong.status).toBe(404);
+    });
   },
 );

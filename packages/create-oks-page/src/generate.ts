@@ -179,6 +179,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-seo-page")};\n`,
     },
     {
+      path: "app/admin/users/page.tsx",
+      content: `export { default, metadata } from ${from("users-page")};\n`,
+    },
+    {
+      path: "app/admin/invite/[token]/page.tsx",
+      content: `export { default, metadata } from ${from("invite-page")};\n`,
+    },
+    {
       path: "app/admin/account/page.tsx",
       content: `export { default, metadata } from ${from("account-page")};\n`,
     },
@@ -257,6 +265,22 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/maintenance/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-maintenance")};\n`,
+    },
+    {
+      path: "app/api/admin/users/route.ts",
+      content: `export { GET, POST } from ${from("api-users")};\n`,
+    },
+    {
+      path: "app/api/admin/users/[id]/route.ts",
+      content: `export { PATCH, DELETE } from ${from("api-user")};\n`,
+    },
+    {
+      path: "app/api/admin/invitations/[id]/route.ts",
+      content: `export { DELETE } from ${from("api-invitation")};\n`,
+    },
+    {
+      path: "app/api/invite/accept/route.ts",
+      content: `export { POST } from ${from("api-invite-accept")};\n`,
     },
     {
       path: "app/api/admin/redirects/route.ts",
