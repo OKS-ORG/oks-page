@@ -5,12 +5,18 @@ import {
   firstImageOf,
   loadGeneralSettings,
   loadPublicMenu,
+  loadThemeCss,
   readEntrySeo,
   type PublicMenuItem,
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import type { EntryView, SiteInfo, TermArchive } from "./types";
+
+/** The CSS of the owner's look (colors and fonts); empty while the site has the built-in look. */
+export async function loadThemeCssText(): Promise<string> {
+  return loadThemeCss(getRunner(), await getSiteId());
+}
 
 /** The site's name and tagline (Settings, General). */
 export async function loadSiteInfo(): Promise<SiteInfo> {

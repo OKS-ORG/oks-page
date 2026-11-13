@@ -1,0 +1,128 @@
+import { newId } from "@oks-page/db";
+import { openers, type TestDb } from "@oks-page/db/testing";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import type { Actor } from "./content.js";
+import { DEFAULT_ROLES } from "./roles.js";
+import { runSetup } from "./setup.js";
+import { DEFAULT_THEME_STYLES } from "./theme.js";
+import {
+  loadThemeCss,
+  loadThemeStyles,
+  readThemeStyles,
+  saveThemeStyles,
+} from "./theme-settings.js";
+
+const T = new Date(1_700_000_000_000);
+const actorOf = (userId: string, role: string): Actor => {
+  const caps = DEFAULT_ROLES.find((r) => r.key === role)!.capabilities;
+  return { userId, can: (capability) => caps.includes(capability) };
+};
+
+describe("reading a stored look", () => {
+  test("anything damaged or unknown means the built-in look, field by field", () => {
+    expect(readThemeStyles(null)).toEqual(DEFAULT_THEME_STYLES);
+    expect(readThemeStyles("not json")).toEqual(DEFAULT_THEME_STYLES);
+    expect(readThemeStyles({ mainColor: "red;}", bodyFont: "Comic Sans", headingFont: 3 })).toEqual(
+      DEFAULT_THEME_STYLES,
+    );
+    expect(
+      readThemeStyles(
+        JSON.stringify({ mainColor: "#2A6F4F", bodyFont: "system-serif", headingFont: "x" }),
+      ),
+    ).toEqual({ mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-sans" });
+  });
+});
+
+for (const { kind, open, skip } of openers) {
+  describe.skipIf(skip)(`${kind}: the owner's look`, () => {
+    let db: TestDb;
+    let siteId = "";
+    let admin: Actor;
+    let editor: Actor;
+
+    beforeEach(async () => {
+      db = await open();
+      const result = await runSetup(
+        db.runner,
+        async ({ name, email }) => {
+          const id = newId();
+          await db.run(
+            "insert into users (id, name, email, created_at, updated_at) values (?, ?, ?, ?, ?)",
+            [id, name, email, T, T],
+          );
+          return { userId: id };
+        },
+        {
+          siteName: "Anna's Garden",
+          tagline: "Plants and pots",
+          admin: { name: "Anna", email: "anna@example.com", password: "a-long-password" },
+        },
+      );
+      siteId = result.siteId;
+      admin = actorOf(result.userId, "administrator");
+      editor = actorOf(result.userId, "editor");
+    });
+    afterEach(async () => {
+      await db.close();
+    });
+
+    test("a new site has the built-in look and writes no CSS", async () => {
+      expect(await loadThemeStyles(db.runner, siteId)).toEqual(DEFAULT_THEME_STYLES);
+      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+    });
+
+    test("saving a color and fonts changes the CSS; the parts not given stay", async () => {
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, {
+          mainColor: "#2A6F4F",
+          bodyFont: "system-serif",
+        }),
+      ).toEqual({
+        ok: true,
+        styles: { mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-sans" },
+      });
+      await saveThemeStyles(db.runner, admin, siteId, { headingFont: "system-mono" });
+      expect(await loadThemeStyles(db.runner, siteId)).toEqual({
+        mainColor: "#2a6f4f",
+        bodyFont: "system-serif",
+        headingFont: "system-mono",
+      });
+      const css = await loadThemeCss(db.runner, siteId);
+      expect(css).toContain("--oks-color-primary-700:");
+      expect(css).toContain("--oks-site-font-heading:");
+    });
+
+    test("clearing the color brings the built-in look back", async () => {
+      await saveThemeStyles(db.runner, admin, siteId, { mainColor: "#2a6f4f" });
+      await saveThemeStyles(db.runner, admin, siteId, { mainColor: null });
+      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+    });
+
+    test("refuses what is not a six-digit color or a listed font, and keeps what was saved", async () => {
+      await saveThemeStyles(db.runner, admin, siteId, { mainColor: "#2a6f4f" });
+      for (const input of [
+        { mainColor: "green" },
+        { mainColor: "#12345" },
+        { mainColor: "red;}body{display:none" },
+        { mainColor: "</style><script>x</script>" },
+        { mainColor: 42 as unknown as string },
+        { bodyFont: "Comic Sans" },
+        { headingFont: 'x"; } body { display: none' },
+      ]) {
+        const result = await saveThemeStyles(db.runner, admin, siteId, input);
+        expect(result, JSON.stringify(input)).toMatchObject({ ok: false, code: "invalid" });
+      }
+      expect((await loadThemeStyles(db.runner, siteId)).mainColor).toBe("#2a6f4f");
+    });
+
+    test("only people who manage the settings may change it", async () => {
+      expect(
+        await saveThemeStyles(db.runner, editor, siteId, { mainColor: "#2a6f4f" }),
+      ).toMatchObject({
+        ok: false,
+        code: "forbidden",
+      });
+      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+    });
+  });
+}

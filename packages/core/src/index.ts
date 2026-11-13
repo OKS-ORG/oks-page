@@ -22,6 +22,8 @@ export * from "./seo-meta.js";
 export * from "./entry-seo.js";
 export * from "./sitemap.js";
 export * from "./seo-settings.js";
+export * from "./theme.js";
+export * from "./theme-settings.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

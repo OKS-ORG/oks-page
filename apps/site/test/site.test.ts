@@ -5094,3 +5094,172 @@ describe.skipIf(!findBrowser())(
     });
   },
 );
+
+describe.skipIf(!findBrowser())(
+  "the look of the site: colors and fonts",
+  { timeout: 150_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    const owner = { email: "anna@example.com", password: "a-long-password" };
+    const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+    beforeAll(async () => {
+      db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
+      site = await startSite("sqlite", db, { OKS_SECRET: "l".repeat(40) });
+      const made = await fetch(site.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          siteName: "Anna's Garden",
+          tagline: "Plants and pots",
+          starterContent: true,
+          admin: { name: "Anna", ...owner },
+        }),
+      });
+      expect(made.status).toBe(200);
+      const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: site.base },
+        body: JSON.stringify({ name: "Cara", ...cara }),
+      });
+      const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+      const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+      const role = String((await db.run("select id from roles where key = 'editor'"))[0]!["id"]);
+      await db.run(
+        "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+        [siteId, caraId, role, new Date()],
+      );
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+    }, 300_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+    });
+
+    type Page = Awaited<ReturnType<Browser["newPage"]>>;
+    const signedIn = async (who: { email: string; password: string }): Promise<Page> => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(who.email);
+      await page.getByLabel(/^Password/).fill(who.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      return page;
+    };
+    const call = (page: Page, method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const publicStyle = async () => {
+      const html = await (await fetch(site.base + "/")).text();
+      return /<style>([^<]*oks-color[^<]*)<\/style>/.exec(html)?.[1] ?? null;
+    };
+
+    test("a new site has the built-in look; the owner sets a color and fonts and every public page shows them at once; bad values, editors and signed-out visitors are refused", async () => {
+      const page = await signedIn(owner);
+      expect(await publicStyle()).toBeNull();
+      expect((await call(page, "GET", "/api/admin/settings/theme")).json).toEqual({
+        styles: { mainColor: null, bodyFont: "system-sans", headingFont: "system-sans" },
+      });
+
+      const saved = await call(page, "PUT", "/api/admin/settings/theme", {
+        mainColor: "#2A6F4F",
+        bodyFont: "system-serif",
+        headingFont: "system-mono",
+      });
+      expect(saved.status).toBe(200);
+      expect(saved.json).toMatchObject({ styles: { mainColor: "#2a6f4f" } });
+
+      // The next request carries the new look, on the front page and on any other public page.
+      const css = await publicStyle();
+      expect(css).toContain("--oks-color-primary-700:");
+      expect(css).toContain("--oks-site-font-heading:");
+      const search = await (await fetch(site.base + "/search?q=garden")).text();
+      expect(search).toContain("--oks-color-primary-700:");
+
+      // In a real browser: the fonts and the link color are used.
+      const visitor = await browser.newPage();
+      await visitor.goto(site.base + "/");
+      const used = await visitor.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        const link = document.createElement("a");
+        link.href = "/x";
+        link.textContent = "a link";
+        document.body.append(link);
+        const hex = root.getPropertyValue("--oks-color-primary-700").trim();
+        const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+        return {
+          body: getComputedStyle(document.body).fontFamily,
+          heading: getComputedStyle(document.querySelector("h1")!).fontFamily,
+          link: getComputedStyle(link).color,
+          expected: `rgb(${rgb.join(", ")})`,
+        };
+      });
+      expect(used.body).toContain("Iowan Old Style");
+      expect(used.heading).toContain("ui-monospace");
+      expect(used.link).toBe(used.expected);
+
+      // The look is for the public pages only: the admin keeps its own.
+      const admin = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+      expect(admin).not.toContain("Iowan Old Style");
+
+      // Public pages still pass the accessibility checks with the new colors.
+      await visitor.addScriptTag({ content: axe.source });
+      const result = await visitor.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+      ).toEqual([]);
+      await visitor.close();
+
+      // Refusals leave the saved look alone.
+      for (const body of [
+        { mainColor: "red;}body{display:none" },
+        { mainColor: "green" },
+        { bodyFont: "Comic Sans" },
+        { headingFont: "</style><script>window.pwned=1</script>" },
+      ])
+        expect((await call(page, "PUT", "/api/admin/settings/theme", body)).status).toBe(400);
+      expect((await call(page, "GET", "/api/admin/settings/theme")).json).toMatchObject({
+        styles: { mainColor: "#2a6f4f", bodyFont: "system-serif", headingFont: "system-mono" },
+      });
+
+      // An editor may not see or change it; a signed-out request is refused.
+      const editor = await signedIn(cara);
+      expect((await call(editor, "GET", "/api/admin/settings/theme")).status).toBe(403);
+      expect(
+        (await call(editor, "PUT", "/api/admin/settings/theme", { mainColor: null })).status,
+      ).toBe(403);
+      expect((await fetch(site.base + "/api/admin/settings/theme")).status).toBe(401);
+
+      // Clearing the color and the fonts brings the built-in look back at once.
+      await call(page, "PUT", "/api/admin/settings/theme", {
+        mainColor: null,
+        bodyFont: "system-sans",
+        headingFont: "system-sans",
+      });
+      expect(await publicStyle()).toBeNull();
+    });
+  },
+);

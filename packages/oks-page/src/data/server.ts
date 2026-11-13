@@ -3,7 +3,14 @@
 import { cacheTag } from "next/cache";
 import type { PublicMenuItem } from "@oks-page/core";
 import { slugTag } from "../cache-tags";
-import { loadPublishedEntry, loadSiteInfo, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
+import {
+  loadPublishedEntry,
+  loadSiteInfo,
+  loadThemeCssText,
+  loadSiteMenu,
+  loadTermArchive,
+  slugOf,
+} from "./entries";
 import type { EntryView, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
@@ -14,6 +21,13 @@ export async function getSiteInfo(): Promise<SiteInfo> {
   "use cache";
   cacheTag("settings");
   return loadSiteInfo();
+}
+
+/** The CSS of the owner's look. Tagged "theme": refreshed when the look is saved. */
+export async function getThemeCss(): Promise<string> {
+  "use cache";
+  cacheTag("theme");
+  return loadThemeCssText();
 }
 
 // Test builds count how often a page is really read from the database.
