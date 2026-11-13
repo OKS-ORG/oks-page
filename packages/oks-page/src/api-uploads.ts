@@ -1,6 +1,7 @@
 // GET /uploads/<key>: serves a stored file or one of its sizes. The type comes from the database, never from the file
-// name, and every response carries the protective headers (spec 09, section 8).
-import { findFile } from "@oks-page/core";
+// name, and every response carries the protective headers (spec 09, section 8). Theme files (`themes/<sha256>.<type>`)
+// have no row: their type comes from the fixed list, and they are sent only when the bytes match the fingerprint.
+import { findFile, themeFileMatches, themeFileType } from "@oks-page/core";
 import { fileHeaders } from "@oks-page/media";
 import { getRunner, getSiteId } from "./db";
 import { mediaContext } from "./uploads";
@@ -16,6 +17,27 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     return notFound();
   }
   const { storage } = mediaContext();
+  const joined = parts.join("/");
+  const themeType = themeFileType(joined);
+  if (themeType) {
+    let bytes: Uint8Array;
+    try {
+      bytes = await storage.get(joined);
+    } catch {
+      return notFound();
+    }
+    if (!themeFileMatches(joined, bytes)) return notFound();
+    return new Response(bytes as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type": themeType,
+        "Content-Length": String(bytes.length),
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  }
   // A name with a space or an accent is sent encoded. Try the key as given, then decoded once.
   const candidates = [parts.join("/")];
   try {

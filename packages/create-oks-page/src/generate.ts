@@ -323,6 +323,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, PUT } from ${from("api-settings-theme")};\n`,
     },
     {
+      path: "app/admin/settings/themes/page.tsx",
+      content: `export { default, metadata } from ${from("settings-themes-page")};\n`,
+    },
+    {
+      path: "app/api/admin/themes/route.ts",
+      content: `export { GET, POST } from ${from("api-themes")};\n`,
+    },
+    {
+      path: "app/api/admin/themes/[id]/route.ts",
+      content: `export { DELETE, POST } from ${from("api-theme")};\n`,
+    },
+    {
       path: "app/sitemap.xml/route.ts",
       content: `export { GET } from ${from("sitemap-xml")};\n`,
     },

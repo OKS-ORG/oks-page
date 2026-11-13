@@ -23,7 +23,7 @@ export async function getSiteInfo(): Promise<SiteInfo> {
   return loadSiteInfo();
 }
 
-/** The owner's look (colors, fonts, logo). Tagged "theme": refreshed when the look is saved. */
+/** The look (the theme in use, colors, fonts, logo). Tagged "theme": refreshed when the look or the theme changes. */
 export async function getLook(): Promise<Look> {
   "use cache";
   cacheTag("theme", "settings");

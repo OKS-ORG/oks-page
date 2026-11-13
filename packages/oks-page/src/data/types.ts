@@ -24,8 +24,10 @@ export interface SiteInfo {
   tagline: string;
 }
 
-/** The owner's look as the public pages use it: the CSS, and the logo if there is one. */
+/** The look as the public pages use it: the theme's CSS file, the owner's CSS, and the logo if there is one. */
 export interface Look {
+  /** The address of the CSS file of the theme in use (fonts, design values, the theme's CSS), or null. */
+  themeCssUrl: string | null;
   css: string;
   logo: { url: string; width: number | null; height: number | null; alt: string } | null;
 }

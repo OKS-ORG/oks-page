@@ -13,6 +13,7 @@ import {
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, relative, sep } from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
 import axe from "axe-core";
@@ -5437,6 +5438,187 @@ describe.skipIf(!findBrowser())(
         headingFont: "system-sans",
       });
       expect(await publicStyle()).toBeNull();
+    });
+
+    // ----- theme packages: a tiny .tgz writer (plain files only)
+    const tgz = (files: Record<string, string | Buffer>): Buffer => {
+      const parts: Buffer[] = [];
+      for (const [name, content] of Object.entries(files)) {
+        const data = Buffer.from(content);
+        const h = Buffer.alloc(512);
+        h.write(name, 0, "utf8");
+        h.write("0000644\0", 100);
+        h.write("0000000\0", 108);
+        h.write("0000000\0", 116);
+        h.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
+        h.write("00000000000\0", 136);
+        h.fill(32, 148, 156);
+        h.write("0", 156);
+        h.write("ustar\0" + "00", 257);
+        let sum = 0;
+        for (const byte of h) sum += byte;
+        h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+        parts.push(h, data, Buffer.alloc((512 - (data.length % 512)) % 512));
+      }
+      parts.push(Buffer.alloc(1024));
+      return gzipSync(Buffer.concat(parts));
+    };
+    const maple = (version: string, spacing: string) =>
+      tgz({
+        "theme.json": JSON.stringify({
+          key: "maple",
+          name: "Maple",
+          version,
+          description: "A warm theme.",
+          author: "Maple Studio",
+          license: "MIT",
+          rtl: "supported",
+          tokens: { color: { "primary-700": "#2a6f4f" } },
+          fonts: [{ family: "Maple Sans", weight: 400, file: "assets/maple.woff2" }],
+        }),
+        "styles/theme.css": `body{word-spacing:${spacing}} .hero{background:url(assets/bg.png)}`,
+        "assets/bg.png": Buffer.from("iVBORw0KGgo=", "base64"),
+        "assets/maple.woff2": "wOF2 maple",
+      });
+    const themeLink = async () => {
+      const html = await (await fetch(site.base + "/")).text();
+      return (
+        /<link rel="stylesheet" href="(\/uploads\/themes\/[0-9a-f]{64}\.css)"/.exec(html)?.[1] ??
+        null
+      );
+    };
+    const axeViolations = async (page: Page) => {
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      return result.violations.map(
+        (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+      );
+    };
+
+    test("theme packages: upload a theme file, read the report, use it, update it, go back, and remove it; files are served by fingerprint and never in the admin", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("heading", { name: "Themes", level: 1 }).waitFor();
+      await page.getByText("No themes are installed yet.").waitFor();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await axeViolations(page), `at ${width} px`).toEqual([]);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+
+      // A hostile package: the report names the file and why, and nothing is installed.
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "evil.tgz",
+        mimeType: "application/gzip",
+        buffer: tgz({
+          "theme.json": JSON.stringify({ key: "evil", name: "Evil", version: "1.0.0" }),
+          "evil.js": "alert(1)",
+        }),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      const report = page.getByRole("region", { name: "Report for evil.tgz" });
+      await report.getByRole("heading", { name: "Refused" }).waitFor();
+      expect(await report.textContent()).toContain("evil.js");
+      await page.getByText("No themes are installed yet.").waitFor();
+
+      // A good package is installed but not in use: the public pages do not change.
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "maple-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: maple("1.0.0", "3px"),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Maple 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page
+        .getByRole("region", { name: "Report for maple-1.0.0.tgz" })
+        .getByRole("heading", { name: "Passed" })
+        .waitFor();
+      expect(await themeLink()).toBeNull();
+      expect(await axeViolations(page)).toEqual([]);
+
+      // Use it: every public page loads the theme's CSS file, served from the site with its fingerprint in the name.
+      await page.getByRole("button", { name: "Use Maple" }).click();
+      await page.getByText("Your site uses Maple now.").waitFor();
+      const first = await themeLink();
+      expect(first).not.toBeNull();
+      const cssResponse = await fetch(site.base + first!);
+      expect(cssResponse.status).toBe(200);
+      expect(cssResponse.headers.get("content-type")).toBe("text/css; charset=utf-8");
+      expect(cssResponse.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(cssResponse.headers.get("x-content-type-options")).toBe("nosniff");
+      const css = await cssResponse.text();
+      expect(css).toContain('font-family:"Maple Sans"');
+      expect(css).toContain("--oks-color-primary-700:#2a6f4f");
+      const font = /url\("(\/uploads\/themes\/[0-9a-f]{64}\.woff2)"\)/.exec(css)![1]!;
+      const fontResponse = await fetch(site.base + font);
+      expect(fontResponse.headers.get("content-type")).toBe("font/woff2");
+      expect(await fontResponse.text()).toBe("wOF2 maple");
+      expect(css).toMatch(/\.hero\{background:url\("\/uploads\/themes\/[0-9a-f]{64}\.png"\)\}/);
+      const search = await (await fetch(site.base + "/search?q=garden")).text();
+      expect(search).toContain(first!);
+
+      // In a real browser, the theme's CSS is used on the public pages, and never in the admin.
+      const visitor = await browser.newPage();
+      await visitor.goto(site.base + "/");
+      expect(await visitor.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("3px");
+      expect(await axeViolations(visitor)).toEqual([]);
+      await page.goto(site.base + "/admin");
+      expect(await page.content()).not.toContain("/uploads/themes/");
+      expect(await page.evaluate(() => getComputedStyle(document.body).wordSpacing)).not.toBe(
+        "3px",
+      );
+
+      // Only files that match their fingerprint are served; the original package never is.
+      expect((await fetch(site.base + `/uploads/themes/${"0".repeat(64)}.css`)).status).toBe(404);
+      expect((await fetch(site.base + first!.replace(/\.css$/, ".js"))).status).toBe(404);
+      const packages = await fetch(site.base + `/uploads/theme-packages/${"0".repeat(64)}.tgz`);
+      expect(packages.status).toBe(404);
+
+      // A new version of the theme in use is used at once; going back restores the old one, at once too.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "maple-1.1.0.tgz",
+        mimeType: "application/gzip",
+        buffer: maple("1.1.0", "5px"),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Maple is now version 1.1.0. Your site uses it now.").waitFor();
+      const second = await themeLink();
+      expect(second).not.toBe(first);
+      await visitor.goto(site.base + "/");
+      expect(await visitor.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("5px");
+
+      await page.getByRole("button", { name: "Go back to version 1.0.0" }).click();
+      await page.getByText("Maple is back to version 1.0.0.").waitFor();
+      expect(await themeLink()).toBe(first);
+      await page.getByRole("button", { name: "Go back to version 1.1.0" }).waitFor();
+
+      // The built-in design again, then Maple is removed (in two steps).
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      expect(await themeLink()).toBeNull();
+      await visitor.goto(site.base + "/");
+      expect(await visitor.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("0px");
+      await visitor.close();
+      await page.getByRole("button", { name: "Remove Maple" }).click();
+      await page.getByRole("button", { name: "Yes, remove Maple" }).click();
+      await page.getByText("Maple is removed.").waitFor();
+      await page.getByText("No themes are installed yet.").waitFor();
+      expect((await fetch(site.base + first!)).status).toBe(404);
+
+      // An editor may not see or change themes; a signed-out request is refused.
+      const editor = await signedIn(cara);
+      expect((await call(editor, "GET", "/api/admin/themes")).status).toBe(403);
+      expect(
+        (await call(editor, "POST", "/api/admin/themes/default", { action: "use" })).status,
+      ).toBe(403);
+      await editor.goto(site.base + "/admin/settings/themes");
+      await editor.waitForURL((url) => url.pathname === "/admin");
+      expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
   },
 );

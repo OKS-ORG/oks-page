@@ -35,10 +35,12 @@ export async function PublicFrame({
   footer: PublicMenuItem[];
   children: ReactNode;
 }) {
-  // The owner's colors and fonts. The CSS is written by the core from checked values only, so it holds nothing else.
-  const { css: themeCss, logo } = await getLook();
+  // The theme's CSS file first (checked when the theme was installed, served from the site with its fingerprint in the
+  // name), then the owner's colors and fonts, written by the core from checked values only, so they win.
+  const { themeCssUrl, css: themeCss, logo } = await getLook();
   return (
     <>
+      {themeCssUrl ? <link rel="stylesheet" href={themeCssUrl} /> : null}
       {themeCss ? <style dangerouslySetInnerHTML={{ __html: themeCss }} /> : null}
       {header.length > 0 || logo ? (
         <header>

@@ -112,7 +112,11 @@ describe("oks export", () => {
   });
 
   test("ST-07: uploaded files are copied into the export as plain files", async () => {
-    const site = tmp({ "up/2026/photo-800.webp": "bytes" });
+    const site = tmp({
+      "up/2026/photo-800.webp": "bytes",
+      "up/themes/abc.css": "body{}",
+      "up/theme-packages/abc.tgz": "package",
+    });
     const out = join(site, "out");
     const result = await exportSite(site, {
       out,
@@ -122,6 +126,9 @@ describe("oks export", () => {
     });
     expect(result.ok).toBe(true);
     expect(readFileSync(join(out, "uploads", "2026", "photo-800.webp"), "utf8")).toBe("bytes");
+    // Theme files are published; the original theme packages are kept for the site only.
+    expect(readFileSync(join(out, "uploads", "themes", "abc.css"), "utf8")).toBe("body{}");
+    expect(existsSync(join(out, "uploads", "theme-packages"))).toBe(false);
   });
 
   test("a missing uploads folder is reported", async () => {

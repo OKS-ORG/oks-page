@@ -5,6 +5,7 @@ import {
   firstImageOf,
   loadGeneralSettings,
   loadPublicMenu,
+  loadActiveThemeCssKey,
   loadThemeStyles,
   stylesToCss,
   readEntrySeo,
@@ -14,7 +15,10 @@ import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
 
-/** The owner's look: the CSS for the colors and fonts, and the logo (its address and size) when one is chosen. */
+/**
+ * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
+ * the owner's choices win), and the logo (its address and size) when one is chosen.
+ */
 export async function loadLook(): Promise<Look> {
   const runner = getRunner();
   const siteId = await getSiteId();
@@ -37,7 +41,12 @@ export async function loadLook(): Promise<Look> {
       };
     }
   }
-  return { css: stylesToCss(styles), logo };
+  const themeCssKey = await loadActiveThemeCssKey(runner, siteId);
+  return {
+    themeCssUrl: themeCssKey ? mediaContext().storage.publicUrl(themeCssKey) : null,
+    css: stylesToCss(styles),
+    logo,
+  };
 }
 
 /** The site's name and tagline (Settings, General). */

@@ -3,7 +3,7 @@ import { buildRedirectFiles, type Redirect, type RefusedRedirect } from "@oks-pa
 import * as pagefind from "pagefind";
 import { execFile } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { checkExport, type ExportCheckOptions, type ExportCheckResult } from "./export-check.js";
 
@@ -95,7 +95,14 @@ export async function exportSite(
 
   if (options.uploads) {
     if (existsSync(options.uploads))
-      cpSync(options.uploads, join(out, "uploads"), { recursive: true });
+      // The original theme packages are kept for the site only; they are never published.
+      cpSync(options.uploads, join(out, "uploads"), {
+        recursive: true,
+        filter: (from) => {
+          const packages = join(options.uploads!, "theme-packages");
+          return from !== packages && !from.startsWith(packages + sep);
+        },
+      });
     else result.problems.push(`The uploads folder ${options.uploads} was not found.`);
   }
 
