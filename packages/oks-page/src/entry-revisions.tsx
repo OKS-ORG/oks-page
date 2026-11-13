@@ -2,6 +2,7 @@
 // The saved copies of an entry: who saved when, what changed, a compare with the page as it is now, and a restore.
 import { Alert, Button, Modal } from "oks-ui";
 import { useCallback, useEffect, useState } from "react";
+import { formatWhen } from "./time-format";
 
 interface Copy {
   id: string;
@@ -15,16 +16,16 @@ interface Compare {
   lines: { kind: "same" | "added" | "removed"; text: string }[];
 }
 
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
-
 export interface EntryRevisionsProps {
   id: string;
   /** The entry's current revision number; the list is loaded again when it changes. */
   revision: number;
+  /** The site time zone, or null for the browser own. */
+  timeZone?: string | null;
 }
 
-export function EntryRevisions({ id, revision }: EntryRevisionsProps) {
+export function EntryRevisions({ id, revision, timeZone = null }: EntryRevisionsProps) {
+  const when = (iso: string) => formatWhen(iso, timeZone);
   const [copies, setCopies] = useState<Copy[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [open, setOpen] = useState<{ copy: Copy; compare: Compare } | null>(null);

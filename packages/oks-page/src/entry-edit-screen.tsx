@@ -1,6 +1,7 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor } from "@oks-page/admin";
+import { utcToZonedLocal, zonedLocalToUtc } from "@oks-page/core/timezone";
 import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
 import { useEffect, useRef, useState } from "react";
 import type { Block } from "oks-ui";
@@ -34,6 +35,8 @@ export interface EntryEditScreenProps {
   showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
   listHref: string;
+  /** The site's time zone, or null when it is automatic (each person's own browser). */
+  timeZone?: string | null;
 }
 
 interface SaveReply {
@@ -43,16 +46,20 @@ interface SaveReply {
   error?: { message: string };
 }
 
-/** An ISO time as the value of a datetime-local box (the viewer's own clock), and back. */
-const pad = (n: number) => String(n).padStart(2, "0");
-function toLocalInput(iso: string | null): string {
+/**
+ * An ISO time as the value of a datetime-local box, and back. The box is in the site's time zone; a site that has not
+ * chosen one ("automatic") uses this browser's own zone.
+ */
+const zoneOf = (timeZone: string | null): string =>
+  timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+function toLocalInput(iso: string | null, timeZone: string | null): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? "" : utcToZonedLocal(ms, zoneOf(timeZone));
 }
-function fromLocalInput(value: string): string | null {
-  const d = new Date(value);
-  return value && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+function fromLocalInput(value: string, timeZone: string | null): string | null {
+  const ms = zonedLocalToUtc(value, zoneOf(timeZone));
+  return ms === null ? null : new Date(ms).toISOString();
 }
 
 /** The "Insert image from the library" button and its window. */
@@ -79,7 +86,9 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
   const [status, setStatus] = useState(
     props.status === "published" || props.status === "scheduled" ? props.status : "draft",
   );
-  const [scheduledAt, setScheduledAt] = useState(toLocalInput(props.scheduledAt));
+  const [scheduledAt, setScheduledAt] = useState(
+    toLocalInput(props.scheduledAt, props.timeZone ?? null),
+  );
   const revision = useRef(props.revision);
   const [revisionNo, setRevisionNo] = useState(props.revision);
   const [trashing, setTrashing] = useState(false);
@@ -162,7 +171,10 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
             aria-describedby="scheduled-at-help"
           />
           <p id="scheduled-at-help">
-            The time on your own clock. The page goes live then, with your permission.
+            {props.timeZone
+              ? `The time in ${props.timeZone.replace(/_/g, " ")}.`
+              : "The time on your own clock."}{" "}
+            The page goes live then, with your permission.
           </p>
         </div>
       ) : null}
@@ -181,6 +193,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
             <InsertFromLibrary insertImage={insertImage} />
             <UnsavedCopyBanner
               copy={unsaved}
+              timeZone={props.timeZone ?? null}
               onBringBack={(copy) => {
                 setTitle(copy.title);
                 replaceBlocks(copy.blocks);
@@ -202,7 +215,8 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
               title,
               slugPart,
               status,
-              scheduledAt: status === "scheduled" ? fromLocalInput(scheduledAt) : null,
+              scheduledAt:
+                status === "scheduled" ? fromLocalInput(scheduledAt, props.timeZone ?? null) : null,
               blocks,
               revision: revision.current,
             }),
@@ -220,8 +234,8 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
       />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
       <EntryPreview id={props.id} />
-      <AutosaveStatus savedAt={keptAt} />
-      <EntryRevisions id={props.id} revision={revisionNo} />
+      <AutosaveStatus savedAt={keptAt} timeZone={props.timeZone ?? null} />
+      <EntryRevisions id={props.id} revision={revisionNo} timeZone={props.timeZone ?? null} />
       {props.canTrash ? (
         <p>
           <Button color="danger" onPress={() => setTrashing(true)}>

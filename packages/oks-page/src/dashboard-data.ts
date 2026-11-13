@@ -1,8 +1,11 @@
 // What the dashboard shows (spec 07, "Home"): counts of the site's content and the latest edits.
+import { loadGeneralSettings } from "@oks-page/core";
 import { getRunner } from "./db";
 
 export interface DashboardData {
   siteName: string;
+  /** The site's time zone, or null when it is automatic (each person's own browser). */
+  timeZone: string | null;
   /** Published pages, published posts, and entries still in draft (any type). */
   counts: { pages: number; posts: number; drafts: number };
   recent: { id: string; title: string; type: string; status: string; updatedAt: string }[];
@@ -13,7 +16,7 @@ const toIso = (value: unknown): string =>
 
 export async function loadDashboard(siteId: string): Promise<DashboardData> {
   const runner = getRunner();
-  const site = (await runner.all(`select "name" from "sites" where "id" = ?`, [siteId]))[0];
+  const general = await loadGeneralSettings(runner, siteId);
   const groups = await runner.all(
     `select "type_key", "status", count(*) as n from "entries"
       where "site_id" = ? and "status" <> 'trash' group by "type_key", "status"`,
@@ -32,7 +35,8 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
     [siteId],
   );
   return {
-    siteName: String(site?.["name"] ?? ""),
+    siteName: general.siteName,
+    timeZone: general.timeZone,
     counts,
     recent: recent.map((row) => ({
       id: String(row["id"]),

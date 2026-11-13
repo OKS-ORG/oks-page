@@ -3113,7 +3113,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
         "/admin/pages",
         "/admin/posts",
         "/admin/media",
-        "/admin/settings/media",
+        "/admin/settings/general",
       ])
         if ((await page.locator(`a[href="${href}"]`).count()) > 0) found.push(href);
       return found;
@@ -3126,13 +3126,13 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
       "/admin/pages",
       "/admin/posts",
       "/admin/media",
-      "/admin/settings/media",
+      "/admin/settings/general",
     ]);
     // The settings screen marks Settings as the place you are in.
-    await owner.goto(site.base + "/admin/settings/media");
-    await owner.getByRole("heading", { name: "Media settings", level: 1 }).waitFor();
+    await owner.goto(site.base + "/admin/settings/general");
+    await owner.getByRole("heading", { name: "General settings", level: 1 }).waitFor();
     expect(
-      await owner.locator('a[href="/admin/settings/media"][aria-current]').count(),
+      await owner.locator('a[href="/admin/settings/general"][aria-current]').count(),
     ).toBeGreaterThan(0);
     await owner.close();
 
@@ -3142,7 +3142,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await cara.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     expect(await places(cara)).toEqual(["/admin", "/admin/pages", "/admin/posts"]);
     // The screens still refuse her on the server, whatever the menu shows.
-    await cara.goto(site.base + "/admin/settings/media");
+    await cara.goto(site.base + "/admin/settings/general");
     await cara.waitForURL(site.base + "/admin");
     await cara.close();
   });
@@ -4026,5 +4026,245 @@ describe.skipIf(!findBrowser())("previews", { timeout: 120_000 }, () => {
     expect(signedOut.status).toBe(401);
     await owner1.close();
     await caras.close();
+  });
+});
+
+// General settings and the site's time zone, on a site of its own. The browser is in Los Angeles and the site in Auckland, so a
+// time that is wrong by the zone shows at once.
+describe.skipIf(!findBrowser())("general settings and the time zone", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-general-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "g".repeat(40) });
+    // What the wizard sends: the site starts in the zone of the browser that set it up.
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        tagline: "Plants and pots",
+        timeZone: "Pacific/Auckland",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'editor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  const signedIn = async (who: { email: string; password: string }): Promise<Page> => {
+    const context = await browser.newContext({ timezoneId: "America/Los_Angeles" });
+    const page = await context.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    return page;
+  };
+  const call = (page: Page, method: string, url: string, body?: unknown) =>
+    page.evaluate(
+      async ([m, u, b]) => {
+        const response = await fetch(u as string, {
+          method: m as string,
+          headers: { "content-type": "application/json" },
+          ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+        });
+        return {
+          status: response.status,
+          json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+        };
+      },
+      [method, url, body] as const,
+    );
+  const zonedBox = (ms: number, zone: string) =>
+    new Intl.DateTimeFormat("sv-SE", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .format(ms)
+      .replace(" ", "T");
+  const written = (ms: number, zone: string) =>
+    new Intl.DateTimeFormat("en", {
+      timeZone: zone,
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(ms);
+  const settingValue = async (key: string) =>
+    (await db.run("select value from settings where key = ?", [key]))[0]?.["value"];
+
+  test("the General screen: the site starts as the wizard made it, saves the name, tagline and time zone, refuses bad values and is closed to an editor", async () => {
+    const page = await signedIn(owner);
+    // The settings menu item leads to General first.
+    await page.getByRole("link", { name: "Settings", exact: true }).first().click();
+    await page.getByRole("heading", { name: "General settings", level: 1 }).waitFor();
+    expect(await page.getByLabel("Site name").inputValue()).toBe("Anna's Garden");
+    expect(await page.getByLabel("Tagline").inputValue()).toBe("Plants and pots");
+    expect(await page.locator("#general-zone").inputValue()).toBe("Pacific/Auckland");
+    // The list has the modern name of India's zone, and Automatic first.
+    const options = await page.locator("#general-zone option").allTextContents();
+    expect(options[0]).toContain("Automatic");
+    expect(options).toContain("Asia/Kolkata");
+    expect(options).not.toContain("Asia/Calcutta");
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        `general ${width}px`,
+      ).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    await page.getByLabel("Site name").fill("  Anna's Greenhouse ");
+    await page.getByLabel("Tagline").fill("Everything under glass");
+    await page.locator("#general-zone").selectOption("Asia/Kolkata");
+    await page.getByText(/there now\./).waitFor();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByText("Saved.", { exact: true }).waitFor();
+    expect((await db.run("select name from sites"))[0]!["name"]).toBe("Anna's Greenhouse");
+    expect(JSON.parse(String(await settingValue("title")))).toBe("Anna's Greenhouse");
+    expect(JSON.parse(String(await settingValue("tagline")))).toBe("Everything under glass");
+    expect(JSON.parse(String(await settingValue("timezone")))).toBe("Asia/Kolkata");
+    await page.reload();
+    expect(await page.getByLabel("Site name").inputValue()).toBe("Anna's Greenhouse");
+    expect(await page.locator("#general-zone").inputValue()).toBe("Asia/Kolkata");
+    // The dashboard shows the new name.
+    await page.goto(site.base + "/admin");
+    await page.getByText("Anna's Greenhouse").first().waitFor();
+
+    // Refused in words, with the field.
+    const refused = async (body: object) => call(page, "PUT", "/api/admin/settings/general", body);
+    const empty = await refused({ siteName: "   " });
+    expect(empty.status).toBe(400);
+    expect((empty.json!["error"] as { field: string }).field).toBe("siteName");
+    expect((await refused({ siteName: "x".repeat(101) })).status).toBe(400);
+    expect((await refused({ tagline: "x".repeat(201) })).status).toBe(400);
+    const zone = await refused({ timeZone: "Mars/Base" });
+    expect(zone.status).toBe(400);
+    expect((zone.json!["error"] as { field: string }).field).toBe("timeZone");
+    expect((await db.run("select name from sites"))[0]!["name"]).toBe("Anna's Greenhouse");
+
+    // An editor may not see or change the general settings.
+    const editor = await signedIn(cara);
+    expect((await call(editor, "GET", "/api/admin/settings/general")).status).toBe(403);
+    expect(
+      (await call(editor, "PUT", "/api/admin/settings/general", { siteName: "Mine" })).status,
+    ).toBe(403);
+    await editor.goto(site.base + "/admin/settings/general");
+    await editor.waitForURL(site.base + "/admin");
+    await editor.context().close();
+
+    // Signed out: refused.
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await fetch(site.base + "/api/admin/settings/general", {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body: "{}" } : {}),
+      });
+      expect(response.status, method).toBe(401);
+    }
+    await page.context().close();
+  });
+
+  test("the time zone rules the scheduling box and the dates in the admin; automatic uses the browser's own zone", async () => {
+    const page = await signedIn(owner);
+    // The previous test set the zone to Asia/Kolkata; the browser here is in Los Angeles.
+    expect(JSON.parse(String(await settingValue("timezone")))).toBe("Asia/Kolkata");
+    const made = await call(page, "POST", "/api/admin/entries", {
+      type: "post",
+      title: "Timed post",
+    });
+    const id = String(made.json!["id"]);
+
+    // Schedule for 9:30 in Kolkata: the stored moment is 04:00 UTC, whatever the browser's clock says.
+    await page.goto(`${site.base}/admin/posts/${id}`);
+    await page.getByRole("heading", { name: "Edit: Timed post", level: 1 }).waitFor();
+    await page.locator("[contenteditable=true]").first().click();
+    await page.keyboard.type("A post for later");
+    await page.getByLabel(/^Scheduled/).check({ force: true });
+    await page.getByText("The time in Asia/Kolkata.").waitFor();
+    await page.getByLabel("Publish at").fill("2091-03-10T09:30");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect
+      .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
+      .toBe("Saved.");
+    const stored = (await db.run("select scheduled_at from entries where id = ?", [id]))[0]![
+      "scheduled_at"
+    ];
+    expect(new Date(Number(stored)).toISOString()).toBe("2091-03-10T04:00:00.000Z");
+    await page.reload();
+    await page.getByRole("heading", { name: "Edit: Timed post", level: 1 }).waitFor();
+    expect(await page.getByLabel("Publish at").inputValue()).toBe("2091-03-10T09:30");
+    // A time in the past in the site's zone is still refused.
+    await page.getByLabel("Publish at").fill("2020-01-15T09:30");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Choose a time in the future.").first().waitFor();
+
+    // The dates in the lists and on the dashboard are in the site's zone, not the browser's.
+    const updated = Number(
+      (await db.run("select updated_at from entries where id = ?", [id]))[0]!["updated_at"],
+    );
+    await page.goto(`${site.base}/admin/posts`);
+    await page
+      .getByRole("row", { name: /Timed post/ })
+      .getByText(written(updated, "Asia/Kolkata"), { exact: false })
+      .waitFor();
+    await page.goto(`${site.base}/admin`);
+    await page
+      .getByRole("list", { name: "Recent edits" })
+      .getByText(written(updated, "Asia/Kolkata"), { exact: false })
+      .first()
+      .waitFor();
+
+    // Automatic: each person's own browser decides, as it did before the setting existed.
+    expect(
+      (await call(page, "PUT", "/api/admin/settings/general", { timeZone: null })).status,
+    ).toBe(200);
+    expect(await settingValue("timezone")).toBeUndefined();
+    await page.goto(`${site.base}/admin/posts/${id}`);
+    await page.getByRole("heading", { name: "Edit: Timed post", level: 1 }).waitFor();
+    await page.getByText("The time on your own clock.").waitFor();
+    expect(await page.getByLabel("Publish at").inputValue()).toBe(
+      zonedBox(Date.parse("2091-03-10T04:00:00Z"), "America/Los_Angeles"),
+    );
+    await page.context().close();
   });
 });

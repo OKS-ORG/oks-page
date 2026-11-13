@@ -4,6 +4,7 @@
 import { Alert, Button } from "oks-ui";
 import { useEffect, useRef, useState } from "react";
 import type { Block } from "oks-ui";
+import { formatWhen } from "./time-format";
 
 export const AUTOSAVE_MS = 10_000;
 const RENEW_MS = 30_000;
@@ -15,8 +16,7 @@ export interface UnsavedCopy {
   revision: number;
 }
 
-const clock = (iso: string) =>
-  new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const clock = (iso: string, timeZone: string | null) => formatWhen(iso, timeZone);
 
 /** Sends the current content to the server 10 seconds after the last change. Returns the time of the last copy kept. */
 export function useAutosave(
@@ -113,8 +113,11 @@ export function UnsavedCopyBanner({
   copy,
   onBringBack,
   onThrowAway,
+  timeZone = null,
 }: {
   copy: UnsavedCopy | null;
+  /** The site time zone, or null for the browser own. */
+  timeZone?: string | null;
   onBringBack: (copy: UnsavedCopy) => void;
   onThrowAway: () => void;
 }) {
@@ -123,7 +126,7 @@ export function UnsavedCopyBanner({
     <Alert
       color="info"
       title="You have changes that were not saved"
-      description={`We kept a copy from ${clock(copy.savedAt)}. The page itself is as you last saved it.`}
+      description={`We kept a copy from ${clock(copy.savedAt, timeZone)}. The page itself is as you last saved it.`}
       actions={
         <>
           <Button color="primary" size="sm" onPress={() => onBringBack(copy)}>
@@ -138,10 +141,16 @@ export function UnsavedCopyBanner({
   );
 }
 
-export function AutosaveStatus({ savedAt }: { savedAt: string | null }) {
+export function AutosaveStatus({
+  savedAt,
+  timeZone = null,
+}: {
+  savedAt: string | null;
+  timeZone?: string | null;
+}) {
   return (
     <p role="status" id="autosave-status">
-      {savedAt ? `Unsaved changes kept as a copy at ${clock(savedAt)}.` : ""}
+      {savedAt ? `Unsaved changes kept as a copy at ${clock(savedAt, timeZone)}.` : ""}
     </p>
   );
 }

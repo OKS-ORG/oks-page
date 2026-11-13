@@ -1,5 +1,5 @@
 // /admin/pages/[id] and /admin/posts/[id]: the edit screen. Anyone who may not edit this entry is sent back to the list.
-import { isSetupDone, loadForEdit } from "@oks-page/core";
+import { isSetupDone, loadForEdit, loadGeneralSettings } from "@oks-page/core";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -25,6 +25,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
     redirect("/admin");
   }
   const { entry } = loaded;
+  const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
   const segment = entry.type === "post" ? "posts" : "pages";
   const canPublish =
     actor.can("content.publish_any", entry.type) ||
@@ -58,6 +59,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
           (actor.can("content.delete_own", entry.type) && entry.authorId === actor.userId)
         }
         showTerms={entry.type === "post"}
+        timeZone={timeZone}
         listHref={`/admin/${segment}`}
       />
     </AdminFrame>

@@ -1,5 +1,5 @@
 // The server side of the list screens: only a signed-in member who may edit this kind of content sees them.
-import { isSetupDone, listEntries, listTrash } from "@oks-page/core";
+import { isSetupDone, listEntries, listTrash, loadGeneralSettings } from "@oks-page/core";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { actorOf } from "./admin-actor";
@@ -31,6 +31,7 @@ export async function ContentListPage({
   const entries = await listEntries(getRunner(), actor, member.siteId, kind.type);
   const trashed = await listTrash(getRunner(), actor, member.siteId, kind.type);
   const view = (await searchParams)?.view === "trash" ? "trash" : "all";
+  const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
   return (
     <AdminFrame
       nav={navFor((c) => actor.can(c))}
@@ -49,6 +50,7 @@ export async function ContentListPage({
         trashed={trashed}
         view={view}
         canAdd={actor.can("content.create", kind.type)}
+        timeZone={timeZone}
       />
     </AdminFrame>
   );

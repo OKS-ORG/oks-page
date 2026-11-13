@@ -50,6 +50,8 @@ export function SetupWizard() {
       tagline: answers.tagline,
       purpose: answers.purpose,
       starterContent: answers.starter === "sample",
+      // The site starts in the time zone of this browser; the owner can change it in Settings, General.
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       admin: { name: answers.name, email: answers.email, password: answers.password },
     };
     let response: Response;

@@ -35,7 +35,12 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     href: "/admin/media",
     needs: ["media.upload", "media.edit_own", "media.edit_any"],
   },
-  { key: "settings", label: "Settings", href: "/admin/settings/media", needs: ["settings.manage"] },
+  {
+    key: "settings",
+    label: "Settings",
+    href: "/admin/settings/general",
+    needs: ["settings.manage"],
+  },
 ];
 
 /** The menu items a person with these capabilities sees. Home is for everyone who is signed in. */

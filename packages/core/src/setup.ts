@@ -5,6 +5,7 @@ import { newId, type SqlRunner } from "@oks-page/db";
 import { DEFAULT_ROLES } from "./roles.js";
 import { BUILT_IN_TYPES, STARTER_ENTRIES, starterBody } from "./starter.js";
 import { ensureDefaultTaxonomies } from "./taxonomies.js";
+import { isValidTimeZone } from "./timezone.js";
 
 export const SITE_PURPOSES = ["blog", "business", "portfolio", "other"] as const;
 export type SitePurpose = (typeof SITE_PURPOSES)[number];
@@ -15,6 +16,8 @@ export interface SetupInput {
   purpose?: SitePurpose;
   /** Make the sample pages (Home, About, Contact) and a first post. Default: no. */
   starterContent?: boolean;
+  /** The site's time zone ("Asia/Kolkata"); the wizard sends the browser's. A name that is not a real zone is left out. */
+  timeZone?: string;
   admin: { name: string; email: string; password: string };
 }
 
@@ -170,6 +173,9 @@ export async function runSetup(
         ["title", input.siteName.trim()],
         ["tagline", (input.tagline ?? "").trim()],
         ["purpose", input.purpose ?? "blog"],
+        ...(input.timeZone && isValidTimeZone(input.timeZone)
+          ? ([["timezone", input.timeZone]] as [string, unknown][])
+          : []),
       ];
       for (const [key, value] of settings)
         await tx.all(

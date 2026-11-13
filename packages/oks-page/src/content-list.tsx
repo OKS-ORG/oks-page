@@ -3,6 +3,7 @@
 import { ListTable } from "@oks-page/admin";
 import { Alert, Button, Modal, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
+import { formatWhen } from "./time-format";
 import type { ListedEntry, TrashedEntry } from "@oks-page/core";
 
 export interface ContentListProps {
@@ -15,10 +16,9 @@ export interface ContentListProps {
   trashed: TrashedEntry[];
   view: "all" | "trash";
   canAdd: boolean;
+  /** The site time zone, or null for the browser own. */
+  timeZone?: string | null;
 }
-
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
 export function ContentList({
   type,
@@ -28,7 +28,9 @@ export function ContentList({
   trashed,
   view,
   canAdd,
+  timeZone = null,
 }: ContentListProps) {
+  const when = (iso: string) => formatWhen(iso, timeZone);
   const [title, setTitle] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

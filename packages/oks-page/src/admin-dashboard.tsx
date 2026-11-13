@@ -4,6 +4,7 @@ import { Card, CardBody, CardHeader } from "oks-ui";
 import { AdminFrame } from "./admin-frame";
 import type { NavItem } from "./admin-nav";
 import type { DashboardData } from "./dashboard-data";
+import { formatWhen } from "./time-format";
 
 export interface AdminDashboardProps {
   user: { name: string; email: string };
@@ -12,9 +13,6 @@ export interface AdminDashboardProps {
   product: string;
   version: string;
 }
-
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
 export function AdminDashboard({ user, nav, data, product, version }: AdminDashboardProps) {
   return (
@@ -52,7 +50,7 @@ export function AdminDashboard({ user, nav, data, product, version }: AdminDashb
                   <a href={`/admin/${entry.type === "post" ? "posts" : "pages"}/${entry.id}`}>
                     {entry.title}
                   </a>{" "}
-                  ({entry.type}, {entry.status}) · {when(entry.updatedAt)}
+                  ({entry.type}, {entry.status}) · {formatWhen(entry.updatedAt, data.timeZone)}
                 </li>
               ))}
             </ul>
