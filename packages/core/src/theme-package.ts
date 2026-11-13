@@ -497,7 +497,7 @@ const countBlocks = (blocks: Block[]): number =>
  * parts in place must not make more than `MAX_EXPANDED_BLOCKS` blocks, nor nest more than `MAX_PART_DEPTH` deep. The size
  * is worked out without ever building the big list (a few parts that each include the next twice would make millions).
  */
-function checkParts(
+export function checkParts(
   templates: ThemeLayout[],
   parts: ThemeLayout[],
   refuse: (message: string) => void,

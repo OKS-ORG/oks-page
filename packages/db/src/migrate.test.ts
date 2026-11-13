@@ -82,6 +82,40 @@ describe("sqlite migrations", () => {
     expect(sqliteShape(upgraded)).toEqual(sqliteShape(fresh));
   });
 
+  test("0004 keeps the layout changes stored before it (the SQLite table is rebuilt)", () => {
+    const db = open();
+    const tags = realTags("sqlite");
+    const at = tags.indexOf("0004_theme_layout_changes");
+    expect(at).toBeGreaterThan(0);
+    migrateSqlite(db, real("sqlite"), { upTo: at });
+    const site = "1".repeat(26);
+    const theme = "0".repeat(26);
+    db.prepare("insert into sites (id, name, created_at, updated_at) values (?, ?, 1, 1)").run(
+      site,
+      "S",
+    );
+    db.prepare(
+      "insert into themes (id, site_id, key, version, source, is_active, settings) values (?, ?, 'maple', '1.0.0', 'runtime', 1, '{}')",
+    ).run(theme, site);
+    db.prepare(
+      "insert into theme_overrides (theme_id, template_key, content, base_hash, base_version, updated_at) values (?, ?, ?, ?, ?, ?)",
+    ).run(theme, "templates/index", '{"blocks":[]}', "abc", "1.0.0", 1);
+    migrateSqlite(db, real("sqlite"));
+    expect(db.prepare("select * from theme_overrides").all()).toEqual([
+      {
+        theme_id: theme,
+        template_key: "templates/index",
+        content: '{"blocks":[]}',
+        draft: null,
+        kind: "theme",
+        name: "",
+        base_hash: "abc",
+        base_version: "1.0.0",
+        updated_at: 1,
+      },
+    ]);
+  });
+
   test("a migration that was changed after it was applied is refused", () => {
     const db = open();
     const dir = withSecondMigration("sqlite", false);
@@ -176,6 +210,7 @@ describe("sqlite migrations", () => {
       "0001_cache_tags",
       "0002_extension_updates_and_rollback",
       "0003_extension_settings",
+      "0004_theme_layout_changes",
     ]);
   });
 });
@@ -310,6 +345,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0001_cache_tags",
       "0002_extension_updates_and_rollback",
       "0003_extension_settings",
+      "0004_theme_layout_changes",
     ]);
   });
 });

@@ -718,7 +718,12 @@ export const themeOverrides = pgTable(
       .notNull()
       .references(() => themes.id, { onDelete: "cascade" }),
     templateKey: text("template_key").notNull(),
-    content: jsonb("content").notNull(),
+    /** The published layout; null while the layout has only a draft (spec 05, section 17.5). */
+    content: jsonb("content"),
+    /** Changes not published yet; null when there are none. */
+    draft: jsonb("draft"),
+    kind: text("kind").notNull().default("theme"),
+    name: text("name").notNull().default(""),
     baseHash: text("base_hash").notNull(),
     baseVersion: text("base_version").notNull(),
     updatedAt: timestamp("updated_at", {
@@ -729,7 +734,31 @@ export const themeOverrides = pgTable(
   },
   (t) => [
     check("ck_theme_overrides_theme_id_ulid", sql`length(${t.themeId}) = 26`),
+    check("ck_theme_overrides_kind", sql`${t.kind} in ('theme', 'owner-made')`),
     primaryKey({ columns: [t.themeId, t.templateKey] }),
+  ],
+);
+
+export const themeOverrideVersions = pgTable(
+  "theme_override_versions",
+  {
+    id: text("id").primaryKey().notNull(),
+    themeId: text("theme_id")
+      .notNull()
+      .references(() => themes.id, { onDelete: "cascade" }),
+    templateKey: text("template_key").notNull(),
+    content: jsonb("content").notNull(),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    publishedBy: text("published_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    check("ck_theme_override_versions_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_theme_override_versions_theme_id_ulid", sql`length(${t.themeId}) = 26`),
+    index("ix_theme_override_versions_layout").on(t.themeId, t.templateKey, t.publishedAt),
   ],
 );
 
@@ -1071,6 +1100,7 @@ export const tableNames = [
   "settings",
   "themes",
   "theme_overrides",
+  "theme_override_versions",
   "extensions",
   "extension_pending_updates",
   "extension_previous_versions",

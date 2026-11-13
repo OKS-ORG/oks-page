@@ -5286,7 +5286,20 @@ describe.skipIf(!findBrowser())(
     });
 
     type Page = Awaited<ReturnType<Browser["newPage"]>>;
+    // One signed-in page per person for the whole group: signing in again and again from one address would meet the
+    // sign-in rate limit.
+    const sessions = new Map<string, Page>();
     const signedIn = async (who: { email: string; password: string }): Promise<Page> => {
+      const known = sessions.get(who.email);
+      if (known) {
+        await known.goto(site.base + "/admin");
+        return known;
+      }
+      const page = await signInFresh(who);
+      sessions.set(who.email, page);
+      return page;
+    };
+    const signInFresh = async (who: { email: string; password: string }): Promise<Page> => {
       const context = await browser.newContext();
       const page = await context.newPage();
       await page.goto(site.base + "/admin/login");
@@ -5769,6 +5782,107 @@ describe.skipIf(!findBrowser())(
       const after = await html("/");
       expect(after).not.toContain("oks-site-title");
       expect(after).not.toContain("Made with Willow");
+    });
+
+    test("layout changes: a draft is not public, publish shows it on every page that uses the layout at once, history, reset; only design managers", async () => {
+      const page = await signedIn(owner);
+      const themes = (await call(page, "GET", "/api/admin/themes")).json as {
+        themes: { id: string; key: string }[];
+      };
+      const willow = themes.themes.find((t) => t.key === "willow")!;
+      expect(
+        (await call(page, "POST", `/api/admin/themes/${willow.id}`, { action: "use" })).status,
+      ).toBe(200);
+      const base = `/api/admin/themes/${willow.id}`;
+      const post = async () => (await fetch(site.base + "/blog/hello-world")).text();
+      expect(await post()).toContain("Made with Willow");
+
+      const list = await call(page, "GET", `${base}/layouts`);
+      expect(list.status).toBe(200);
+      expect(list.json!["layouts"]).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: "templates/index", state: "theme", hasDraft: false }),
+          expect.objectContaining({ key: "parts/footer", state: "theme", kind: "part" }),
+        ]),
+      );
+
+      // A draft of the footer: the public pages do not change.
+      const footer = (await call(page, "GET", `${base}/layout?key=parts/footer`)).json as {
+        layout: { theme: unknown[] };
+      };
+      const changed = [
+        ...footer.layout.theme,
+        {
+          id: "owner-note",
+          type: "paragraph",
+          props: {},
+          content: [{ type: "text", text: "Open every day but Monday" }],
+          children: [],
+        },
+      ];
+      const draft = await call(page, "PUT", `${base}/layout`, {
+        key: "parts/footer",
+        blocks: changed,
+      });
+      expect(draft.status).toBe(200);
+      expect(draft.json).toMatchObject({ layout: { state: "theme", hasDraft: true }, repairs: 0 });
+      expect(await post()).not.toContain("Open every day but Monday");
+
+      // A footer that includes itself is refused and leaves the draft alone.
+      const loop = await call(page, "PUT", `${base}/layout`, {
+        key: "parts/footer",
+        blocks: [{ id: "x", type: "part", props: { name: "footer" }, content: null, children: [] }],
+      });
+      expect(loop.status).toBe(400);
+
+      // Publish: every page with the footer shows it at once.
+      const published = await call(page, "POST", `${base}/layouts`, { action: "publish" });
+      expect(published.json).toEqual({ ok: true, published: ["parts/footer"] });
+      expect(await post()).toContain("Open every day but Monday");
+      expect(await (await fetch(site.base + "/")).text()).toContain("Open every day but Monday");
+      const detail = (await call(page, "GET", `${base}/layout?key=parts/footer`)).json as {
+        layout: { state: string };
+        versions: { id: string; publishedBy: string }[];
+      };
+      expect(detail.layout.state).toBe("owner");
+      expect(detail.versions).toHaveLength(1);
+      expect(detail.versions[0]!.publishedBy).toBe("Anna");
+
+      // An editor may not see or change layouts; a signed-out request is refused.
+      const editor = await signedIn(cara);
+      expect((await call(editor, "GET", `${base}/layouts`)).status).toBe(403);
+      expect(
+        (await call(editor, "PUT", `${base}/layout`, { key: "parts/footer", blocks: [] })).status,
+      ).toBe(403);
+      expect((await call(editor, "POST", `${base}/layouts`, { action: "publish" })).status).toBe(
+        403,
+      );
+      expect((await fetch(site.base + `${base}/layouts`)).status).toBe(401);
+
+      // Reset to the theme's footer: the change leaves every page at once; the history stays.
+      expect(
+        (await call(page, "POST", `${base}/layout`, { action: "reset", key: "parts/footer" }))
+          .status,
+      ).toBe(200);
+      expect(await post()).not.toContain("Open every day but Monday");
+      const after = (await call(page, "GET", `${base}/layout?key=parts/footer`)).json as {
+        layout: { state: string };
+        versions: unknown[];
+      };
+      expect(after.layout.state).toBe("theme");
+      expect(after.versions).toHaveLength(1);
+
+      // Restore makes a draft from the old version; nothing is public until it is published again.
+      const restored = await call(page, "POST", `${base}/layout`, {
+        action: "restore",
+        versionId: detail.versions[0]!.id,
+      });
+      expect(restored.json).toMatchObject({ layout: { hasDraft: true } });
+      expect(await post()).not.toContain("Open every day but Monday");
+      await call(page, "POST", `${base}/layouts`, { action: "publish" });
+      expect(await post()).toContain("Open every day but Monday");
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });
   },
 );

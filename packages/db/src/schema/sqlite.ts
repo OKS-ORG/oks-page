@@ -626,15 +626,42 @@ export const themeOverrides = sqliteTable(
       .notNull()
       .references(() => themes.id, { onDelete: "cascade" }),
     templateKey: text("template_key").notNull(),
-    content: text("content", { mode: "json" }).notNull(),
+    /** The published layout; null while the layout has only a draft (spec 05, section 17.5). */
+    content: text("content", { mode: "json" }),
+    /** Changes not published yet; null when there are none. */
+    draft: text("draft", { mode: "json" }),
+    kind: text("kind").notNull().default("theme"),
+    name: text("name").notNull().default(""),
     baseHash: text("base_hash").notNull(),
     baseVersion: text("base_version").notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [
     check("ck_theme_overrides_theme_id_ulid", sql`length(${t.themeId}) = 26`),
-    check("ck_theme_overrides_content_json", sql`json_valid(${t.content})`),
+    check("ck_theme_overrides_content_json", sql`${t.content} is null or json_valid(${t.content})`),
+    check("ck_theme_overrides_draft_json", sql`${t.draft} is null or json_valid(${t.draft})`),
+    check("ck_theme_overrides_kind", sql`${t.kind} in ('theme', 'owner-made')`),
     primaryKey({ columns: [t.themeId, t.templateKey] }),
+  ],
+);
+
+export const themeOverrideVersions = sqliteTable(
+  "theme_override_versions",
+  {
+    id: text("id").primaryKey().notNull(),
+    themeId: text("theme_id")
+      .notNull()
+      .references(() => themes.id, { onDelete: "cascade" }),
+    templateKey: text("template_key").notNull(),
+    content: text("content", { mode: "json" }).notNull(),
+    publishedAt: integer("published_at", { mode: "timestamp_ms" }).notNull(),
+    publishedBy: text("published_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    check("ck_theme_override_versions_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_theme_override_versions_theme_id_ulid", sql`length(${t.themeId}) = 26`),
+    check("ck_theme_override_versions_content_json", sql`json_valid(${t.content})`),
+    index("ix_theme_override_versions_layout").on(t.themeId, t.templateKey, t.publishedAt),
   ],
 );
 
@@ -937,6 +964,7 @@ export const tableNames = [
   "settings",
   "themes",
   "theme_overrides",
+  "theme_override_versions",
   "extensions",
   "extension_pending_updates",
   "extension_previous_versions",

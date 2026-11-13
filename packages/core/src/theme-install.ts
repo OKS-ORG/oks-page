@@ -185,6 +185,18 @@ export async function loadActiveThemeCssKey(
   return (await loadActiveThemeVersion(runner, siteId))?.cssKey ?? null;
 }
 
+/** The version in use of one installed theme of the site, or null (not installed, or its row is damaged). */
+export async function loadThemeVersion(
+  runner: SqlRunner,
+  siteId: string,
+  themeId: string,
+): Promise<{ version: ThemeVersion; isActive: boolean } | null> {
+  const found = await findTheme(runner, siteId, themeId);
+  return found
+    ? { version: found.stored.current, isActive: Boolean(found.row["is_active"]) }
+    : null;
+}
+
 /** The version of the theme in use, or null (no theme in use, or its row is damaged). */
 export async function loadActiveThemeVersion(
   runner: SqlRunner,

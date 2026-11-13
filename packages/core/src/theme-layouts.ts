@@ -89,24 +89,55 @@ export function toDrawNodes(blocks: Block[]): DrawNode[] {
   return out;
 }
 
-/** The layouts of the theme in use, ready to draw; null when no theme is in use or it has no layouts. */
+/**
+ * The layouts of the theme in use, ready to draw, with the owner's published changes in place of the theme's own
+ * (and, with `drafts`, the owner's unpublished changes, for the site editor's preview). Null when no theme is in use or
+ * it has no layouts.
+ */
 export async function loadActiveThemeLayouts(
   runner: SqlRunner,
   siteId: string,
+  options: { drafts?: boolean } = {},
 ): Promise<ThemeLayouts | null> {
   const version = await loadActiveThemeVersion(runner, siteId);
   if (!version) return null;
-  const build = (list: unknown): Record<string, DrawNode[]> => {
+  const owner = new Map<string, unknown>();
+  const rows = await runner.all(
+    `select o."template_key", o."content", o."draft" from "theme_overrides" o
+      join "themes" t on t."id" = o."theme_id"
+      where t."site_id" = ? and t."is_active" = ? and t."source" = 'runtime' and o."kind" = 'theme'`,
+    [siteId, true],
+  );
+  for (const row of rows) {
+    const raw = options.drafts && row["draft"] != null ? row["draft"] : row["content"];
+    if (raw == null) continue;
+    let value: unknown = raw;
+    if (typeof raw === "string")
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        value = []; // damaged: drawn as an empty layout, never as raw text
+      }
+    owner.set(String(row["template_key"]), value);
+  }
+  const build = (folder: string, list: unknown): Record<string, DrawNode[]> => {
     const out: Record<string, DrawNode[]> = {};
-    if (!Array.isArray(list)) return out;
-    for (const item of list as { name?: unknown; blocks?: unknown }[]) {
-      if (!item || typeof item.name !== "string" || !NAME.test(item.name)) continue;
-      const checked = checkBlocks({ version: 1, blocks: item.blocks });
-      out[item.name] = toDrawNodes(checked.body.blocks);
+    const items = Array.isArray(list) ? (list as { name?: unknown; blocks?: unknown }[]) : [];
+    const names = new Set<string>();
+    for (const item of items) if (item && typeof item.name === "string") names.add(item.name);
+    for (const key of owner.keys())
+      if (key.startsWith(`${folder}/`)) names.add(key.slice(folder.length + 1));
+    for (const name of names) {
+      if (!NAME.test(name)) continue;
+      const blocks = owner.has(`${folder}/${name}`)
+        ? owner.get(`${folder}/${name}`)
+        : items.find((i) => i?.name === name)?.blocks;
+      const checked = checkBlocks({ version: 1, blocks });
+      out[name] = toDrawNodes(checked.body.blocks);
     }
     return out;
   };
-  const templates = build(version.templates);
+  const templates = build("templates", version.templates);
   if (Object.keys(templates).length === 0) return null;
-  return { templates, parts: build(version.parts) };
+  return { templates, parts: build("parts", version.parts) };
 }

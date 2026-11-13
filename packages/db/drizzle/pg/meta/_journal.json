@@ -29,6 +29,13 @@
       "when": 1793246850430,
       "tag": "0003_extension_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794588160498,
+      "tag": "0004_theme_layout_changes",
+      "breakpoints": true
     }
   ]
 }

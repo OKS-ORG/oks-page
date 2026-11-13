@@ -268,9 +268,20 @@ export async function seedEverything(db: TestDb): Promise<void> {
     theme_id: theme,
     template_key: "header",
     content: JSON.stringify({ blocks: [] }),
+    draft: JSON.stringify({ blocks: [{ type: "paragraph" }] }),
+    kind: "theme",
+    name: "",
     base_hash: "h",
     base_version: "1.0.0",
     updated_at: T,
+  });
+  await ins(db, "theme_override_versions", {
+    id: id(60),
+    theme_id: theme,
+    template_key: "header",
+    content: JSON.stringify({ blocks: [] }),
+    published_at: T,
+    published_by: user,
   });
   const ext = id(27);
   await ins(db, "extensions", {

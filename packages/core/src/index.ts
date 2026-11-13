@@ -29,6 +29,7 @@ export * from "./tar.js";
 export * from "./theme-package.js";
 export * from "./theme-install.js";
 export * from "./theme-layouts.js";
+export * from "./theme-edits.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";
