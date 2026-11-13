@@ -1,8 +1,10 @@
 // The page for the export build (static mode): the same output as the server build's page, plus the list of pages to
-// write. Used in place of app/[[...slug]]/page.tsx by scripts/build-export.mjs.
+// write. Used in place of app/[[...slug]]/page.tsx by scripts/build-export.mjs. A static export has no feeds, so the
+// pages carry no feed links.
 import {
   allSlugParams,
   getPublishedEntry,
+  getSiteInfo,
   getSiteMenu,
   getTermArchive,
   slugOf,
@@ -10,9 +12,9 @@ import {
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
-import { ArchiveView, archiveTitle } from "./archive-view";
+import { ArchiveView } from "./archive-view";
+import { EntryJsonLd, archiveMetadata, entryMetadata } from "./page-meta";
 import { PublicFrame } from "./public-frame";
-import { canonicalFor } from "./site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
@@ -23,11 +25,9 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const slug = slugOf((await params).slug);
   const entry = await getPublishedEntry(slug);
-  if (entry) return { title: entry.title, alternates: { canonical: canonicalFor(slug) } };
+  if (entry) return entryMetadata(entry, await getSiteInfo(), { feeds: false });
   const archive = await getTermArchive(slug);
-  return archive
-    ? { title: archiveTitle(archive), alternates: { canonical: canonicalFor(slug) } }
-    : {};
+  return archive ? archiveMetadata(archive, slug, await getSiteInfo(), { feeds: false }) : {};
 }
 
 export default async function Page({ params }: Props) {
@@ -43,7 +43,11 @@ export default async function Page({ params }: Props) {
       </PublicFrame>
     );
   }
-  const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
+  const [header, footer, site] = await Promise.all([
+    getSiteMenu("primary"),
+    getSiteMenu("footer"),
+    getSiteInfo(),
+  ]);
   return (
     <PublicFrame header={header} footer={footer}>
       <main data-pagefind-body>
@@ -54,6 +58,7 @@ export default async function Page({ params }: Props) {
           </CardBody>
         </Card>
       </main>
+      <EntryJsonLd entry={entry} site={site} />
     </PublicFrame>
   );
 }

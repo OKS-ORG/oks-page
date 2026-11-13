@@ -1,21 +1,19 @@
-import { getPublishedEntry, getSiteMenu, getTermArchive, slugOf } from "@data";
+import { getPublishedEntry, getSiteInfo, getSiteMenu, getTermArchive, slugOf } from "@data";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
-import { ArchiveView, archiveTitle } from "./archive-view";
+import { ArchiveView } from "./archive-view";
+import { EntryJsonLd, archiveMetadata, entryMetadata } from "./page-meta";
 import { PublicFrame } from "./public-frame";
-import { canonicalFor } from "./site-url";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const slug = slugOf((await params).slug);
   const entry = await getPublishedEntry(slug);
-  if (entry) return { title: entry.title, alternates: { canonical: canonicalFor(slug) } };
+  if (entry) return entryMetadata(entry, await getSiteInfo(), { feeds: true });
   const archive = await getTermArchive(slug);
-  return archive
-    ? { title: archiveTitle(archive), alternates: { canonical: canonicalFor(slug) } }
-    : {};
+  return archive ? archiveMetadata(archive, slug, await getSiteInfo(), { feeds: true }) : {};
 }
 
 export default async function Page({ params }: Props) {
@@ -32,7 +30,11 @@ export default async function Page({ params }: Props) {
       </PublicFrame>
     );
   }
-  const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
+  const [header, footer, site] = await Promise.all([
+    getSiteMenu("primary"),
+    getSiteMenu("footer"),
+    getSiteInfo(),
+  ]);
   return (
     <PublicFrame header={header} footer={footer}>
       <main>
@@ -43,6 +45,7 @@ export default async function Page({ params }: Props) {
           </CardBody>
         </Card>
       </main>
+      <EntryJsonLd entry={entry} site={site} />
     </PublicFrame>
   );
 }

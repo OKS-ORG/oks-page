@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|maintenance-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -237,6 +237,26 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/entries/[id]/editing/route.ts",
       content: `export { POST, DELETE } from ${from("api-editing")};\n`,
+    },
+    {
+      path: "app/feed.xml/route.ts",
+      content: `export { siteRss as GET } from ${from("feeds")};\n`,
+    },
+    {
+      path: "app/atom.xml/route.ts",
+      content: `export { siteAtom as GET } from ${from("feeds")};\n`,
+    },
+    {
+      path: "app/category/[slug]/feed.xml/route.ts",
+      content: `export { categoryRss as GET } from ${from("feeds")};\n`,
+    },
+    {
+      path: "app/category/[slug]/atom.xml/route.ts",
+      content: `export { categoryAtom as GET } from ${from("feeds")};\n`,
+    },
+    {
+      path: "app/api/admin/entries/[id]/seo/route.ts",
+      content: `export { GET, PUT } from ${from("api-entry-seo")};\n`,
     },
     {
       path: "app/api/admin/entries/[id]/preview-link/route.ts",

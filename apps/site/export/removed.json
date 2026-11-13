@@ -8,6 +8,9 @@
     "app/preview",
     "app/sitemap.xml",
     "app/robots.txt",
+    "app/feed.xml",
+    "app/atom.xml",
+    "app/category",
     "app/test-form",
     "app/admin",
     "app/uploads"

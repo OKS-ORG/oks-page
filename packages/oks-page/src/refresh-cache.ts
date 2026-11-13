@@ -16,6 +16,8 @@ export function refreshArchives(): void {
   revalidateTag("archive:posts", { expire: 0 });
   // The sitemap lists every published address and the archives that have posts.
   revalidateTag("sitemap", { expire: 0 });
+  // The feeds hold the newest posts with their text.
+  revalidateTag("feed", { expire: 0 });
   refreshMenus();
   // The search index holds titles, texts and term names too: this process builds it again at the next search.
   forgetSearchIndex();

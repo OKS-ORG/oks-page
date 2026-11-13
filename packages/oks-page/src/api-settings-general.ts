@@ -1,5 +1,6 @@
 // /api/admin/settings/general: GET the general settings, PUT to change them. Only people who manage the settings.
 import { loadGeneralSettings, saveGeneralSettings, type GeneralSettings } from "@oks-page/core";
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -36,5 +37,7 @@ export async function PUT(request: Request) {
     patch,
   );
   if (!result.ok) return reply(result, result.code === "forbidden" ? 403 : 400);
+  // The site's name and tagline are in every page's title and tags (and in the feeds).
+  revalidateTag("settings", { expire: 0 });
   return NextResponse.json({ ok: true, settings: result.settings });
 }

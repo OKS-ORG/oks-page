@@ -3,11 +3,18 @@
 import { cacheTag } from "next/cache";
 import type { PublicMenuItem } from "@oks-page/core";
 import { slugTag } from "../cache-tags";
-import { loadPublishedEntry, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
-import type { EntryView, TermArchive } from "./types";
+import { loadPublishedEntry, loadSiteInfo, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
+import type { EntryView, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
-export type { EntryView, TermArchive };
+export type { EntryView, SiteInfo, TermArchive };
+
+/** The site's name and tagline, for every page's title and tags. Tagged `settings`: refreshed when they are saved. */
+export async function getSiteInfo(): Promise<SiteInfo> {
+  "use cache";
+  cacheTag("settings");
+  return loadSiteInfo();
+}
 
 // Test builds count how often a page is really read from the database.
 const loads = globalThis as typeof globalThis & { __oksLoads?: Record<string, number> };

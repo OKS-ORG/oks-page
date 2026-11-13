@@ -82,7 +82,7 @@ for (const { kind, skip } of openers) {
       const res = await get("/about");
       expect(res.status).toBe(200);
       const html = await res.text();
-      expect(html).toContain("<title>About us</title>");
+      expect(html).toContain("<title>About us – S</title>");
       expect(html).toContain("About us body");
       expect(await text("/")).toContain("<h1>Home</h1>");
     });
@@ -514,7 +514,7 @@ for (const { kind, skip } of openers) {
       const served = await (await fetch(site.base + "/category/news")).text();
       const written = readFileSync(join(out, "category/news.html"), "utf8");
       expect(pick(written)).toMatchObject({
-        title: "Category: News",
+        title: "Category: News – S",
         heading: "Category: News",
         canonical: `${SITE_URL}/category/news`,
       });
@@ -1345,7 +1345,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     }
     const trainsPage = await text("/category/trains");
     expect(trainsPage.body).toContain("<h1>Category: Trains</h1>");
-    expect(trainsPage.body).toContain("<title>Category: Trains</title>");
+    expect(trainsPage.body).toMatch(/<title>Category: Trains – Anna(?:.|&#x27;)s Garden<\/title>/);
     expect((await text("/tag/window-seat")).body).toContain("<h1>Tag: Window Seat</h1>");
     // Not in another category.
     expect((await text("/category/uncategorised")).body).not.toContain("Night train to Vienna");
@@ -4523,7 +4523,9 @@ describe.skipIf(!findBrowser())(
     test("6. (the part that exists) a site that search engines can read: addresses, sitemap, robots, real 404s, and visitors can search", async () => {
       // Every published page has its own title and canonical address.
       const post = (await get("/blog/sourdough-for-beginners")).body;
-      expect(post).toContain("<title>Sourdough for beginners</title>");
+      expect(post).toMatch(
+        /<title>Sourdough for beginners – Maple Street Bakery &amp; Café<\/title>/,
+      );
       expect(post).toMatch(/<link rel="canonical" href="[^"]*\/blog\/sourdough-for-beginners"/);
       // The sitemap lists what is public and nothing that is not (the scheduled winter post is not live yet).
       const sitemap = (await get("/sitemap.xml")).body;
@@ -4612,9 +4614,227 @@ describe.skipIf(!findBrowser())(
     test.todo(
       "5. set the logo, the colors and the fonts within the default theme (there is no theme system and no logo yet)",
     );
-    test.todo(
-      "6. the blog feed (RSS and Atom) and each page's description, Open Graph and structured data tags",
-    );
+    /** A request made from inside the signed-in page, so it carries the owner's session. */
+    const call = (who: Page, method: string, url: string, body?: unknown) =>
+      who.evaluate(
+        async ([m, u, b]) => {
+          const response = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: response.status,
+            json: (await response.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    test("6. the tags a page tells search engines and social sites, the structured data, the SEO box, and the feeds", async () => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const meta = (html: string, attr: "name" | "property", key: string) =>
+        new RegExp(`<meta ${attr}="${key}" content="([^"]*)"`).exec(html)?.[1];
+      const ldOf = (html: string) =>
+        [...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)].flatMap(
+          (m) => JSON.parse(m[1]!) as Record<string, unknown>[],
+        );
+      const parse = (path: string) =>
+        page.evaluate(async (url) => {
+          const text = await (await fetch(url)).text();
+          const doc = new DOMParser().parseFromString(text, "application/xml");
+          return {
+            error: doc.querySelector("parsererror")?.textContent ?? null,
+            root: doc.documentElement.tagName,
+            titles: [...doc.querySelectorAll("item > title, entry > title")].map(
+              (t) => t.textContent,
+            ),
+            links: [...doc.querySelectorAll("item > link")].map((l) => l.textContent),
+            text,
+          };
+        }, site.base + path);
+
+      // The post: a title with the site name, a description made from its text, Open Graph and Twitter tags with its picture,
+      // a canonical address, links to the feeds, and structured data.
+      const html = (await get("/blog/sourdough-for-beginners")).body;
+      expect(html).toMatch(
+        /<title>Sourdough for beginners – Maple Street Bakery &amp; Café<\/title>/,
+      );
+      expect(meta(html, "name", "description")).toBe(
+        "Mix flour and water, wait a day, and feed it again.",
+      );
+      expect(meta(html, "property", "og:title")).toBe(
+        "Sourdough for beginners – Maple Street Bakery &amp; Café",
+      );
+      expect(meta(html, "property", "og:type")).toBe("article");
+      expect(meta(html, "property", "og:url")).toMatch(/\/blog\/sourdough-for-beginners$/);
+      expect(meta(html, "property", "og:image")).toMatch(/\/uploads\/.*Starter-jar\.png$/);
+      expect(meta(html, "property", "article:published_time")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(meta(html, "name", "twitter:card")).toBe("summary_large_image");
+      expect(html).toMatch(
+        /<link rel="alternate" type="application\/rss\+xml" href="[^"]*\/feed\.xml"/,
+      );
+      expect(html).toMatch(
+        /<link rel="alternate" type="application\/atom\+xml" href="[^"]*\/atom\.xml"/,
+      );
+      const ld = ldOf(html);
+      expect(ld[0]).toMatchObject({
+        "@type": "BlogPosting",
+        headline: "Sourdough for beginners",
+        author: { "@type": "Person", name: "Mira" },
+        publisher: { name: "Maple Street Bakery & Café" },
+      });
+      expect(String(ld[0]!["image"])).toMatch(/Starter-jar\.png$/);
+      expect(ld[1]).toMatchObject({ "@type": "BreadcrumbList" });
+      // The front page: the site's name and tagline, and the site as structured data with its search box.
+      const front = (await get("/")).body;
+      expect(front).toMatch(
+        /<title>Maple Street Bakery &amp; Café – Bread, baked slowly, every morning<\/title>/,
+      );
+      expect(ldOf(front)[0]).toMatchObject({
+        "@type": "WebSite",
+        potentialAction: { "@type": "SearchAction" },
+      });
+      // A category page has its own title and description, and the feed of that category.
+      const archive = (await get("/category/recipes")).body;
+      expect(archive).toMatch(/<title>Category: Recipes – Maple Street Bakery &amp; Café<\/title>/);
+      expect(meta(archive, "name", "description")).toContain("Recipes");
+      expect(archive).toMatch(/href="[^"]*\/category\/recipes\/feed\.xml"/);
+
+      // The SEO box: the owner writes a description; the page and its previews use it at once. A hostile text cannot break
+      // out of the structured data (SEO-29): it runs no code and reads back exactly.
+      const hostile = "</script><script>window.pwned=1</script> Slow-fed starter";
+      await page.goto(`${site.base}/admin/posts`);
+      await page.getByRole("link", { name: "Sourdough for beginners" }).click();
+      await page
+        .getByRole("heading", { name: "Edit: Sourdough for beginners", level: 1 })
+        .waitFor();
+      await page.getByRole("heading", { name: "Search engines", level: 2 }).waitFor();
+      await page
+        .getByText("Empty: a description is made from the first words of the page.")
+        .waitFor();
+      await page.getByLabel("Description for search results and link previews").fill(hostile);
+      await page.getByRole("button", { name: "Update search engine settings" }).click();
+      await page.getByText("Search engine settings saved.").waitFor();
+      const changed = (await get("/blog/sourdough-for-beginners")).body;
+      expect(meta(changed, "name", "description")).toContain("Slow-fed starter");
+      expect(meta(changed, "name", "description")).not.toContain("<");
+      expect(ldOf(changed)[0]!["description"]).toBe(hostile);
+      expect(changed.match(/<script type="application\/ld\+json">.*?<\/script>/gs)).toHaveLength(1);
+      await page.goto(`${site.base}/blog/sourdough-for-beginners`);
+      expect(
+        await page.evaluate(() => (window as unknown as { pwned?: number }).pwned),
+      ).toBeUndefined();
+      await page.setViewportSize({ width: 390, height: 800 });
+      await page.goBack();
+      await page.setViewportSize({ width: 1280, height: 800 });
+
+      // The feeds: RSS and Atom for the blog and for the category; well-formed; the published posts only; the full text with
+      // the site's address on its pictures and links; new posts at once; a missing category is a 404.
+      const rss = await parse("/feed.xml");
+      expect(rss).toMatchObject({ error: null, root: "rss" });
+      expect(rss.titles).toContain("Sourdough for beginners");
+      expect(rss.titles).toContain("Spring special");
+      expect(rss.titles).not.toContain("Winter menu"); // scheduled for 2090
+      expect(rss.titles).not.toContain("Secret recipe"); // a draft
+      expect(rss.links[0]).toMatch(new RegExp(`^${site.base}/blog/`));
+      expect(rss.text).toContain("Mix flour and water");
+      expect(rss.text).toMatch(new RegExp(`src=&quot;${site.base}/uploads/[^&]*Starter-jar\\.png`));
+      expect((await get("/feed.xml")).response.headers.get("content-type")).toContain(
+        "application/rss+xml",
+      );
+      const atom = await parse("/atom.xml");
+      expect(atom).toMatchObject({ error: null, root: "feed" });
+      expect(atom.titles).toContain("Sourdough for beginners");
+      expect((await get("/atom.xml")).response.headers.get("content-type")).toContain(
+        "application/atom+xml",
+      );
+      expect((await parse("/category/recipes/feed.xml")).titles).toEqual([
+        "Sourdough for beginners",
+      ]);
+      expect((await parse("/category/recipes/atom.xml")).titles).toEqual([
+        "Sourdough for beginners",
+      ]);
+      expect((await get("/category/nope/feed.xml")).response.status).toBe(404);
+      expect((await get("/category/nope/atom.xml")).response.status).toBe(404);
+      const fresh = await call(page, "POST", "/api/admin/entries", {
+        type: "post",
+        title: "Fresh news",
+      });
+      const freshId = String((fresh.json as { id: string }).id);
+      expect(
+        (
+          await call(page, "PUT", `/api/admin/entries/${freshId}`, {
+            title: "Fresh news",
+            slugPart: "fresh-news",
+            status: "published",
+            blocks: [],
+            revision: (fresh.json as { revision: number }).revision,
+          })
+        ).status,
+      ).toBe(200);
+      expect((await parse("/feed.xml")).titles[0]).toBe("Fresh news");
+
+      // "Ask search engines not to list this page": it stays on the site and leaves the page tags, the sitemap, the search and
+      // the feeds.
+      await page.goto(`${site.base}/admin/posts`);
+      await page.getByRole("link", { name: "Sourdough for beginners" }).click();
+      await page
+        .getByRole("heading", { name: "Edit: Sourdough for beginners", level: 1 })
+        .waitFor();
+      await page.getByLabel("Ask search engines not to list this page").check();
+      await page.getByRole("button", { name: "Update search engine settings" }).click();
+      await page.getByText("Search engine settings saved.").waitFor();
+      const hidden = (await get("/blog/sourdough-for-beginners")).body;
+      expect(meta(hidden, "name", "robots")).toBe("noindex, nofollow");
+      expect((await get("/blog/sourdough-for-beginners")).response.status).toBe(200);
+      expect((await get("/sitemap.xml")).body).not.toContain("/blog/sourdough-for-beginners");
+      expect((await get("/search?q=sourdough")).body).not.toContain(
+        'href="/blog/sourdough-for-beginners"',
+      );
+      expect((await parse("/feed.xml")).titles).not.toContain("Sourdough for beginners");
+      expect((await parse("/category/recipes/feed.xml")).titles).toEqual([]);
+      // And it comes back when the owner changes their mind.
+      await page.getByLabel("Ask search engines not to list this page").uncheck();
+      await page.getByLabel("Description for search results and link previews").fill("");
+      await page.getByRole("button", { name: "Update search engine settings" }).click();
+      await page.getByText("Search engine settings saved.").waitFor();
+      expect((await get("/sitemap.xml")).body).toContain("/blog/sourdough-for-beginners");
+      expect((await parse("/feed.xml")).titles).toContain("Sourdough for beginners");
+      expect(
+        meta((await get("/blog/sourdough-for-beginners")).body, "name", "robots"),
+      ).toBeUndefined();
+
+      // A site that asks search engines to stay away has no feeds either, and the owner can switch it back.
+      expect(
+        (await call(page, "PUT", "/api/admin/settings/seo", { discourageIndexing: true })).status,
+      ).toBe(200);
+      expect((await get("/feed.xml")).response.status).toBe(404);
+      expect((await get("/category/recipes/atom.xml")).response.status).toBe(404);
+      expect(
+        (await call(page, "PUT", "/api/admin/settings/seo", { discourageIndexing: false })).status,
+      ).toBe(200);
+      expect((await get("/feed.xml")).response.status).toBe(200);
+
+      // The SEO box refuses what it should; signed out nothing is reachable.
+      expect(
+        (
+          await call(page, "PUT", `/api/admin/entries/${freshId}/seo`, {
+            description: "x".repeat(301),
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (await call(page, "PUT", `/api/admin/entries/${freshId}/seo`, { noindex: "yes" })).status,
+      ).toBe(400);
+      for (const method of ["GET", "PUT"] as const) {
+        const response = await fetch(`${site.base}/api/admin/entries/${freshId}/seo`, {
+          method,
+          headers: { "content-type": "application/json" },
+          ...(method === "PUT" ? { body: "{}" } : {}),
+        });
+        expect(response.status, method).toBe(401);
+      }
+    });
     test("7. invite an editor with a limited role: a link, a password of their own, the right menu, no way into users and settings, then a changed role and removal", async () => {
       await page.setViewportSize({ width: 1280, height: 800 });
       const call = (who: Page, method: string, url: string, body?: unknown) =>

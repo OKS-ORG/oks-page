@@ -1,10 +1,14 @@
 // The data module for the export build (static mode): no cache, read once while the files are made.
 import type { PublicMenuItem } from "@oks-page/core";
-import { loadPublishedEntry, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
-import type { EntryView, TermArchive } from "./types";
+import { loadPublishedEntry, loadSiteInfo, loadSiteMenu, loadTermArchive, slugOf } from "./entries";
+import type { EntryView, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
-export type { EntryView, TermArchive };
+export type { EntryView, SiteInfo, TermArchive };
+
+export async function getSiteInfo(): Promise<SiteInfo> {
+  return loadSiteInfo();
+}
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {
   return loadPublishedEntry(slug);

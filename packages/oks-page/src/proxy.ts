@@ -96,6 +96,11 @@ export async function proxy(request: NextRequest) {
   // engines are told not to index them (spec 08, section 9).
   if (slug === "search")
     return apply(NextResponse.next(), { "x-robots-tag": "noindex", "cache-control": PRIVATE });
+  // The feed of a category ("category/news/feed.xml" and ".../atom.xml") is a route of its own; only a category that exists
+  // gets through, anything else is the plain 404 below.
+  const categoryFeed = /^category\/([^/]+)\/(?:feed|atom)\.xml$/.exec(slug);
+  if (categoryFeed && (await findTermArchive(`category/${categoryFeed[1]}`)))
+    return apply(NextResponse.next(), {});
   if (found) {
     const tags = [
       `site:${await getSiteId()}`,
@@ -129,6 +134,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|admin|_next|robots.txt|sitemap.xml|not-found-handler|maintenance-handler|test-form|favicon.ico).*)",
+    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|favicon.ico).*)",
   ],
 };

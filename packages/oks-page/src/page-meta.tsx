@@ -1,0 +1,131 @@
+// What every public page says about itself in its head and in its structured data: the title (`{title} – {site}`), a
+// description, the canonical address, Open Graph and Twitter tags, `noindex` when the page asks for it, and JSON-LD. The
+// server build and the export build use the same functions, so both write the same page. Feed links are only for the
+// server build: a static export has no feeds.
+import { excerptOf, jsonLd, postStructuredData, websiteStructuredData } from "@oks-page/core";
+import type { Metadata } from "next";
+import type { EntryView, SiteInfo, TermArchive } from "./data/types";
+import { canonicalFor } from "./site-url";
+
+const FEEDS = {
+  "application/rss+xml": "/feed.xml",
+  "application/atom+xml": "/atom.xml",
+};
+
+const origin = () => new URL(canonicalFor("home")).origin;
+const absolute = (path: string) => new URL(path, origin()).href;
+
+/** The page title: "Hello – My Site"; the front page is the site name and its tagline. */
+export function titleOf(title: string, site: SiteInfo, isFront = false): string {
+  if (isFront) return site.tagline ? `${site.siteName} – ${site.tagline}` : site.siteName;
+  return `${title} – ${site.siteName}`;
+}
+
+export function entryMetadata(
+  entry: EntryView,
+  site: SiteInfo,
+  options: { feeds: boolean },
+): Metadata {
+  const isFront = entry.slug === "home";
+  const title = titleOf(entry.title, site, isFront);
+  const url = canonicalFor(entry.slug);
+  const image = entry.image ? absolute(entry.image) : null;
+  return {
+    title,
+    description: entry.description,
+    alternates: {
+      canonical: url,
+      ...(options.feeds ? { types: FEEDS } : {}),
+    },
+    ...(entry.noindex ? { robots: { index: false, follow: false } } : {}),
+    openGraph: {
+      type: entry.type === "post" ? "article" : "website",
+      title,
+      description: entry.description,
+      url,
+      siteName: site.siteName,
+      ...(image ? { images: [{ url: image }] } : {}),
+      ...(entry.type === "post"
+        ? {
+            publishedTime: new Date(entry.publishedAt).toISOString(),
+            modifiedTime: new Date(entry.updatedAt).toISOString(),
+            ...(entry.authorName ? { authors: [entry.authorName] } : {}),
+          }
+        : {}),
+    },
+    twitter: {
+      card: image ? "summary_large_image" : "summary",
+      title,
+      description: entry.description,
+      ...(image ? { images: [image] } : {}),
+    },
+  };
+}
+
+export function archiveMetadata(
+  archive: TermArchive,
+  slug: string,
+  site: SiteInfo,
+  options: { feeds: boolean },
+): Metadata {
+  const label = `${archive.kind === "category" ? "Category" : "Tag"}: ${archive.name}`;
+  const title = `${label} – ${site.siteName}`;
+  const description =
+    archive.description ||
+    excerptOf(
+      `${archive.kind === "category" ? "Posts in the category" : "Posts tagged"} ${archive.name} on ${site.siteName}.`,
+    );
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalFor(slug),
+      ...(options.feeds && archive.kind === "category"
+        ? {
+            types: {
+              "application/rss+xml": `/category/${archive.slug}/feed.xml`,
+              "application/atom+xml": `/category/${archive.slug}/atom.xml`,
+            },
+          }
+        : options.feeds
+          ? { types: FEEDS }
+          : {}),
+    },
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      url: canonicalFor(slug),
+      siteName: site.siteName,
+    },
+    twitter: { card: "summary", title, description },
+  };
+}
+
+/** The structured data a page carries, if any: the site on the front page, a blog posting (and its breadcrumb) on a post. */
+function structuredDataOf(entry: EntryView, site: SiteInfo): unknown[] {
+  if (entry.slug === "home")
+    return [
+      websiteStructuredData({ origin: origin(), name: site.siteName, description: site.tagline }),
+    ];
+  if (entry.type === "post")
+    return postStructuredData({
+      origin: origin(),
+      path: `/${entry.slug}`,
+      title: entry.title,
+      description: entry.description,
+      image: entry.image,
+      publishedAt: entry.publishedAt,
+      modifiedAt: entry.updatedAt,
+      authorName: entry.authorName,
+      siteName: site.siteName,
+    });
+  return [];
+}
+
+/** The JSON-LD script of a page (nothing when it has none). The text is escaped so it cannot end the tag (SEO-28, SEO-29). */
+export function EntryJsonLd({ entry, site }: { entry: EntryView; site: SiteInfo }) {
+  const data = structuredDataOf(entry, site);
+  if (data.length === 0) return null;
+  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(data) }} />;
+}

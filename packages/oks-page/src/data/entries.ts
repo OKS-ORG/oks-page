@@ -1,8 +1,22 @@
 // The queries behind both data modules (server and export). No caching here.
-import { enhanceImages, loadPublicMenu, type PublicMenuItem } from "@oks-page/core";
+import {
+  enhanceImages,
+  excerptOf,
+  firstImageOf,
+  loadGeneralSettings,
+  loadPublicMenu,
+  readEntrySeo,
+  type PublicMenuItem,
+} from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
-import type { EntryView, TermArchive } from "./types";
+import type { EntryView, SiteInfo, TermArchive } from "./types";
+
+/** The site's name and tagline (Settings, General). */
+export async function loadSiteInfo(): Promise<SiteInfo> {
+  const general = await loadGeneralSettings(getRunner(), await getSiteId());
+  return { siteName: general.siteName, tagline: general.tagline };
+}
 
 /**
  * "/" is the entry with the slug "home"; other paths use the path without the leading slash. Addresses may hold letters
@@ -26,22 +40,31 @@ export const slugOf = (path: string[] | undefined) => {
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
-    `select "id", "title", "slug", "type_key", "html", "plain_text", "updated_at" from "entries"
-      where "site_id" = ? and "slug" = ? and "status" = 'published' and "locale" = ''
-      order by case "type_key" when 'page' then 0 else 1 end limit 1`,
+    `select e."id", e."title", e."slug", e."type_key", e."html", e."plain_text", e."seo", e."published_at", e."updated_at", u."name" as "author"
+       from "entries" e left join "users" u on u."id" = e."author_id"
+      where e."site_id" = ? and e."slug" = ? and e."status" = 'published' and e."locale" = ''
+      order by case e."type_key" when 'page' then 0 else 1 end limit 1`,
     [siteId, slug],
   );
   const r = rows[0];
   if (!r) return null;
-  const updated = r["updated_at"];
+  const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
+  const seo = readEntrySeo(r["seo"]);
+  const written = String(r["html"]);
+  const plain = String(r["plain_text"]);
   return {
     id: String(r["id"]),
     title: String(r["title"]),
     slug: String(r["slug"]),
     type: String(r["type_key"]),
-    html: await enhanceImages(getRunner(), siteId, String(r["html"]), mediaContext().storage),
-    plainText: String(r["plain_text"]),
-    updatedAt: updated instanceof Date ? updated.getTime() : Number(updated),
+    html: await enhanceImages(getRunner(), siteId, written, mediaContext().storage),
+    plainText: plain,
+    updatedAt: ms(r["updated_at"]),
+    publishedAt: r["published_at"] == null ? ms(r["updated_at"]) : ms(r["published_at"]),
+    authorName: r["author"] == null ? "" : String(r["author"]),
+    description: seo.description || excerptOf(plain),
+    noindex: seo.noindex,
+    image: firstImageOf(written),
   };
 }
 

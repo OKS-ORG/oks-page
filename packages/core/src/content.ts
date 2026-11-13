@@ -29,6 +29,8 @@ const RESERVED = new Set([
   "maintenance-handler",
   "search",
   "preview",
+  "feed.xml",
+  "atom.xml",
   "test-form",
 ]);
 // A part of an address is made of letters, combining marks and numbers of any script, joined by single hyphens
