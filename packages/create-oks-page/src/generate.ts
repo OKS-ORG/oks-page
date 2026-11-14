@@ -351,6 +351,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { DELETE, GET, POST, PUT } from ${from("api-theme-layout")};\n`,
     },
     {
+      path: "app/api/admin/sections/route.ts",
+      content: `export { GET, POST } from ${from("api-sections")};\n`,
+    },
+    {
+      path: "app/api/admin/sections/[id]/route.ts",
+      content: `export { DELETE, GET, PATCH, POST, PUT } from ${from("api-section")};\n`,
+    },
+    {
       path: "app/sitemap.xml/route.ts",
       content: `export { GET } from ${from("sitemap-xml")};\n`,
     },

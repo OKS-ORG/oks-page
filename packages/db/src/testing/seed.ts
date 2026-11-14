@@ -283,6 +283,26 @@ export async function seedEverything(db: TestDb): Promise<void> {
     published_at: T,
     published_by: user,
   });
+  await ins(db, "saved_sections", {
+    id: id(61),
+    site_id: site,
+    name: "Opening hours",
+    section_group: "contact",
+    content: JSON.stringify([
+      { id: "b1", type: "paragraph", props: {}, content: null, children: [] },
+    ]),
+    draft: null,
+    created_by: user,
+    created_at: T,
+    updated_at: T,
+  });
+  await ins(db, "saved_section_versions", {
+    id: id(62),
+    section_id: id(61),
+    content: JSON.stringify([]),
+    published_at: T,
+    published_by: user,
+  });
   const ext = id(27);
   await ins(db, "extensions", {
     id: ext,

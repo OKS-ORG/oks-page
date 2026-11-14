@@ -22,8 +22,22 @@ import {
   restoreLayoutVersion,
   saveLayoutDraft,
 } from "./theme-edits.js";
+import {
+  createSavedSection,
+  deleteSavedSection,
+  detachLinks,
+  expandLinked,
+  getSavedSection,
+  linkProblems,
+  listSavedSections,
+  listSectionVersions,
+  restoreSectionVersion,
+  saveSectionDraft,
+  SECTION_HISTORY,
+  updateSavedSection,
+} from "./saved-sections.js";
 import { installTheme, useTheme } from "./theme-install.js";
-import { layoutUsage, loadActiveThemeLayouts } from "./theme-layouts.js";
+import { layoutUsage, loadActiveThemeLayouts, loadThemeLayouts } from "./theme-layouts.js";
 
 function tgz(files: Record<string, string>): Buffer {
   const parts: Buffer[] = [];
@@ -201,6 +215,7 @@ for (const { kind, open, skip } of openers) {
       expect(published).toEqual({
         ok: true,
         published: ["parts/header", "templates/index"].sort(),
+        sections: [],
       });
       expect(await states()).toMatchObject({
         "templates/index": ["owner", false, true],
@@ -223,6 +238,7 @@ for (const { kind, open, skip } of openers) {
       expect(await publishLayouts(db.runner, admin, siteId, themeId)).toEqual({
         ok: true,
         published: [],
+        sections: [],
       });
     });
 
@@ -374,6 +390,229 @@ for (const { kind, open, skip } of openers) {
       const header = await layoutUsage(db.runner, siteId, layouts, "parts/header");
       expect(header.entries).toEqual({ page: 3, post: 1 });
       expect(header.inLayouts.sort()).toEqual(["index", "single-post"]);
+    });
+
+    // ----- saved sections (spec 05, 17.6 and 17.10)
+    const linked = (id: string, props: Record<string, unknown> = {}) =>
+      block("linked-section", { id, ...props });
+    const save = async (name: string, blocks: unknown[], group = "contact") => {
+      const made = await createSavedSection(db.runner, admin, siteId, { name, group, blocks });
+      if (!made.ok) throw new Error(made.message);
+      return made.section.id;
+    };
+
+    test("a saved section belongs to the site: named, grouped, only for design managers, and kept across a theme switch (TH-71)", async () => {
+      const id = await save("Opening hours", [text("Open every day but Monday")]);
+      expect(await listSavedSections(db.runner, admin, siteId)).toMatchObject({
+        ok: true,
+        sections: [{ id, name: "Opening hours", group: "contact", hasDraft: false }],
+      });
+      expect(await listSavedSections(db.runner, editor, siteId)).toMatchObject({
+        code: "forbidden",
+      });
+      expect(
+        await createSavedSection(db.runner, editor, siteId, { name: "X", blocks: [text("x")] }),
+      ).toMatchObject({ code: "forbidden" });
+      expect(await saveSectionDraft(db.runner, editor, siteId, id, [text("x")])).toMatchObject({
+        code: "forbidden",
+      });
+      // Names: required, short, new (whatever the case); a section is never empty.
+      for (const [name, blocks, message] of [
+        ["  ", [text("x")], /a name of 1 to 80/],
+        ["x".repeat(81), [text("x")], /a name of 1 to 80/],
+        ["opening HOURS", [text("x")], /already a saved section called "opening HOURS"/],
+        ["Empty", [], /at least one block/],
+      ] as const)
+        expect(
+          await createSavedSection(db.runner, admin, siteId, { name, blocks: [...blocks] }),
+        ).toMatchObject({ ok: false, message: expect.stringMatching(message) });
+      expect(
+        await updateSavedSection(db.runner, admin, siteId, id, {
+          name: "Hours",
+          group: "nonsense",
+        }),
+      ).toMatchObject({ ok: true, section: { name: "Hours", group: "other" } });
+
+      // A switch to another theme and back: the saved section is still there.
+      const other = await install(
+        tgz({
+          "theme.json": JSON.stringify({ key: "birch", name: "Birch", version: "1.0.0" }),
+          "templates/index.json": layout(text("birch")),
+        }),
+      );
+      await useTheme(db.runner, admin, siteId, other.id);
+      await useTheme(db.runner, admin, siteId, themeId);
+      expect(await getSavedSection(db.runner, admin, siteId, id)).toMatchObject({
+        ok: true,
+        section: { name: "Hours", published: [{ type: "paragraph" }] },
+      });
+    });
+
+    test("a copy does not follow later changes; a linked section shows the same everywhere and changes on Publish (TH-71, TH-75)", async () => {
+      const id = await save("Opening hours", [text("Open every day but Monday")]);
+      const saved = (await getSavedSection(db.runner, admin, siteId, id)) as {
+        section: { published: { id: string }[] };
+      };
+      // The index places a copy; the header links it.
+      const copy = { ...saved.section.published[0]!, id: "copy-1" };
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/index", [
+        block("part", { name: "header" }),
+        copy,
+      ]);
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "parts/header", [
+        block("site-title"),
+        linked(id),
+      ]);
+      expect(await publishLayouts(db.runner, admin, siteId, themeId)).toMatchObject({
+        ok: true,
+        sections: [],
+      });
+      const drawn = async (drafts = false) => {
+        const l = (await loadActiveThemeLayouts(db.runner, siteId, { drafts }))!;
+        return { index: words(l.templates["index"]), header: words(l.parts["header"]) };
+      };
+      expect((await drawn()).index).toContain("Open every day but Monday");
+      expect((await drawn()).header).toContain("Open every day but Monday");
+
+      // A change is a draft: not on the site until Publish; then every linked place has it, the copy does not.
+      await saveSectionDraft(db.runner, admin, siteId, id, [text("Open from Tuesday")]);
+      expect((await drawn()).header).toContain("Open every day but Monday");
+      expect((await drawn(true)).header).toContain("Open from Tuesday");
+      expect(await publishLayouts(db.runner, admin, siteId, themeId)).toEqual({
+        ok: true,
+        published: [],
+        sections: [id],
+      });
+      expect((await drawn()).header).toContain("Open from Tuesday");
+      expect((await drawn()).index).toContain("Open every day but Monday");
+      expect((await drawn()).index).not.toContain("Open from Tuesday");
+
+      // The banner's numbers: the header (with the link) is on the index and the post layout.
+      const split = (await loadThemeLayouts(db.runner, siteId, { split: true, drafts: true }))!;
+      const usage = await layoutUsage(db.runner, siteId, split, `sections/${id}`);
+      expect(usage.entries).toEqual({ page: 3, post: 1 });
+      expect(usage.inLayouts.sort()).toEqual(["index", "single-post"]);
+      // Where it is placed, for the editor and for deleting.
+      expect((await getSavedSection(db.runner, admin, siteId, id)) as unknown).toMatchObject({
+        places: [{ themeId, key: "parts/header" }],
+      });
+    });
+
+    test("a link to a section that does not exist is refused; a section cannot hold itself (TH-79)", async () => {
+      expect(
+        await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/index", [
+          linked("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        ]),
+      ).toMatchObject({ ok: false, message: expect.stringMatching(/no longer exists/) });
+      const a = await save("A", [text("a")]);
+      const b = await save("B", [text("b"), linked(a)]);
+      // Directly, and through another section.
+      expect(await saveSectionDraft(db.runner, admin, siteId, a, [linked(a)])).toMatchObject({
+        ok: false,
+        message: expect.stringMatching(/"A" contains itself/),
+      });
+      expect(await saveSectionDraft(db.runner, admin, siteId, a, [linked(b)])).toMatchObject({
+        ok: false,
+        message: expect.stringMatching(
+          /contains itself, directly or through another linked section/,
+        ),
+      });
+      // A linked section inside another is drawn inside it.
+      const sections = new Map([
+        [a, [text("a")]],
+        [b, [text("b"), linked(a)]],
+      ]);
+      expect(words(expandLinked([linked(b)], sections))).toMatch(/"b".*"a"/);
+      // Seven levels deep is too deep.
+      const chain = new Map<string, { name: string; blocks: ReturnType<typeof text>[] }>();
+      for (let i = 0; i < 8; i++)
+        chain.set(`s${i}`, {
+          name: `s${i}`,
+          blocks: i < 7 ? [linked(`s${i + 1}`)] : [text("end")],
+        });
+      expect(linkProblems(chain).join(" ")).toMatch(/"s0" links sections more than 6 levels deep/);
+    });
+
+    test("hiding set on the link is given to each block in its place, as on a copy", () => {
+      const sections = new Map([
+        ["x", [text("one"), { ...text("two"), props: { hide: ["tablet"] } }]],
+      ]);
+      const expanded = expandLinked([linked("x", { hide: ["phone"] })], sections);
+      expect(expanded.map((b) => b.props["hide"])).toEqual([["phone"], ["tablet", "phone"]]);
+      const detached = detachLinks([linked("x", { hide: ["phone"] })], "x", sections.get("x")!);
+      expect(detached.map((b) => b.props["hide"])).toEqual([["phone"], ["tablet", "phone"]]);
+      expect(detached.map((b) => b.id)).not.toContain(sections.get("x")![0]!.id);
+    });
+
+    test("deleting a linked section turns every placement into a copy first: the pages look the same (TH-78)", async () => {
+      const id = await save("Opening hours", [text("Open every day but Monday")]);
+      const holder = await save("Contact box", [text("Call us"), linked(id)]);
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "parts/header", [
+        block("site-title"),
+        linked(id, { hide: ["phone"] }),
+      ]);
+      await publishLayouts(db.runner, admin, siteId, themeId);
+      // A draft that links it too.
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/index", [
+        block("part", { name: "header" }),
+        linked(holder),
+      ]);
+      const before = (await loadActiveThemeLayouts(db.runner, siteId, { drafts: true }))!;
+      const beforePublic = (await loadActiveThemeLayouts(db.runner, siteId))!;
+
+      expect(await deleteSavedSection(db.runner, editor, siteId, id)).toMatchObject({
+        code: "forbidden",
+      });
+      const deleted = await deleteSavedSection(db.runner, admin, siteId, id);
+      expect(deleted).toMatchObject({ ok: true });
+      expect((deleted as { copied: { key: string }[] }).copied.map((p) => p.key).sort()).toEqual([
+        "parts/header",
+        `sections/${holder}`,
+      ]);
+      expect(await getSavedSection(db.runner, admin, siteId, id)).toMatchObject({
+        code: "not_found",
+      });
+      // Every page draws the same, published and draft.
+      expect(words(await loadActiveThemeLayouts(db.runner, siteId, { drafts: true }))).toBe(
+        words(before),
+      );
+      expect(words(await loadActiveThemeLayouts(db.runner, siteId))).toBe(words(beforePublic));
+      // The drafts can still be published (no link to a missing section is left behind).
+      expect(await publishLayouts(db.runner, admin, siteId, themeId)).toMatchObject({ ok: true });
+      const audit = await db.run(
+        "select action, target_id, detail from audit_log where action = 'saved_section.delete'",
+      );
+      expect(audit).toHaveLength(1);
+      const detail = audit[0]!["detail"];
+      expect(typeof detail === "string" ? detail : JSON.stringify(detail)).toContain(
+        "Opening hours",
+      );
+    });
+
+    test("history keeps the newest 20 published versions of a saved section; restoring one makes a draft", async () => {
+      // Made at the start of the history, so the versions are in the order they were published.
+      const made = await createSavedSection(
+        db.runner,
+        admin,
+        siteId,
+        { name: "Notice", blocks: [text("v0")] },
+        T.getTime(),
+      );
+      if (!made.ok) throw new Error(made.message);
+      const id = made.section.id;
+      for (let i = 1; i <= SECTION_HISTORY + 2; i++) {
+        await saveSectionDraft(db.runner, admin, siteId, id, [text(`v${i}`)]);
+        await publishLayouts(db.runner, admin, siteId, themeId, T.getTime() + i * 1000);
+      }
+      const versions = await listSectionVersions(db.runner, admin, siteId, id);
+      if (!versions.ok) throw new Error(versions.message);
+      expect(versions.versions).toHaveLength(SECTION_HISTORY);
+      const oldest = versions.versions.at(-1)!;
+      expect(await restoreSectionVersion(db.runner, admin, siteId, oldest.id)).toMatchObject({
+        ok: true,
+        section: { hasDraft: true },
+      });
+      expect(words(await getSavedSection(db.runner, admin, siteId, id))).toContain('"v3"');
     });
   });
 }

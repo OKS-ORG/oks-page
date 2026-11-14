@@ -6,6 +6,7 @@
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import type { SqlRunner } from "@oks-page/db";
 import { writeBlocks } from "@oks-page/renderer";
+import { expandLinked, LINKED_SECTION, loadSectionBlocks } from "./saved-sections.js";
 import { loadThemeVersion } from "./theme-install.js";
 import { SITE_BLOCKS } from "./theme-package.js";
 
@@ -90,7 +91,14 @@ export function pickLayout(layouts: ThemeLayouts | null, candidates: string[]): 
  * editor's preview), every content block is written on its own and every node keeps its block id, so a click on the
  * preview can say which block it was.
  */
-export function toDrawNodes(blocks: Block[], options: { split?: boolean } = {}): DrawNode[] {
+export function toDrawNodes(
+  blocks: Block[],
+  options: { split?: boolean; sections?: ReadonlyMap<string, Block[]> } = {},
+): DrawNode[] {
+  // Public pages draw a linked section as its blocks in place, exactly like a copy; the editor keeps it as one block.
+  if (!options.split && options.sections) {
+    return toDrawNodes(expandLinked(blocks, options.sections));
+  }
   const out: DrawNode[] = [];
   let run: Block[] = [];
   let runHide: Screen[] = [];
@@ -109,7 +117,23 @@ export function toDrawNodes(blocks: Block[], options: { split?: boolean } = {}):
   };
   for (const block of blocks) {
     const hide = hiddenOn(block.props);
-    if (SITE.has(block.type)) {
+    if (block.type === LINKED_SECTION) {
+      flush();
+      const id = typeof block.props["id"] === "string" ? block.props["id"] : "";
+      const inner = options.sections?.get(id);
+      out.push({
+        kind: "site",
+        type: LINKED_SECTION,
+        props: block.props,
+        children: inner
+          ? toDrawNodes(expandLinked(inner, options.sections!, [id]), {
+              split: options.split ?? false,
+            })
+          : [],
+        ...(options.split ? { id: block.id } : {}),
+        ...(hide.length > 0 ? { hide } : {}),
+      });
+    } else if (SITE.has(block.type)) {
       flush();
       out.push({
         kind: "site",
@@ -179,6 +203,7 @@ export async function loadThemeLayouts(
   const found = await loadThemeVersion(runner, siteId, themeId);
   if (!found) return null;
   const version = found.version;
+  const sections = await loadSectionBlocks(runner, siteId, { drafts: options.drafts ?? false });
   const owner = new Map<string, unknown>();
   const rows = await runner.all(
     `select "template_key", "content", "draft" from "theme_overrides" where "theme_id" = ? and "kind" = 'theme'`,
@@ -206,7 +231,7 @@ export async function loadThemeLayouts(
         ? owner.get(`${folder}/${name}`)
         : items.find((i) => i?.name === name)?.blocks;
       const checked = checkBlocks({ version: 1, blocks });
-      out[name] = toDrawNodes(checked.body.blocks, { split: options.split ?? false });
+      out[name] = toDrawNodes(checked.body.blocks, { split: options.split ?? false, sections });
     }
     return out;
   };
@@ -248,6 +273,30 @@ export function partsUsedBy(layout: DrawNode[], parts: Record<string, DrawNode[]
   return [...used];
 }
 
+/** True when the nodes draw the linked saved section, directly, inside sections, or through parts. */
+export function nodesLink(
+  nodes: DrawNode[],
+  parts: Record<string, DrawNode[]>,
+  sectionId: string,
+): boolean {
+  const walk = (list: DrawNode[], depth: number): boolean =>
+    list.some((node) => {
+      if (node.kind !== "site") return false;
+      if (node.type === LINKED_SECTION && node.props["id"] === sectionId) return true;
+      if (node.type === "section" || node.type === LINKED_SECTION)
+        return walk(node.children, depth);
+      const name = node.props["name"];
+      return (
+        node.type === "part" &&
+        typeof name === "string" &&
+        Object.hasOwn(parts, name) &&
+        depth < 6 &&
+        walk(parts[name]!, depth + 1)
+      );
+    });
+  return walk(nodes, 0);
+}
+
 /** Where a layout shows: how many published entries of each type use it, and which other kinds of page do. */
 export interface LayoutUsage {
   /** Published entries that use it, by content type ("post": 24). */
@@ -272,7 +321,14 @@ export async function layoutUsage(
   // The page layouts that count: the layout itself, or (for a part) every layout that draws the part.
   const counting = new Set<string>();
   if (folder === "templates") counting.add(name);
-  else
+  else if (folder === "sections") {
+    // A saved section: every page layout that draws it (the layouts must be loaded with `split`, which keeps links).
+    for (const [template, nodes] of Object.entries(layouts.templates))
+      if (nodesLink(nodes, layouts.parts, name)) {
+        counting.add(template);
+        usage.inLayouts.push(template);
+      }
+  } else
     for (const [template, nodes] of Object.entries(layouts.templates))
       if (partsUsedBy(nodes, layouts.parts).includes(name)) {
         counting.add(template);

@@ -30,6 +30,8 @@ export const SITE_BLOCKS = [
   "breadcrumbs",
   "part",
   "section",
+  // A saved section of the site, placed by reference (spec 05, 17.10); a theme package has none of its own.
+  "linked-section",
 ] as const;
 
 /**

@@ -6,12 +6,16 @@
 //   &page=entry:<address> | archive:<category/x> | search   the page that fills the preview
 //   &use=draft|published|theme   for the edited layout: the draft (default), the published change, or the theme's own
 //   &section=<name>          only one ready-made section of the theme, for its picture in the section library
+//   &saved=<id>              only one saved section: its picture (&picture=1), or the editor's preview of it (with
+//                            its draft unless &use=published)
 import {
   checkedDrawNodes,
   layoutCandidates,
+  loadSectionBlocks,
   loadThemeLayouts,
   loadThemeVersion,
   pickLayout,
+  toDrawNodes,
 } from "@oks-page/core";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -35,6 +39,8 @@ type Props = {
     page?: string;
     use?: string;
     section?: string;
+    saved?: string;
+    picture?: string;
   }>;
 };
 
@@ -59,6 +65,32 @@ export default async function SiteEditorPreview({ searchParams }: Props) {
   if (!member || !(await actorOf(member)).can("themes.manage")) notFound();
   const params = await searchParams;
   const themeId = one(params.theme);
+
+  // One saved section: as a picture for the library, or with ids for the editor (its draft unless asked otherwise).
+  const savedId = one(params.saved);
+  if (savedId) {
+    const picture = params.picture === "1";
+    const sections = await loadSectionBlocks(getRunner(), member.siteId, {
+      drafts: !picture && params.use !== "published",
+    });
+    const blocks = sections.get(savedId);
+    if (!blocks) notFound();
+    // Its own blocks keep their ids (a section linked inside it is one block), so a click selects them.
+    const nodes = toDrawNodes(blocks, { split: true, sections });
+    const page = { title: "Saved section", content: null, meta: null, isFront: false };
+    if (picture)
+      return (
+        <div inert>
+          <ThemedPage layout={nodes} parts={{}} page={page} />
+        </div>
+      );
+    return (
+      <>
+        <style dangerouslySetInnerHTML={{ __html: EDITOR_CSS }} />
+        <ThemedPage layout={nodes} parts={{}} page={page} editor />
+      </>
+    );
+  }
 
   // One ready-made section, drawn with the site's look; nothing in it can be focused or clicked (it is a picture).
   const sectionName = one(params.section);

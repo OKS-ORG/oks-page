@@ -762,6 +762,63 @@ export const themeOverrideVersions = pgTable(
   ],
 );
 
+// Sections the owner saved by name (spec 05, sections 17.6 and 17.10). They belong to the site, not a theme, so they
+// survive a theme switch. A layout places one as a copy, or as a `linked-section` block that stores only its id.
+export const savedSections = pgTable(
+  "saved_sections",
+  {
+    id: text("id").primaryKey().notNull(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sectionGroup: text("section_group").notNull().default("other"),
+    /** The published blocks. */
+    content: jsonb("content").notNull(),
+    /** Changes not published yet; null when there are none. */
+    draft: jsonb("draft"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_saved_sections_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_saved_sections_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    unique("uq_saved_sections_site_id_name").on(t.siteId, t.name),
+  ],
+);
+
+/** The last 20 published versions of each saved section. */
+export const savedSectionVersions = pgTable(
+  "saved_section_versions",
+  {
+    id: text("id").primaryKey().notNull(),
+    sectionId: text("section_id")
+      .notNull()
+      .references(() => savedSections.id, { onDelete: "cascade" }),
+    content: jsonb("content").notNull(),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    publishedBy: text("published_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    check("ck_saved_section_versions_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_saved_section_versions_section_id_ulid", sql`length(${t.sectionId}) = 26`),
+    index("ix_saved_section_versions_section").on(t.sectionId, t.publishedAt),
+  ],
+);
+
 export const extensions = pgTable(
   "extensions",
   {
@@ -1101,6 +1158,8 @@ export const tableNames = [
   "themes",
   "theme_overrides",
   "theme_override_versions",
+  "saved_sections",
+  "saved_section_versions",
   "extensions",
   "extension_pending_updates",
   "extension_previous_versions",

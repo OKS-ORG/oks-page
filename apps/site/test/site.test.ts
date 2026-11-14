@@ -5837,7 +5837,7 @@ describe.skipIf(!findBrowser())(
 
       // Publish: every page with the footer shows it at once.
       const published = await call(page, "POST", `${base}/layouts`, { action: "publish" });
-      expect(published.json).toEqual({ ok: true, published: ["parts/footer"] });
+      expect(published.json).toEqual({ ok: true, published: ["parts/footer"], sections: [] });
       expect(await post()).toContain("Open every day but Monday");
       expect(await (await fetch(site.base + "/")).text()).toContain("Open every day but Monday");
       const detail = (await call(page, "GET", `${base}/layout?key=parts/footer`)).json as {
@@ -6166,7 +6166,13 @@ describe.skipIf(!findBrowser())(
         [1440, true],
       ] as const) {
         await visitor.setViewportSize({ width, height: 800 });
-        expect(await visitor.getByText("Welcome to Birch").isVisible(), `${width} px`).toBe(shown);
+        // The page lays itself out again after a resize; wait for that before judging.
+        await expect
+          .poll(() => visitor.evaluate(() => innerWidth), { message: `${width} px` })
+          .toBe(width);
+        await expect
+          .poll(() => visitor.getByText("Welcome to Birch").isVisible(), { message: `${width} px` })
+          .toBe(shown);
         expect(await visitor.getByText("Plants for every window").isVisible(), `${width} px`).toBe(
           shown,
         );
@@ -6205,6 +6211,154 @@ describe.skipIf(!findBrowser())(
           ).toBe(!m.includes(screenOf(width)));
       }
       await visitor.close();
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
+    });
+
+    test("saved sections: save one, place it linked in two places, change it once for both, detach one, and delete it with copies (TH-75 to TH-78)", async () => {
+      const page = await signedIn(owner);
+      const themes = (await call(page, "GET", "/api/admin/themes")).json as {
+        themes: { id: string; key: string }[];
+      };
+      const birch = themes.themes.find((t) => t.key === "birch")!;
+      await call(page, "POST", `/api/admin/themes/${birch.id}`, { action: "use" });
+      const home = async () => (await fetch(site.base + "/")).text();
+      // Counted in the page itself, not in the data Next.js adds for the browser in scripts.
+      const times = (html: string, text: string) =>
+        html.replace(/<script[\s\S]*?<\/script>/g, "").split(text).length - 1;
+      expect(times(await home(), "Welcome to Birch")).toBe(1);
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(site.base + "/admin/settings/site-editor");
+      const tools = page.getByRole("complementary", { name: "Tools" });
+      const outline = page.getByRole("region", { name: /^Outline of/ });
+      const publish = async (text: string) => {
+        await page.getByRole("button", { name: /^Publish changes \(\d+\)$/ }).click();
+        await page.getByText(text).waitFor();
+      };
+
+      // Save the welcome group as a section and link this place to it.
+      await outline.getByRole("button", { name: 'Group "welcome" (hidden on phone)' }).click();
+      await tools.getByRole("button", { name: "Save as a section" }).click();
+      await tools.getByLabel("Name").fill("Welcome box");
+      await tools.getByLabel("Group").selectOption("hero");
+      await tools.getByLabel("Link this place to the saved section").check();
+      await tools.getByRole("button", { name: "Save the section" }).click();
+      await page
+        .getByText(
+          'Saved as "Welcome box". It is in the library under My sections, and this place is linked to it.',
+        )
+        .waitFor();
+      await tools.getByRole("heading", { name: "Selected: Linked section: Welcome box" }).waitFor();
+      await tools.getByText(/^Linked section · /).waitFor();
+      await page.getByText("Draft kept").waitFor();
+      await publish("Published 1 layout. Your site shows the changes now.");
+      let html = await home();
+      expect(times(html, "Welcome to Birch")).toBe(1);
+      // The same HTML as a copy: the hiding of the group still applies.
+      expect(html).toContain('class="oks-hide oks-hide-phone"');
+
+      // My sections in the library: place it a second time, linked.
+      await page
+        .getByRole("navigation", { name: "Layouts" })
+        .getByRole("button", { name: /^Welcome box/ })
+        .waitFor();
+      await tools.getByRole("button", { name: "Add a ready-made section" }).click();
+      const library = page.getByRole("dialog", { name: "Ready-made sections" });
+      await library.getByLabel("My sections (1)").check();
+      await page
+        .frameLocator('iframe[title="Picture of Welcome box"]')
+        .getByText("Welcome to Birch")
+        .waitFor();
+      await library.getByText("Copy: change it here only").waitFor();
+      await library.getByText("Linked: the same everywhere").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await library.getByRole("button", { name: "Linked Welcome box" }).click();
+      await page
+        .getByText(
+          'Placed "Welcome box" as a linked section: it is the same everywhere it is linked.',
+        )
+        .waitFor();
+      await page.getByText("Draft kept").waitFor();
+      await publish("Published 1 layout. Your site shows the changes now.");
+      html = await home();
+      expect(times(html, "Welcome to Birch")).toBe(2);
+      expect(times(html, "Plants for every window")).toBe(2);
+
+      // Change it once: open it, delete its text; a draft until Publish, then both places change.
+      await outline.getByRole("button", { name: "Linked section: Welcome box" }).first().click();
+      await tools.getByRole("button", { name: "Edit the linked section" }).click();
+      await page
+        .getByText(/Changes here show on every page where "Welcome box" is linked: this changes /)
+        .waitFor();
+      const preview = page.frameLocator('iframe[title="Preview of your site with your changes"]');
+      await preview.getByText("Plants for every window").click();
+      await tools
+        .getByRole("heading", { name: "Selected: Text: Plants for every window" })
+        .waitFor();
+      await tools.getByRole("button", { name: "Delete", exact: true }).click();
+      await page.getByText("Draft kept").waitFor();
+      expect(times(await home(), "Plants for every window")).toBe(2);
+      expect(await axeViolations(page)).toEqual([]);
+      await publish("Published 1 saved section. Your site shows the changes now.");
+      html = await home();
+      expect(times(html, "Plants for every window")).toBe(0);
+      expect(times(html, "Welcome to Birch")).toBe(2);
+
+      // Only design managers: the server refuses an editor, not only the screen (TH-77).
+      const list = (await call(page, "GET", "/api/admin/sections")).json as {
+        sections: { id: string; name: string; places: number }[];
+      };
+      const welcome = list.sections.find((x) => x.name === "Welcome box")!;
+      expect(welcome.places).toBe(1);
+      const editor = await signedIn(cara);
+      expect((await call(editor, "GET", "/api/admin/sections")).status).toBe(403);
+      expect(
+        (await call(editor, "PUT", `/api/admin/sections/${welcome.id}`, { blocks: [] })).status,
+      ).toBe(403);
+      expect((await call(editor, "DELETE", `/api/admin/sections/${welcome.id}`)).status).toBe(403);
+
+      // Detach the second place: it becomes a copy there; the first stays linked (TH-76).
+      await page
+        .getByRole("navigation", { name: "Layouts" })
+        .getByRole("button", { name: /^Default/ })
+        .click();
+      await outline.getByRole("button", { name: "Linked section: Welcome box" }).last().click();
+      await tools.getByRole("button", { name: "Detach" }).click();
+      await page
+        .getByText("Detached: this place has its own copy now. Other places stay linked.")
+        .waitFor();
+      await page.getByText("Draft kept").waitFor();
+      await expect
+        .poll(() => outline.getByRole("button", { name: "Linked section: Welcome box" }).count())
+        .toBe(1);
+      await publish("Published 1 layout. Your site shows the changes now.");
+      expect(times(await home(), "Welcome to Birch")).toBe(2);
+
+      // Delete it: the places are listed, each gets a copy first, and the page is the same before and after (TH-78).
+      const body = (h: string) => h.replace(/<script[\s\S]*?<\/script>/g, "");
+      const before = body(await home());
+      await page
+        .getByRole("navigation", { name: "Layouts" })
+        .getByRole("button", { name: /^Welcome box/ })
+        .click();
+      const box = page.getByRole("region", { name: "This saved section" });
+      await box.getByRole("button", { name: "Delete this section" }).click();
+      await box.getByText("Default (used when no other layout fits)").waitFor();
+      await box
+        .getByRole("button", { name: "Keep it on these pages as copies, then delete" })
+        .click();
+      await page
+        .getByText('"Welcome box" is deleted. Every place that linked it has a copy now.')
+        .waitFor();
+      expect(body(await home())).toBe(before);
+      expect(
+        ((await call(page, "GET", "/api/admin/sections")).json as { sections: unknown[] }).sections,
+      ).toEqual([]);
+      const audit = await db.run(
+        "select action from audit_log where action = 'saved_section.delete'",
+      );
+      expect(audit).toHaveLength(1);
 
       await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });

@@ -3,7 +3,15 @@
 // real site with the changes, where a click selects a block. On the right: what can be done with the selected block.
 // Every change is kept as a draft on the server a moment after it is made; Publish shows all changed layouts at once.
 import { EntryEditor } from "@oks-page/admin";
-import type { LayoutDetail, LayoutInfo, LayoutUsage, LayoutVersion } from "@oks-page/core";
+import type {
+  LayoutDetail,
+  LayoutInfo,
+  LayoutUsage,
+  LayoutVersion,
+  SavedSectionDetail,
+  SavedSectionInfo,
+  SectionPlace,
+} from "@oks-page/core";
 import { Alert, Button, Modal } from "oks-ui";
 import type { Block } from "oks-ui";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -46,7 +54,25 @@ interface Props {
   parts: string[];
   /** The theme's ready-made sections, in library order, which are added as copies. */
   sections: { name: string; title: string; blocks: unknown[]; group: string }[];
+  /** The site's saved sections ("My sections"), with how many places link to each. */
+  initialSaved: SavedSection[];
+  /** The groups a saved section can be in, with their names. */
+  sectionGroups: { value: string; label: string }[];
 }
+
+export type SavedSection = SavedSectionInfo & { places: number };
+const SECTION_KEY = "sections/";
+const LINKED = "linked-section";
+
+/** "Published 2 layouts and 1 saved section." */
+function publishedWords(layouts: number, sections: number): string {
+  const l = `${layouts} ${layouts === 1 ? "layout" : "layouts"}`;
+  const s = `${sections} saved ${sections === 1 ? "section" : "sections"}`;
+  const what = layouts > 0 && sections > 0 ? `${l} and ${s}` : sections > 0 ? s : l;
+  return `Published ${what}. Your site shows the changes now.`;
+}
+const placesWords = (n: number) =>
+  n === 0 ? "not linked anywhere yet" : n === 1 ? "linked in 1 place" : `linked in ${n} places`;
 
 /** The preview sizes, each drawn at its real width and scaled down to fit (spec 06, section 4.1 breakpoints). */
 const PREVIEW_SIZES = [
@@ -192,6 +218,10 @@ function usageWords(key: string, title: string, usage: LayoutUsage | null): stri
   if (usage.search) parts.push("the search page");
   const where =
     parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : (parts[0] ?? "");
+  if (key.startsWith(SECTION_KEY))
+    return parts.length > 0
+      ? `Changes here show on every page where "${title}" is linked: this changes ${where}.`
+      : `"${title}" is not linked on any published page yet.`;
   if (key.startsWith("parts/"))
     return parts.length > 0
       ? `The ${title} shows on every page that uses it: this changes ${where}.`
@@ -201,8 +231,24 @@ function usageWords(key: string, title: string, usage: LayoutUsage | null): stri
     : `You are changing the ${title} layout. No published page uses it yet.`;
 }
 
-export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, sections }: Props) {
+export function SiteEditor({
+  themeId,
+  themeName,
+  initialLayouts,
+  pages,
+  parts,
+  sections,
+  initialSaved,
+  sectionGroups,
+}: Props) {
   const [layouts, setLayouts] = useState(initialLayouts);
+  const [saved, setSaved] = useState(initialSaved);
+  const [savedPlaces, setSavedPlaces] = useState<SectionPlace[]>([]);
+  const [saving2, setSaving2] = useState<{ name: string; group: string; link: boolean } | null>(
+    null,
+  );
+  const [renaming, setRenaming] = useState<{ name: string; group: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [openKey, setOpenKey] = useState(initialLayouts[0]!.key);
   const [detail, setDetail] = useState<LayoutDetail | null>(null);
   const [versions, setVersions] = useState<LayoutVersion[]>([]);
@@ -228,19 +274,71 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
   const frame = useRef<HTMLIFrameElement>(null);
   const holder = useRef<HTMLDivElement>(null);
   const base = `/api/admin/themes/${encodeURIComponent(themeId)}`;
-  const open = layouts.find((l) => l.key === openKey) ?? layouts[0]!;
-  const title = layoutTitle(open.key, open.title);
-  const drafts = layouts.filter((l) => l.hasDraft).length;
+  // A saved section is opened like a layout, with the key "sections/<id>".
+  const isSection = openKey.startsWith(SECTION_KEY);
+  const savedId = isSection ? openKey.slice(SECTION_KEY.length) : "";
+  const savedOpen = isSection ? (saved.find((s) => s.id === savedId) ?? null) : null;
+  const open: Pick<LayoutInfo, "key" | "title" | "hasDraft" | "state" | "inTheme"> = savedOpen
+    ? {
+        key: openKey,
+        title: savedOpen.name,
+        hasDraft: savedOpen.hasDraft,
+        state: "owner",
+        inTheme: false,
+      }
+    : (layouts.find((l) => l.key === openKey) ?? layouts[0]!);
+  const title = savedOpen ? savedOpen.name : layoutTitle(open.key, open.title);
+  const drafts = layouts.filter((l) => l.hasDraft).length + saved.filter((s) => s.hasDraft).length;
+  const sectionUrl = (id: string) => `/api/admin/sections/${encodeURIComponent(id)}`;
+  const savedName = (id: unknown) =>
+    saved.find((s) => s.id === id)?.name ?? "a section that no longer exists";
+  /** The outline's and the tools' name of a block; a linked section is named after its saved section. */
+  const labelOf = (b: LayoutBlock) =>
+    b.type === LINKED ? `Linked section: ${savedName(b.props["id"])}` : blockLabel(b);
 
   const refreshList = useCallback(async () => {
-    const response = await fetch(`${base}/layouts`);
+    const [response, savedResponse] = await Promise.all([
+      fetch(`${base}/layouts`),
+      fetch("/api/admin/sections"),
+    ]);
     const body = (await response.json().catch(() => null)) as { layouts?: LayoutInfo[] } | null;
     if (response.ok && body?.layouts) setLayouts(body.layouts);
+    const list = (await savedResponse.json().catch(() => null)) as {
+      sections?: SavedSection[];
+    } | null;
+    if (savedResponse.ok && list?.sections) setSaved(list.sections);
   }, [base]);
 
   // Opens a layout. With `keepBlocks` (after Publish, which does not change the blocks) the work and its undo steps stay.
   const load = useCallback(
     async (key: string, keepBlocks = false) => {
+      setRenaming(null);
+      setDeleting(false);
+      setSaving2(null);
+      if (key.startsWith(SECTION_KEY)) {
+        const response = await fetch(sectionUrl(key.slice(SECTION_KEY.length)));
+        const body = (await response.json().catch(() => null)) as {
+          section?: SavedSectionDetail;
+          places?: SectionPlace[];
+          versions?: LayoutVersion[];
+          usage?: LayoutUsage | null;
+        } | null;
+        if (!response.ok || !body?.section) {
+          setProblem(failure(body, "The saved section could not be opened."));
+          return;
+        }
+        setDetail(null);
+        setSavedPlaces(body.places ?? []);
+        setVersions(body.versions ?? []);
+        setUsage(body.usage ?? null);
+        if (keepBlocks) return;
+        setBlocks((body.section.draft ?? body.section.published) as LayoutBlock[]);
+        setUndo([]);
+        setRedo([]);
+        setSelected(null);
+        setComparing(false);
+        return;
+      }
       const response = await fetch(`${base}/layout?key=${encodeURIComponent(key)}`);
       const body = (await response.json().catch(() => null)) as {
         layout?: LayoutDetail;
@@ -289,11 +387,16 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
     const timer = setTimeout(() => {
       void (async () => {
         setSaving("saving");
-        const response = await fetch(`${base}/layout`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ key: openKey, blocks: pending }),
-        });
+        const response = await fetch(
+          openKey.startsWith(SECTION_KEY)
+            ? sectionUrl(openKey.slice(SECTION_KEY.length))
+            : `${base}/layout`,
+          {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ key: openKey, blocks: pending }),
+          },
+        );
         const body: unknown = await response.json().catch(() => null);
         if (!response.ok) {
           setSaving("error");
@@ -361,6 +464,10 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
 
   // The preview: a click selects the nearest block of the open layout; links do not navigate.
   const previewUrl = (use: string) =>
+    isSection
+      ? `/admin/site-editor/preview?saved=${encodeURIComponent(savedId)}&use=${use}&v=${token}`
+      : layoutPreviewUrl(use);
+  const layoutPreviewUrl = (use: string) =>
     `/admin/site-editor/preview?theme=${encodeURIComponent(themeId)}&layout=${encodeURIComponent(openKey)}&page=${encodeURIComponent(page)}&use=${use}&v=${token}`;
   const ids = allIds(blocks);
   const idsRef = useRef(ids);
@@ -403,6 +510,98 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
     setNote(`Added a copy of "${ready!.title}". Change it as you like.`);
   }
 
+  /** The published blocks of a saved section, as fresh copies with new ids (and the hiding of the place, if any). */
+  async function copiesOfSaved(id: string, hide: unknown = undefined): Promise<LayoutBlock[]> {
+    const response = await fetch(sectionUrl(id));
+    const body = (await response.json().catch(() => null)) as {
+      section?: SavedSectionDetail;
+    } | null;
+    if (!response.ok || !body?.section)
+      throw new Error(failure(body, "The saved section could not be read."));
+    const taken = usedIds(blocks);
+    return (body.section.published as LayoutBlock[]).map((b) => {
+      const copy = copyWithNewIds(b, taken);
+      if (!Array.isArray(hide) || hide.length === 0) return copy;
+      const own = Array.isArray(copy.props["hide"]) ? (copy.props["hide"] as unknown[]) : [];
+      return { ...copy, props: { ...copy.props, hide: [...new Set([...own, ...hide])] } };
+    });
+  }
+
+  async function placeSaved(id: string, how: "copy" | "linked") {
+    setLibrary(false);
+    const name = savedName(id);
+    try {
+      const added =
+        how === "linked"
+          ? [
+              {
+                id: newBlockId(usedIds(blocks)),
+                type: LINKED,
+                props: { id },
+                content: null,
+                children: [],
+              },
+            ]
+          : await copiesOfSaved(id);
+      if (added.length === 0) return;
+      change(insertBlocks(blocks, selected, added));
+      setSelected(added[0]!.id);
+      setNote(
+        how === "linked"
+          ? `Placed "${name}" as a linked section: it is the same everywhere it is linked.`
+          : `Added a copy of "${name}". Change it as you like; the saved section stays as it is.`,
+      );
+    } catch (error) {
+      setProblem((error as Error).message);
+    }
+  }
+
+  async function detach(block: LayoutBlock) {
+    try {
+      const copies = await copiesOfSaved(String(block.props["id"] ?? ""), block.props["hide"]);
+      change(replaceBlock(blocks, block.id, copies));
+      setSelected(copies[0]?.id ?? null);
+      setNote("Detached: this place has its own copy now. Other places stay linked.");
+    } catch (error) {
+      setProblem((error as Error).message);
+    }
+  }
+
+  async function saveAsSection(
+    block: LayoutBlock,
+    form: { name: string; group: string; link: boolean },
+  ) {
+    setProblem(null);
+    const response = await fetch("/api/admin/sections", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: form.name, group: form.group, blocks: [block] }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      section?: SavedSectionInfo;
+    } | null;
+    if (!response.ok || !body?.section) {
+      setProblem(failure(body, "The section could not be saved."));
+      return;
+    }
+    setSaving2(null);
+    if (form.link) {
+      const linkedBlock = {
+        id: newBlockId(usedIds(blocks)),
+        type: LINKED,
+        props: { id: body.section.id },
+        content: null,
+        children: [],
+      };
+      change(replaceBlock(blocks, block.id, [linkedBlock]));
+      setSelected(linkedBlock.id);
+    }
+    await refreshList();
+    setNote(
+      `Saved as "${body.section.name}". It is in the library under My sections${form.link ? ", and this place is linked to it" : ""}.`,
+    );
+  }
+
   function addBlock() {
     const taken = usedIds(blocks);
     let added: LayoutBlock[];
@@ -438,7 +637,7 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
             aria-pressed={b.id === selected}
             onClick={() => setSelected(b.id)}
           >
-            {blockLabel(b)}
+            {labelOf(b)}
             {hiddenWords(b) ? <small>{` (${hiddenWords(b)})`}</small> : null}
           </button>
           {b.children.length > 0 ? outline(b.children, depth + 1) : null}
@@ -493,8 +692,10 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                       { action: "publish" },
                       "It could not be published.",
                     );
-                    const count = (answer["published"] as string[] | undefined)?.length ?? 0;
-                    return `Published ${count} ${count === 1 ? "layout" : "layouts"}. Your site shows the changes now.`;
+                    return publishedWords(
+                      (answer["published"] as string[] | undefined)?.length ?? 0,
+                      (answer["sections"] as string[] | undefined)?.length ?? 0,
+                    );
                   }, true)
                 }
               >
@@ -532,10 +733,41 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                 </div>
               ) : null,
             )}
+            {saved.length > 0 ? (
+              <div>
+                <h2 style={{ fontSize: "1rem" }}>My sections</h2>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {saved.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className="oks-layout-item"
+                        aria-current={openKey === `${SECTION_KEY}${s.id}`}
+                        onClick={() => {
+                          if (pending) return;
+                          setOpenKey(`${SECTION_KEY}${s.id}`);
+                        }}
+                      >
+                        {s.name}
+                        <br />
+                        <small>
+                          {placesWords(s.places)}
+                          {s.hasDraft ? " · draft" : ""}
+                        </small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </nav>
           <section aria-label={`Outline of ${title}`}>
             <h2 style={{ fontSize: "1rem" }}>{`Outline of ${title}`}</h2>
-            {blocks.length === 0 ? <p>This layout is empty.</p> : outline(blocks, 0)}
+            {blocks.length === 0 ? (
+              <p>{isSection ? "This section is empty." : "This layout is empty."}</p>
+            ) : (
+              outline(blocks, 0)
+            )}
           </section>
         </div>
 
@@ -668,7 +900,12 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
           </p>
           {chosen ? (
             <section aria-label="Selected block">
-              <h2 style={{ fontSize: "1rem" }}>{`Selected: ${blockLabel(chosen)}`}</h2>
+              <h2 style={{ fontSize: "1rem" }}>{`Selected: ${labelOf(chosen)}`}</h2>
+              {chosen.type === LINKED ? (
+                <p className="oks-linked-badge">
+                  {`Linked section · ${placesWords(saved.find((s) => s.id === chosen.props["id"])?.places ?? 0)}. It is the same everywhere; change it once with "Edit the linked section".`}
+                </p>
+              ) : null}
               <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 <Button onPress={() => change(moveBlock(blocks, chosen.id, -1))}>Move up</Button>
                 <Button onPress={() => change(moveBlock(blocks, chosen.id, 1))}>Move down</Button>
@@ -696,6 +933,74 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                   <Button onPress={() => setEditingText(chosen)}>Edit the text</Button>
                 </p>
               ) : null}
+              {chosen.type === LINKED ? (
+                <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <Button
+                    isDisabled={pending !== null || !saved.some((s) => s.id === chosen.props["id"])}
+                    onPress={() => setOpenKey(`${SECTION_KEY}${String(chosen.props["id"])}`)}
+                  >
+                    Edit the linked section
+                  </Button>
+                  <Button onPress={() => void detach(chosen)}>Detach</Button>
+                </p>
+              ) : saving2 ? (
+                <fieldset style={{ border: "1px solid currentColor", padding: "0.5rem" }}>
+                  <legend>Save as a section</legend>
+                  <p>
+                    <label htmlFor="se-save-name">Name</label>
+                    <br />
+                    <input
+                      id="se-save-name"
+                      value={saving2.name}
+                      maxLength={80}
+                      onChange={(e) => setSaving2({ ...saving2, name: e.target.value })}
+                      style={{ minBlockSize: "32px", inlineSize: "100%" }}
+                    />
+                  </p>
+                  <p>
+                    <label htmlFor="se-save-group">Group</label>
+                    <br />
+                    <select
+                      id="se-save-group"
+                      value={saving2.group}
+                      onChange={(e) => setSaving2({ ...saving2, group: e.target.value })}
+                      style={{ minBlockSize: "32px" }}
+                    >
+                      {sectionGroups.map((g) => (
+                        <option key={g.value} value={g.value}>
+                          {g.label}
+                        </option>
+                      ))}
+                    </select>
+                  </p>
+                  <p>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={saving2.link}
+                        onChange={(e) => setSaving2({ ...saving2, link: e.target.checked })}
+                      />{" "}
+                      Link this place to the saved section
+                    </label>
+                  </p>
+                  <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <Button
+                      color="primary"
+                      isDisabled={saving2.name.trim() === "" || pending !== null}
+                      onPress={() => void saveAsSection(chosen, saving2)}
+                    >
+                      Save the section
+                    </Button>
+                    <Button onPress={() => setSaving2(null)}>Cancel</Button>
+                  </p>
+                </fieldset>
+              ) : (
+                <p>
+                  <Button onPress={() => setSaving2({ name: "", group: "other", link: false })}>
+                    Save as a section
+                  </Button>
+                </p>
+              )}
               {chosen.type === "menu" ? (
                 <p>
                   <label htmlFor="se-menu-place">Which menu</label>
@@ -836,22 +1141,162 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
               </select>{" "}
               <Button onPress={addBlock}>Add</Button>
             </p>
-            {sections.length > 0 ? (
+            {sections.length > 0 || saved.length > 0 ? (
               <p>
                 <Button onPress={() => setLibrary(true)}>Add a ready-made section</Button>
               </p>
             ) : null}
           </section>
 
-          <section aria-label="This layout">
-            <h2 style={{ fontSize: "1rem" }}>This layout</h2>
+          {isSection && savedOpen ? (
+            <section aria-label="This saved section">
+              <h2 style={{ fontSize: "1rem" }}>This saved section</h2>
+              <p>
+                {`"${savedOpen.name}" is ${placesWords(savedPlaces.length)}. Changes stay a draft until you publish; then every place shows them.`}
+              </p>
+              {renaming ? (
+                <fieldset style={{ border: "1px solid currentColor", padding: "0.5rem" }}>
+                  <legend>Name and group</legend>
+                  <p>
+                    <label htmlFor="se-rename">Name</label>
+                    <br />
+                    <input
+                      id="se-rename"
+                      value={renaming.name}
+                      maxLength={80}
+                      onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                      style={{ minBlockSize: "32px", inlineSize: "100%" }}
+                    />
+                  </p>
+                  <p>
+                    <label htmlFor="se-regroup">Group</label>
+                    <br />
+                    <select
+                      id="se-regroup"
+                      value={renaming.group}
+                      onChange={(e) => setRenaming({ ...renaming, group: e.target.value })}
+                      style={{ minBlockSize: "32px" }}
+                    >
+                      {sectionGroups.map((g) => (
+                        <option key={g.value} value={g.value}>
+                          {g.label}
+                        </option>
+                      ))}
+                    </select>
+                  </p>
+                  <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <Button
+                      color="primary"
+                      onPress={() =>
+                        void run(async () => {
+                          const response = await fetch(sectionUrl(savedId), {
+                            method: "PATCH",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify(renaming),
+                          });
+                          if (!response.ok)
+                            throw new Error(
+                              failure(
+                                await response.json().catch(() => null),
+                                "It could not be renamed.",
+                              ),
+                            );
+                          setRenaming(null);
+                          return "The name and group are saved.";
+                        }, true)
+                      }
+                    >
+                      Save the name
+                    </Button>
+                    <Button onPress={() => setRenaming(null)}>Cancel</Button>
+                  </p>
+                </fieldset>
+              ) : deleting ? (
+                <div role="group" aria-label="Delete this section">
+                  {savedPlaces.length > 0 ? (
+                    <>
+                      <p>
+                        It is linked in these places. Each one gets a copy first, so no page
+                        changes:
+                      </p>
+                      <ul>
+                        {savedPlaces.map((p) => (
+                          <li key={`${p.themeId}-${p.key}`}>
+                            {p.key.startsWith(SECTION_KEY)
+                              ? `Saved section: ${savedName(p.key.slice(SECTION_KEY.length))}`
+                              : p.themeId === themeId
+                                ? layoutTitle(
+                                    p.key,
+                                    layouts.find((l) => l.key === p.key)?.title ?? "",
+                                  )
+                                : `${layoutTitle(p.key, "")} (in another theme)`}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p>It is not linked anywhere, so nothing else changes.</p>
+                  )}
+                  <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <Button
+                      color="danger"
+                      isDisabled={pending !== null}
+                      onPress={() =>
+                        void (async () => {
+                          setProblem(null);
+                          const response = await fetch(sectionUrl(savedId), { method: "DELETE" });
+                          if (!response.ok) {
+                            setProblem(
+                              failure(
+                                await response.json().catch(() => null),
+                                "It could not be deleted.",
+                              ),
+                            );
+                            return;
+                          }
+                          const name = savedOpen.name;
+                          setDeleting(false);
+                          await refreshList();
+                          setOpenKey(layouts[0]!.key);
+                          setNote(
+                            `"${name}" is deleted. Every place that linked it has a copy now.`,
+                          );
+                        })()
+                      }
+                    >
+                      {savedPlaces.length > 0
+                        ? "Keep it on these pages as copies, then delete"
+                        : "Yes, delete it"}
+                    </Button>
+                    <Button onPress={() => setDeleting(false)}>Keep it</Button>
+                  </p>
+                </div>
+              ) : (
+                <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <Button
+                    onPress={() => setRenaming({ name: savedOpen.name, group: savedOpen.group })}
+                  >
+                    Rename
+                  </Button>
+                  <Button color="danger" onPress={() => setDeleting(true)}>
+                    Delete this section
+                  </Button>
+                </p>
+              )}
+            </section>
+          ) : null}
+
+          <section aria-label={isSection ? "Draft and history" : "This layout"}>
+            <h2 style={{ fontSize: "1rem" }}>{isSection ? "Draft and history" : "This layout"}</h2>
             <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
               {open.hasDraft ? (
                 <Button
                   onPress={() =>
                     void run(async () => {
                       const response = await fetch(
-                        `${base}/layout?key=${encodeURIComponent(openKey)}`,
+                        isSection
+                          ? `${sectionUrl(savedId)}?draft=1`
+                          : `${base}/layout?key=${encodeURIComponent(openKey)}`,
                         { method: "DELETE" },
                       );
                       if (!response.ok)
@@ -909,7 +1354,7 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                         onPress={() =>
                           void run(async () => {
                             await post(
-                              `${base}/layout`,
+                              isSection ? sectionUrl(savedId) : `${base}/layout`,
                               { action: "restore", versionId: v.id },
                               "It could not be restored.",
                             );
@@ -937,12 +1382,13 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
         size="xl"
       >
         <p>
-          {`Sections of ${themeName}, drawn with your site's look. Adding one puts an editable copy ${chosen ? "after the selected block" : "at the end"}.`}
+          {`Your saved sections and the sections of ${themeName}, drawn with your site's look. They go ${chosen ? "after the selected block" : "at the end"}.`}
         </p>
         <fieldset className="oks-library-groups">
           <legend>Group</legend>
           {[
-            ["all", `All (${sections.length})`],
+            ["all", `All (${sections.length + saved.length})`],
+            ...(saved.length > 0 ? [["my", `My sections (${saved.length})`]] : []),
             ...[...new Set(sections.map((s) => s.group))].map((g) => [
               g,
               `${g} (${sections.filter((s) => s.group === g).length})`,
@@ -961,7 +1407,48 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
           ))}
         </fieldset>
         <ul className="oks-library-list" aria-label="Sections">
+          {(libraryGroup === "all" || libraryGroup === "my" ? saved : [])
+            .filter((s) => !isSection || s.id !== savedId)
+            .map((s) => (
+              <li key={`saved-${s.id}`}>
+                <h3 style={{ fontSize: "1rem", margin: 0 }}>{s.name}</h3>
+                <small>{`My sections · ${placesWords(s.places)}`}</small>
+                <div className="oks-library-picture">
+                  <iframe
+                    title={`Picture of ${s.name}`}
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    loading="lazy"
+                    src={`/admin/site-editor/preview?saved=${encodeURIComponent(s.id)}&picture=1&v=${token}`}
+                    style={{
+                      inlineSize: `${PICTURE_WIDTH}px`,
+                      blockSize: `${(12 * 16) / PICTURE_SCALE}px`,
+                      transform: `scale(${PICTURE_SCALE})`,
+                    }}
+                  />
+                </div>
+                <p style={{ margin: 0 }}>
+                  <Button
+                    onPress={() => void placeSaved(s.id, "copy")}
+                    aria-label={`Copy ${s.name}`}
+                  >
+                    Copy
+                  </Button>{" "}
+                  <small>Copy: change it here only</small>
+                </p>
+                <p style={{ margin: 0 }}>
+                  <Button
+                    onPress={() => void placeSaved(s.id, "linked")}
+                    aria-label={`Linked ${s.name}`}
+                  >
+                    Linked
+                  </Button>{" "}
+                  <small>Linked: the same everywhere</small>
+                </p>
+              </li>
+            ))}
           {sections
+            .filter(() => libraryGroup !== "my")
             .filter((s) => libraryGroup === "all" || s.group === libraryGroup)
             .map((s) => (
               <li key={s.name}>

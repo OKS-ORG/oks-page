@@ -39,9 +39,9 @@ export async function POST(request: Request, context: Context) {
   if (!result.ok) return reply(result, LAYOUT_STATUS[result.code]);
   // The theme in use draws every public page, so all of them are written again at the next request.
   if (
-    result.published.length > 0 &&
+    (result.published.length > 0 || result.sections.length > 0) &&
     (await loadThemeVersion(getRunner(), member.siteId, id))?.isActive
   )
     revalidateTag("theme", { expire: 0 });
-  return NextResponse.json({ ok: true, published: result.published });
+  return NextResponse.json({ ok: true, published: result.published, sections: result.sections });
 }

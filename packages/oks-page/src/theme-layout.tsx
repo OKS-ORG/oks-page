@@ -10,7 +10,7 @@ import {
   type FeedItem,
   type PublicMenuItem,
 } from "@oks-page/core";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { LINK, LookStyles, MenuList } from "./public-frame";
 
 /** What the layout needs to know about the page it draws. */
@@ -61,6 +61,7 @@ const EMPTY_LABELS: Record<string, string> = {
   "post-featured-image": "Featured picture",
   pagination: "Page numbers",
   part: "Header or footer",
+  "linked-section": "Linked section",
 };
 
 /** The menu places and whether a list of posts is used, so the data is read once before drawing. */
@@ -73,7 +74,7 @@ function needs(nodes: DrawNode[], parts: Record<string, DrawNode[]>) {
       if (node.kind !== "site" || ++seen > MAX_EXPANDED_BLOCKS) continue;
       if (node.type === "menu") places.add(placeOf(node.props));
       if (node.type === "query-loop") posts = true;
-      if (node.type === "section") walk(node.children, depth);
+      if (node.type === "section" || node.type === "linked-section") walk(node.children, depth);
       if (node.type === "part" && depth < MAX_PART_DEPTH) {
         const name = node.props["name"];
         if (typeof name === "string" && Object.hasOwn(parts, name)) walk(parts[name]!, depth + 1);
@@ -272,6 +273,12 @@ export async function ThemedPage({
           </div>
         );
       }
+      case "linked-section":
+        // A saved section placed by reference; public pages get its blocks in place already (like a copy), so this
+        // is only reached in the site editor, where the whole section is one block to select.
+        return node.children.length > 0 ? (
+          <Fragment key={i}>{draw(node.children, depth, stack)}</Fragment>
+        ) : null;
       default:
         // Pagination and featured pictures are not drawn yet; unknown site blocks are kept as data and not drawn.
         return null;

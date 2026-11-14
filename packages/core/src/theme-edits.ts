@@ -7,6 +7,12 @@ import { createHash } from "node:crypto";
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, type SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
+import {
+  missingLinks,
+  publishSectionDrafts,
+  savedSectionIds,
+  sectionProblems,
+} from "./saved-sections.js";
 import { loadThemeVersion, type ThemeActionResult, type ThemeVersion } from "./theme-install.js";
 import { checkParts, type ThemeLayout } from "./theme-package.js";
 
@@ -246,7 +252,10 @@ export async function saveLayoutDraft(
     if (effective) changed.set(r.key, effective);
   }
   changed.set(key, checked.body.blocks);
-  const problems = checkTogether(theme.version, changed);
+  const problems = [
+    ...checkTogether(theme.version, changed),
+    ...missingLinks(key, checked.body.blocks, await savedSectionIds(runner, siteId)),
+  ];
   if (problems.length > 0) return invalid(problems.join(" "));
 
   const value = JSON.stringify(checked.body.blocks);
@@ -303,8 +312,9 @@ export async function discardLayoutDraft(
 }
 
 /**
- * Publishes every layout that has a draft, all at once (spec 05, 17.5): checked together first, so either all are
- * published or none. Each one gets a version in the history, which keeps the newest 20 of each layout.
+ * Publishes every layout that has a draft, and every saved section that has one, all at once (spec 05, 17.5 and
+ * 17.10): checked together first, so either all are published or none. Each one gets a version in the history, which
+ * keeps the newest 20 of each.
  */
 export async function publishLayouts(
   runner: SqlRunner,
@@ -312,21 +322,25 @@ export async function publishLayouts(
   siteId: string,
   themeId: string,
   now: number = Date.now(),
-): Promise<ThemeActionResult<{ published: string[] }>> {
+): Promise<ThemeActionResult<{ published: string[]; sections: string[] }>> {
   const theme = await themeFor(runner, actor, siteId, themeId);
   if (!theme.ok) return theme;
   const rows = await overridesOf(runner, themeId);
   const drafts = [...rows.values()].filter((r) => r.draft);
-  if (drafts.length === 0) return { ok: true, published: [] };
   const changed = new Map<string, Block[]>();
   for (const r of rows.values()) {
     const effective = r.draft ?? r.published;
     if (effective) changed.set(r.key, effective);
   }
-  const problems = checkTogether(theme.version, changed);
+  const existing = await savedSectionIds(runner, siteId);
+  const problems = [
+    ...checkTogether(theme.version, changed),
+    ...drafts.flatMap((r) => missingLinks(r.key, r.draft!, existing)),
+    ...(await sectionProblems(runner, siteId)),
+  ];
   if (problems.length > 0) return invalid(problems.join(" "));
 
-  await runner.transaction(async (tx) => {
+  const sections = await runner.transaction(async (tx) => {
     for (const r of drafts) {
       const themeLayout = themeLayoutOf(theme.version, r.key);
       const value = JSON.stringify(r.draft);
@@ -360,8 +374,9 @@ export async function publishLayouts(
       for (const extra of old.slice(LAYOUT_HISTORY))
         await tx.all(`delete from "theme_override_versions" where "id" = ?`, [extra["id"]]);
     }
+    return publishSectionDrafts(tx, actor, siteId, now);
   });
-  return { ok: true, published: drafts.map((r) => r.key) };
+  return { ok: true, published: drafts.map((r) => r.key), sections };
 }
 
 /** The published versions of a layout, newest first (at most 20). */

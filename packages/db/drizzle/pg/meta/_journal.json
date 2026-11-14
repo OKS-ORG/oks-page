@@ -36,6 +36,13 @@
       "when": 1794588160498,
       "tag": "0004_theme_layout_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794621990549,
+      "tag": "0005_saved_sections",
+      "breakpoints": true
     }
   ]
 }

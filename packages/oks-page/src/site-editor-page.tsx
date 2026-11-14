@@ -3,6 +3,8 @@
 import {
   isSetupDone,
   listLayouts,
+  listSavedSections,
+  sectionPlaces,
   loadThemeVersion,
   SECTION_GROUP_LABELS,
   SECTION_GROUPS,
@@ -17,7 +19,7 @@ import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { SettingsLinks } from "./settings-links";
-import { SiteEditor, type PreviewPage } from "./site-editor";
+import { SiteEditor, type PreviewPage, type SavedSection } from "./site-editor";
 
 export const metadata: Metadata = { title: "Site editor", robots: { index: false } };
 
@@ -37,6 +39,15 @@ export default async function SiteEditorPage() {
   const themeId = active[0] ? String(active[0]["id"]) : null;
   const found = themeId ? await loadThemeVersion(runner, member.siteId, themeId) : null;
   const layouts = themeId ? await listLayouts(runner, actor, member.siteId, themeId) : null;
+  const savedList = await listSavedSections(runner, actor, member.siteId);
+  const saved: SavedSection[] = savedList.ok
+    ? await Promise.all(
+        savedList.sections.map(async (s) => ({
+          ...s,
+          places: (await sectionPlaces(runner, member.siteId, s.id)).length,
+        })),
+      )
+    : [];
 
   // The pages that can fill the preview: published pages and posts, category and tag pages, and search.
   const entries = await runner.all(
@@ -82,6 +93,8 @@ export default async function SiteEditorPage() {
           themeName={found.version.name}
           initialLayouts={layouts.layouts}
           pages={pages}
+          initialSaved={saved}
+          sectionGroups={SECTION_GROUPS.map((g) => ({ value: g, label: SECTION_GROUP_LABELS[g] }))}
           parts={found.version.parts.map((p) => p.name)}
           sections={found.version.patterns
             .map((p) => ({

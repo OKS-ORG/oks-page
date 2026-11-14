@@ -211,6 +211,7 @@ describe("sqlite migrations", () => {
       "0002_extension_updates_and_rollback",
       "0003_extension_settings",
       "0004_theme_layout_changes",
+      "0005_saved_sections",
     ]);
   });
 });
@@ -346,6 +347,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0002_extension_updates_and_rollback",
       "0003_extension_settings",
       "0004_theme_layout_changes",
+      "0005_saved_sections",
     ]);
   });
 });

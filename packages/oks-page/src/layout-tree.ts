@@ -185,6 +185,7 @@ export function blockLabel(block: LayoutBlock): string {
     const name = typeof props["name"] === "string" ? props["name"] : "";
     return name === "header" ? "Header" : name === "footer" ? "Footer" : `Shared part: ${name}`;
   }
+  if (block.type === "linked-section") return "Linked section";
   if (block.type === "menu") {
     const place = typeof props["place"] === "string" ? props["place"] : "primary";
     return place === "primary"
