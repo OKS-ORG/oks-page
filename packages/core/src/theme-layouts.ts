@@ -6,12 +6,18 @@
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import type { SqlRunner } from "@oks-page/db";
 import { writeBlocks } from "@oks-page/renderer";
-import { loadActiveThemeVersion } from "./theme-install.js";
+import { loadThemeVersion } from "./theme-install.js";
 import { SITE_BLOCKS } from "./theme-package.js";
 
 export type DrawNode =
-  | { kind: "html"; html: string }
-  | { kind: "site"; type: string; props: Record<string, unknown>; children: DrawNode[] };
+  | { kind: "html"; html: string; id?: string }
+  | {
+      kind: "site";
+      type: string;
+      props: Record<string, unknown>;
+      children: DrawNode[];
+      id?: string;
+    };
 
 export interface ThemeLayouts {
   /** Layouts for whole pages, by name ("index", "single-post", "archive"...). */
@@ -63,14 +69,19 @@ export function pickLayout(layouts: ThemeLayouts | null, candidates: string[]): 
   return null;
 }
 
-/** Turns checked blocks into a draw tree: content runs become HTML, site blocks stay as nodes. */
-export function toDrawNodes(blocks: Block[]): DrawNode[] {
+/**
+ * Turns checked blocks into a draw tree: content runs become HTML, site blocks stay as nodes. With `split` (the site
+ * editor's preview), every content block is written on its own and every node keeps its block id, so a click on the
+ * preview can say which block it was.
+ */
+export function toDrawNodes(blocks: Block[], options: { split?: boolean } = {}): DrawNode[] {
   const out: DrawNode[] = [];
   let run: Block[] = [];
   const flush = () => {
     if (run.length === 0) return;
     const { html } = writeBlocks(run);
-    if (html) out.push({ kind: "html", html });
+    if (html)
+      out.push(options.split ? { kind: "html", html, id: run[0]!.id } : { kind: "html", html });
     run = [];
   };
   for (const block of blocks) {
@@ -81,44 +92,73 @@ export function toDrawNodes(blocks: Block[]): DrawNode[] {
         type: block.type,
         props: block.props,
         // Only a section holds other blocks; the children of other site blocks are not drawn.
-        children: block.type === "section" ? toDrawNodes(block.children) : [],
+        children: block.type === "section" ? toDrawNodes(block.children, options) : [],
+        ...(options.split ? { id: block.id } : {}),
       });
-    } else run.push(block);
+    } else {
+      run.push(block);
+      if (options.split) flush();
+    }
   }
   flush();
   return out;
 }
 
+const parseStored = (raw: unknown): unknown => {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return []; // damaged: drawn as an empty layout, never as raw text
+  }
+};
+
+export interface LoadLayoutsOptions {
+  /** The theme to draw; the theme in use when not given. */
+  themeId?: string;
+  /** Use the owner's unpublished changes (the site editor's preview). */
+  drafts?: boolean;
+  /** Keep a block id on every node (the site editor's preview). */
+  split?: boolean;
+  /** For one layout, draw the theme's own blocks, the published change, or the draft (the compare view). */
+  only?: { key: string; use: "theme" | "published" | "draft" };
+}
+
 /**
- * The layouts of the theme in use, ready to draw, with the owner's published changes in place of the theme's own
- * (and, with `drafts`, the owner's unpublished changes, for the site editor's preview). Null when no theme is in use or
- * it has no layouts.
+ * The layouts of a theme (the one in use unless `themeId` is given), ready to draw, with the owner's published changes
+ * in place of the theme's own (and, with `drafts`, the unpublished ones). Null when there is no such theme or it has
+ * no layouts.
  */
-export async function loadActiveThemeLayouts(
+export async function loadThemeLayouts(
   runner: SqlRunner,
   siteId: string,
-  options: { drafts?: boolean } = {},
+  options: LoadLayoutsOptions = {},
 ): Promise<ThemeLayouts | null> {
-  const version = await loadActiveThemeVersion(runner, siteId);
-  if (!version) return null;
+  let themeId = options.themeId;
+  if (!themeId) {
+    const active = await runner.all(
+      `select "id" from "themes" where "site_id" = ? and "is_active" = ? and "source" = 'runtime'`,
+      [siteId, true],
+    );
+    if (!active[0]) return null;
+    themeId = String(active[0]["id"]);
+  }
+  const found = await loadThemeVersion(runner, siteId, themeId);
+  if (!found) return null;
+  const version = found.version;
   const owner = new Map<string, unknown>();
   const rows = await runner.all(
-    `select o."template_key", o."content", o."draft" from "theme_overrides" o
-      join "themes" t on t."id" = o."theme_id"
-      where t."site_id" = ? and t."is_active" = ? and t."source" = 'runtime' and o."kind" = 'theme'`,
-    [siteId, true],
+    `select "template_key", "content", "draft" from "theme_overrides" where "theme_id" = ? and "kind" = 'theme'`,
+    [themeId],
   );
   for (const row of rows) {
-    const raw = options.drafts && row["draft"] != null ? row["draft"] : row["content"];
+    const key = String(row["template_key"]);
+    let use = options.drafts ? "draft" : "published";
+    if (options.only?.key === key) use = options.only.use;
+    if (use === "theme") continue;
+    const raw = use === "draft" && row["draft"] != null ? row["draft"] : row["content"];
     if (raw == null) continue;
-    let value: unknown = raw;
-    if (typeof raw === "string")
-      try {
-        value = JSON.parse(raw);
-      } catch {
-        value = []; // damaged: drawn as an empty layout, never as raw text
-      }
-    owner.set(String(row["template_key"]), value);
+    owner.set(key, parseStored(raw));
   }
   const build = (folder: string, list: unknown): Record<string, DrawNode[]> => {
     const out: Record<string, DrawNode[]> = {};
@@ -133,11 +173,96 @@ export async function loadActiveThemeLayouts(
         ? owner.get(`${folder}/${name}`)
         : items.find((i) => i?.name === name)?.blocks;
       const checked = checkBlocks({ version: 1, blocks });
-      out[name] = toDrawNodes(checked.body.blocks);
+      out[name] = toDrawNodes(checked.body.blocks, { split: options.split ?? false });
     }
     return out;
   };
   const templates = build("templates", version.templates);
   if (Object.keys(templates).length === 0) return null;
   return { templates, parts: build("parts", version.parts) };
+}
+
+/** The layouts of the theme in use, as the public pages draw them (see `loadThemeLayouts`). */
+export async function loadActiveThemeLayouts(
+  runner: SqlRunner,
+  siteId: string,
+  options: { drafts?: boolean } = {},
+): Promise<ThemeLayouts | null> {
+  return loadThemeLayouts(runner, siteId, options);
+}
+
+/** The parts a layout draws, directly or through other parts (at most 6 levels, as the checks allow). */
+export function partsUsedBy(layout: DrawNode[], parts: Record<string, DrawNode[]>): string[] {
+  const used = new Set<string>();
+  const walk = (nodes: DrawNode[], depth: number) => {
+    for (const node of nodes) {
+      if (node.kind !== "site") continue;
+      if (node.type === "section") walk(node.children, depth);
+      const name = node.props["name"];
+      if (
+        node.type === "part" &&
+        typeof name === "string" &&
+        Object.hasOwn(parts, name) &&
+        !used.has(name) &&
+        depth < 6
+      ) {
+        used.add(name);
+        walk(parts[name]!, depth + 1);
+      }
+    }
+  };
+  walk(layout, 0);
+  return [...used];
+}
+
+/** Where a layout shows: how many published entries of each type use it, and which other kinds of page do. */
+export interface LayoutUsage {
+  /** Published entries that use it, by content type ("post": 24). */
+  entries: Record<string, number>;
+  /** True when category and tag pages use it. */
+  archives: boolean;
+  /** True when the search page uses it. */
+  search: boolean;
+  /** For a part: the names of the page layouts that draw it. */
+  inLayouts: string[];
+}
+
+/** Works out where a layout of the theme shows, with the real number of pages and posts (spec 05, 17.5). */
+export async function layoutUsage(
+  runner: SqlRunner,
+  siteId: string,
+  layouts: ThemeLayouts,
+  key: string,
+): Promise<LayoutUsage> {
+  const usage: LayoutUsage = { entries: {}, archives: false, search: false, inLayouts: [] };
+  const [folder, name] = key.split("/") as [string, string];
+  // The page layouts that count: the layout itself, or (for a part) every layout that draws the part.
+  const counting = new Set<string>();
+  if (folder === "templates") counting.add(name);
+  else
+    for (const [template, nodes] of Object.entries(layouts.templates))
+      if (partsUsedBy(nodes, layouts.parts).includes(name)) {
+        counting.add(template);
+        usage.inLayouts.push(template);
+      }
+  const rows = await runner.all(
+    `select "slug", "type_key" from "entries" where "site_id" = ? and "status" = 'published' and "locale" = ''`,
+    [siteId],
+  );
+  for (const row of rows) {
+    const type = String(row["type_key"]);
+    const chosen = layoutCandidates({ kind: "entry", type, slug: String(row["slug"]) }).find((n) =>
+      Object.hasOwn(layouts.templates, n),
+    );
+    if (chosen && counting.has(chosen)) usage.entries[type] = (usage.entries[type] ?? 0) + 1;
+  }
+  const first = (kind: PageKind) =>
+    layoutCandidates(kind).find((n) => Object.hasOwn(layouts.templates, n));
+  for (const termKind of ["category", "tag"]) {
+    const chosen = first({ kind: "archive", termKind });
+    if (chosen && counting.has(chosen)) usage.archives = true;
+  }
+  const chosen = first({ kind: "search" });
+  if (chosen && counting.has(chosen)) usage.search = true;
+  return usage;
 }

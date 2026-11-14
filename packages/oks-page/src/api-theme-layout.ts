@@ -8,7 +8,9 @@ import {
   discardLayoutDraft,
   getLayout,
   keepMyLayout,
+  layoutUsage,
   listLayoutVersions,
+  loadThemeLayouts,
   loadThemeVersion,
   resetLayout,
   restoreLayoutVersion,
@@ -35,9 +37,13 @@ export async function GET(request: Request, context: Context) {
   const result = await getLayout(getRunner(), actor, member.siteId, id, key);
   if (!result.ok) return reply(result, LAYOUT_STATUS[result.code]);
   const versions = await listLayoutVersions(getRunner(), actor, member.siteId, id, key);
+  // Where the layout shows, with the real numbers, for the editor's banner.
+  const layouts = await loadThemeLayouts(getRunner(), member.siteId, { themeId: id, drafts: true });
+  const usage = layouts ? await layoutUsage(getRunner(), member.siteId, layouts, key) : null;
   return NextResponse.json({
     layout: result.layout,
     versions: versions.ok ? versions.versions : [],
+    usage,
   });
 }
 

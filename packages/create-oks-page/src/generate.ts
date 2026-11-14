@@ -327,6 +327,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-themes-page")};\n`,
     },
     {
+      path: "app/admin/settings/site-editor/page.tsx",
+      content: `export { default, metadata } from ${from("site-editor-page")};\n`,
+    },
+    {
+      path: "app/admin/site-editor/preview/page.tsx",
+      content: `export { default, metadata } from ${from("site-editor-preview")};\n`,
+    },
+    {
       path: "app/api/admin/themes/route.ts",
       content: `export { GET, POST } from ${from("api-themes")};\n`,
     },

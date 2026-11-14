@@ -1,0 +1,864 @@
+"use client";
+// The site editor (spec 05, section 17.5). On the left: the layouts and the outline of the open one. In the middle: the
+// real site with the changes, where a click selects a block. On the right: what can be done with the selected block.
+// Every change is kept as a draft on the server a moment after it is made; Publish shows all changed layouts at once.
+import { EntryEditor } from "@oks-page/admin";
+import type { LayoutDetail, LayoutInfo, LayoutUsage, LayoutVersion } from "@oks-page/core";
+import { Alert, Button, Modal } from "oks-ui";
+import type { Block } from "oks-ui";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  allIds,
+  blockLabel,
+  copyWithNewIds,
+  duplicateBlock,
+  findBlock,
+  insertBlocks,
+  isContentBlock,
+  layoutTitle,
+  moveBlock,
+  newBlockId,
+  removeBlock,
+  replaceBlock,
+  setProps,
+  type LayoutBlock,
+} from "./layout-tree";
+import { uploadForEditor } from "./media-client";
+import { formatWhen } from "./time-format";
+
+export interface PreviewPage {
+  value: string;
+  label: string;
+  type: string;
+  slug: string;
+}
+
+interface Props {
+  themeId: string;
+  themeName: string;
+  initialLayouts: LayoutInfo[];
+  pages: PreviewPage[];
+  /** The theme's headers, footers and other shared parts, by name. */
+  parts: string[];
+  /** The theme's ready-made sections, which are added as copies. */
+  sections: { name: string; title: string; blocks: unknown[] }[];
+}
+
+const SAVE_AFTER_MS = 700;
+const failure = (body: unknown, fallback: string): string =>
+  (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
+
+const STATE_WORDS: Record<LayoutInfo["state"], string> = {
+  theme: "The theme's",
+  owner: "Your changes",
+  "owner-outdated": "The theme changed this",
+};
+
+/** The blocks that can be added, with plain names. */
+const ADDABLE: { value: string; label: string; make: () => Omit<LayoutBlock, "id"> }[] = [
+  {
+    value: "paragraph",
+    label: "Text",
+    make: () => ({
+      type: "paragraph",
+      props: {},
+      content: [{ type: "text", text: "New text" }],
+      children: [],
+    }),
+  },
+  {
+    value: "heading",
+    label: "Heading",
+    make: () => ({
+      type: "heading",
+      props: { level: 2 },
+      content: [{ type: "text", text: "New heading" }],
+      children: [],
+    }),
+  },
+  {
+    value: "section",
+    label: "Group (holds other blocks)",
+    make: () => ({ type: "section", props: { tag: "div" }, content: null, children: [] }),
+  },
+  {
+    value: "site-title",
+    label: "Site name",
+    make: () => ({ type: "site-title", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "site-logo",
+    label: "Logo",
+    make: () => ({ type: "site-logo", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "menu",
+    label: "Menu",
+    make: () => ({ type: "menu", props: { place: "primary" }, content: null, children: [] }),
+  },
+  {
+    value: "post-title",
+    label: "Page title",
+    make: () => ({ type: "post-title", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "post-content",
+    label: "Page content",
+    make: () => ({ type: "post-content", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "post-meta",
+    label: "Date and author",
+    make: () => ({ type: "post-meta", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "query-loop",
+    label: "Latest posts",
+    make: () => ({ type: "query-loop", props: { count: 5 }, content: null, children: [] }),
+  },
+  {
+    value: "search-form",
+    label: "Search box",
+    make: () => ({ type: "search-form", props: {}, content: null, children: [] }),
+  },
+  {
+    value: "breadcrumbs",
+    label: "Breadcrumbs",
+    make: () => ({ type: "breadcrumbs", props: {}, content: null, children: [] }),
+  },
+];
+const SECTION_TAGS: [string, string][] = [
+  ["div", "Group"],
+  ["header", "Top area"],
+  ["main", "Main area"],
+  ["footer", "Bottom area"],
+  ["aside", "Side area"],
+  ["nav", "Navigation area"],
+  ["section", "Section"],
+];
+
+/** The page that best shows a layout in the preview. */
+function defaultPage(key: string, pages: PreviewPage[]): string {
+  const name = key.split("/")[1] ?? "";
+  const first = (test: (p: PreviewPage) => boolean) => pages.find(test)?.value;
+  if (key.startsWith("parts/") || name === "front-page")
+    return first((p) => p.slug === "home") ?? pages[0]!.value;
+  if (name === "search") return "search";
+  if (["archive", "category", "tag"].includes(name))
+    return first((p) => p.type === "archive") ?? pages[0]!.value;
+  if (name.startsWith("page"))
+    return first((p) => p.type === "page" && p.slug !== "home") ?? pages[0]!.value;
+  if (name.startsWith("single")) {
+    const type = name.startsWith("single-") ? name.slice(7).split("-")[0]! : "post";
+    return first((p) => p.type === type) ?? first((p) => p.type === "post") ?? pages[0]!.value;
+  }
+  return first((p) => p.type === "post") ?? first((p) => p.slug === "home") ?? pages[0]!.value;
+}
+
+/** "This changes all 24 posts and 3 pages." with the real numbers. */
+function usageWords(key: string, title: string, usage: LayoutUsage | null): string {
+  if (!usage) return "";
+  const parts: string[] = [];
+  for (const [type, n] of Object.entries(usage.entries)) {
+    const word =
+      type === "post"
+        ? n === 1
+          ? "post"
+          : "posts"
+        : type === "page"
+          ? n === 1
+            ? "page"
+            : "pages"
+          : type;
+    parts.push(`${n === 1 ? "1" : `all ${n}`} ${word}`);
+  }
+  if (usage.archives) parts.push("the category and tag pages");
+  if (usage.search) parts.push("the search page");
+  const where =
+    parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : (parts[0] ?? "");
+  if (key.startsWith("parts/"))
+    return parts.length > 0
+      ? `The ${title} shows on every page that uses it: this changes ${where}.`
+      : `The ${title} is not used by any page yet.`;
+  return parts.length > 0
+    ? `You are changing the ${title} layout. This changes ${where}.`
+    : `You are changing the ${title} layout. No published page uses it yet.`;
+}
+
+export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, sections }: Props) {
+  const [layouts, setLayouts] = useState(initialLayouts);
+  const [openKey, setOpenKey] = useState(initialLayouts[0]!.key);
+  const [detail, setDetail] = useState<LayoutDetail | null>(null);
+  const [versions, setVersions] = useState<LayoutVersion[]>([]);
+  const [usage, setUsage] = useState<LayoutUsage | null>(null);
+  const [blocks, setBlocks] = useState<LayoutBlock[]>([]);
+  const [undo, setUndo] = useState<LayoutBlock[][]>([]);
+  const [redo, setRedo] = useState<LayoutBlock[][]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [page, setPage] = useState(defaultPage(initialLayouts[0]!.key, pages));
+  const [token, setToken] = useState(0);
+  const [pending, setPending] = useState<LayoutBlock[] | null>(null);
+  const [saving, setSaving] = useState<"saved" | "saving" | "error">("saved");
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [editingText, setEditingText] = useState<LayoutBlock | null>(null);
+  const [adding, setAdding] = useState(ADDABLE[0]!.value);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const base = `/api/admin/themes/${encodeURIComponent(themeId)}`;
+  const open = layouts.find((l) => l.key === openKey) ?? layouts[0]!;
+  const title = layoutTitle(open.key, open.title);
+  const drafts = layouts.filter((l) => l.hasDraft).length;
+
+  const refreshList = useCallback(async () => {
+    const response = await fetch(`${base}/layouts`);
+    const body = (await response.json().catch(() => null)) as { layouts?: LayoutInfo[] } | null;
+    if (response.ok && body?.layouts) setLayouts(body.layouts);
+  }, [base]);
+
+  // Opens a layout. With `keepBlocks` (after Publish, which does not change the blocks) the work and its undo steps stay.
+  const load = useCallback(
+    async (key: string, keepBlocks = false) => {
+      const response = await fetch(`${base}/layout?key=${encodeURIComponent(key)}`);
+      const body = (await response.json().catch(() => null)) as {
+        layout?: LayoutDetail;
+        versions?: LayoutVersion[];
+        usage?: LayoutUsage | null;
+      } | null;
+      if (!response.ok || !body?.layout) {
+        setProblem(failure(body, "The layout could not be opened."));
+        return;
+      }
+      setDetail(body.layout);
+      setVersions(body.versions ?? []);
+      setUsage(body.usage ?? null);
+      if (keepBlocks) return;
+      setBlocks(
+        (body.layout.draft ?? body.layout.published ?? body.layout.theme ?? []) as LayoutBlock[],
+      );
+      setUndo([]);
+      setRedo([]);
+      setSelected(null);
+      setComparing(false);
+    },
+    [base],
+  );
+
+  useEffect(() => {
+    void load(openKey);
+  }, [load, openKey]);
+
+  // A change is kept as a draft a moment after the last one.
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        setSaving("saving");
+        const response = await fetch(`${base}/layout`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key: openKey, blocks: pending }),
+        });
+        const body: unknown = await response.json().catch(() => null);
+        if (!response.ok) {
+          setSaving("error");
+          setProblem(failure(body, "The change could not be kept."));
+          return;
+        }
+        setSaving("saved");
+        setProblem(null);
+        setPending(null);
+        setToken((t) => t + 1);
+        await refreshList();
+      })();
+    }, SAVE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [pending, base, openKey, refreshList]);
+
+  const change = (next: LayoutBlock[]) => {
+    setUndo((u) => [...u.slice(-49), blocks]);
+    setRedo([]);
+    setBlocks(next);
+    setPending(next);
+    setNote("");
+  };
+  const stepBack = () => {
+    const previous = undo.at(-1);
+    if (!previous) return;
+    setRedo((r) => [...r, blocks]);
+    setUndo((u) => u.slice(0, -1));
+    setBlocks(previous);
+    setPending(previous);
+  };
+  const stepForward = () => {
+    const next = redo.at(-1);
+    if (!next) return;
+    setUndo((u) => [...u, blocks]);
+    setRedo((r) => r.slice(0, -1));
+    setBlocks(next);
+    setPending(next);
+  };
+
+  async function run(work: () => Promise<string>, keepBlocks = false) {
+    setProblem(null);
+    setNote("Working…");
+    try {
+      const done = await work();
+      await refreshList();
+      await load(openKey, keepBlocks);
+      setToken((t) => t + 1);
+      setNote(done);
+    } catch (error) {
+      setNote("");
+      setProblem((error as Error).message);
+    }
+  }
+  const post = async (url: string, body: unknown, fallback: string) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const answer: unknown = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(failure(answer, fallback));
+    return answer as Record<string, unknown>;
+  };
+
+  // The preview: a click selects the nearest block of the open layout; links do not navigate.
+  const previewUrl = (use: string) =>
+    `/admin/site-editor/preview?theme=${encodeURIComponent(themeId)}&layout=${encodeURIComponent(openKey)}&page=${encodeURIComponent(page)}&use=${use}&v=${token}`;
+  const ids = allIds(blocks);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+  const onFrameLoad = () => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    doc.addEventListener("click", (event) => {
+      event.preventDefault();
+      let node = (event.target as Element | null)?.closest("[data-oks-block]") ?? null;
+      while (node && !idsRef.current.has(node.getAttribute("data-oks-block") ?? ""))
+        node = node.parentElement?.closest("[data-oks-block]") ?? null;
+      if (node) setSelected(node.getAttribute("data-oks-block"));
+    });
+    doc.addEventListener("submit", (event) => event.preventDefault());
+    markSelected();
+  };
+  const markSelected = () => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    for (const el of doc.querySelectorAll("[data-selected]")) el.removeAttribute("data-selected");
+    if (selected)
+      doc
+        .querySelector(`[data-oks-block="${CSS.escape(selected)}"]`)
+        ?.setAttribute("data-selected", "");
+  };
+  useEffect(markSelected);
+
+  const chosen = selected ? findBlock(blocks, selected) : null;
+  const usedIds = (list: LayoutBlock[]) => allIds(list);
+
+  function addBlock() {
+    const taken = usedIds(blocks);
+    let added: LayoutBlock[];
+    if (adding.startsWith("part:")) {
+      added = [
+        {
+          id: newBlockId(taken),
+          type: "part",
+          props: { name: adding.slice(5) },
+          content: null,
+          children: [],
+        },
+      ];
+    } else if (adding.startsWith("section:")) {
+      const ready = sections.find((s) => s.name === adding.slice(8));
+      added = (ready?.blocks ?? []).map((b) => copyWithNewIds(b as LayoutBlock, taken));
+    } else {
+      const kind = ADDABLE.find((a) => a.value === adding)!;
+      added = [{ id: newBlockId(taken), ...kind.make() }];
+    }
+    if (added.length === 0) return;
+    change(insertBlocks(blocks, selected, added));
+    setSelected(added[0]!.id);
+  }
+
+  const outline = (list: LayoutBlock[], depth: number): ReactNode => (
+    <ul
+      className="oks-outline"
+      style={{ listStyle: "none", paddingInlineStart: depth ? "1rem" : 0, margin: 0 }}
+    >
+      {list.map((b) => (
+        <li key={b.id}>
+          <button
+            type="button"
+            className="oks-outline-item"
+            aria-pressed={b.id === selected}
+            onClick={() => setSelected(b.id)}
+          >
+            {blockLabel(b)}
+          </button>
+          {b.children.length > 0 ? outline(b.children, depth + 1) : null}
+        </li>
+      ))}
+    </ul>
+  );
+
+  const groups: [string, LayoutInfo[]][] = [
+    ["Page layouts", layouts.filter((l) => l.kind === "template")],
+    ["Headers and footers", layouts.filter((l) => l.kind === "part")],
+  ];
+
+  return (
+    <div className="oks-site-editor">
+      <style>{`
+.oks-site-editor-narrow{display:none}
+.oks-site-editor-grid{display:grid;grid-template-columns:minmax(14rem,18rem) minmax(0,1fr) minmax(15rem,20rem);gap:1rem;align-items:start}
+.oks-site-editor-preview iframe{inline-size:100%;block-size:calc(100vh - 16rem);min-block-size:28rem;border:1px solid currentColor;background:#fff}
+.oks-site-editor-compare{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.oks-outline-item,.oks-layout-item{display:block;inline-size:100%;text-align:start;min-block-size:28px;padding:.2rem .4rem;background:none;border:1px solid transparent;color:inherit;font:inherit;cursor:pointer}
+.oks-outline-item[aria-pressed="true"],.oks-layout-item[aria-current="true"]{border-color:currentColor;font-weight:600}
+@media (max-width:1100px){.oks-site-editor-grid{grid-template-columns:minmax(13rem,16rem) minmax(0,1fr)}.oks-site-editor-tools{grid-column:1 / -1}}
+@media (max-width:767px){.oks-site-editor-grid{display:none}.oks-site-editor-narrow{display:block}}
+`}</style>
+      <p className="oks-site-editor-narrow">
+        The site editor needs a wider screen (a tablet or a computer). On a phone you can still
+        choose a theme and change the look and the menus.
+      </p>
+      <div className="oks-site-editor-grid">
+        <div className="oks-site-editor-side">
+          <nav aria-label="Layouts" className="oks-site-editor-layouts">
+            <p>
+              <strong>{themeName}</strong>
+            </p>
+            <p>
+              <Button
+                color="primary"
+                isDisabled={drafts === 0 || pending !== null}
+                onPress={() =>
+                  void run(async () => {
+                    const answer = await post(
+                      `${base}/layouts`,
+                      { action: "publish" },
+                      "It could not be published.",
+                    );
+                    const count = (answer["published"] as string[] | undefined)?.length ?? 0;
+                    return `Published ${count} ${count === 1 ? "layout" : "layouts"}. Your site shows the changes now.`;
+                  }, true)
+                }
+              >
+                {drafts > 0 ? `Publish changes (${drafts})` : "Nothing to publish"}
+              </Button>
+            </p>
+            {groups.map(([label, list]) =>
+              list.length > 0 ? (
+                <div key={label}>
+                  <h2 style={{ fontSize: "1rem" }}>{label}</h2>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {list.map((l) => (
+                      <li key={l.key}>
+                        <button
+                          type="button"
+                          className="oks-layout-item"
+                          aria-current={l.key === openKey}
+                          onClick={() => {
+                            if (pending) return;
+                            setOpenKey(l.key);
+                            setPage(defaultPage(l.key, pages));
+                          }}
+                        >
+                          {layoutTitle(l.key, l.title)}
+                          <br />
+                          <small>
+                            {STATE_WORDS[l.state]}
+                            {l.hasDraft ? " · draft" : ""}
+                            {l.inTheme ? "" : " · no longer in the theme"}
+                          </small>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null,
+            )}
+          </nav>
+          <section aria-label={`Outline of ${title}`}>
+            <h2 style={{ fontSize: "1rem" }}>{`Outline of ${title}`}</h2>
+            {blocks.length === 0 ? <p>This layout is empty.</p> : outline(blocks, 0)}
+          </section>
+        </div>
+
+        <section aria-label="Preview" className="oks-site-editor-preview">
+          <p role="note">
+            <strong>{usageWords(open.key, title, usage)}</strong> Changing a page changes only that
+            page; changing a layout changes every page that uses it.
+          </p>
+          {detail?.state === "owner-outdated" ? (
+            <Alert
+              color="warning"
+              title="The theme changed this layout since you edited it"
+              description={`Your change started from version ${detail.baseVersion || "?"}; the theme is now version ${detail.themeVersion}. Keep yours, use the new one, or compare them first.`}
+            />
+          ) : null}
+          {detail?.state === "owner-outdated" ? (
+            <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              <Button
+                onPress={() =>
+                  void run(async () => {
+                    await post(
+                      `${base}/layout`,
+                      { action: "keep-mine", key: openKey },
+                      "It could not be kept.",
+                    );
+                    return "Your layout is kept.";
+                  })
+                }
+              >
+                Keep mine
+              </Button>
+              <Button
+                onPress={() =>
+                  void run(async () => {
+                    await post(
+                      `${base}/layout`,
+                      { action: "reset", key: openKey },
+                      "The new layout could not be used.",
+                    );
+                    return "The theme's new layout is used now. Your old one is in the history.";
+                  })
+                }
+              >
+                Use the new one
+              </Button>
+              <Button onPress={() => setComparing((c) => !c)}>
+                {comparing ? "Stop comparing" : "Compare"}
+              </Button>
+            </p>
+          ) : null}
+          <p>
+            <label htmlFor="site-editor-page">Show this page in the preview</label>{" "}
+            <select
+              id="site-editor-page"
+              value={page}
+              onChange={(e) => setPage(e.target.value)}
+              style={{ minBlockSize: "32px" }}
+            >
+              {pages.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>{" "}
+            <span aria-live="polite">
+              {pending || saving === "saving"
+                ? "Keeping your change…"
+                : saving === "error"
+                  ? "Not kept"
+                  : open.hasDraft
+                    ? "Draft kept"
+                    : ""}
+            </span>
+          </p>
+          {comparing ? (
+            <div className="oks-site-editor-compare">
+              <div>
+                <h2
+                  style={{ fontSize: "1rem" }}
+                >{`The theme's new layout (version ${detail?.themeVersion ?? ""})`}</h2>
+                <iframe title="The theme's new layout" src={previewUrl("theme")} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1rem" }}>Yours</h2>
+                <iframe title="Your layout" src={previewUrl("published")} />
+              </div>
+            </div>
+          ) : (
+            <iframe
+              ref={frame}
+              title="Preview of your site with your changes"
+              src={previewUrl("draft")}
+              onLoad={onFrameLoad}
+            />
+          )}
+        </section>
+
+        <aside aria-label="Tools" className="oks-site-editor-tools">
+          <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            <Button isDisabled={undo.length === 0} onPress={stepBack}>
+              Undo
+            </Button>
+            <Button isDisabled={redo.length === 0} onPress={stepForward}>
+              Redo
+            </Button>
+          </p>
+          {chosen ? (
+            <section aria-label="Selected block">
+              <h2 style={{ fontSize: "1rem" }}>{`Selected: ${blockLabel(chosen)}`}</h2>
+              <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                <Button onPress={() => change(moveBlock(blocks, chosen.id, -1))}>Move up</Button>
+                <Button onPress={() => change(moveBlock(blocks, chosen.id, 1))}>Move down</Button>
+                <Button
+                  onPress={() => {
+                    const copied = duplicateBlock(blocks, chosen.id);
+                    change(copied.blocks);
+                    setSelected(copied.id);
+                  }}
+                >
+                  Duplicate
+                </Button>
+                <Button
+                  color="danger"
+                  onPress={() => {
+                    change(removeBlock(blocks, chosen.id));
+                    setSelected(null);
+                  }}
+                >
+                  Delete
+                </Button>
+              </p>
+              {isContentBlock(chosen) ? (
+                <p>
+                  <Button onPress={() => setEditingText(chosen)}>Edit the text</Button>
+                </p>
+              ) : null}
+              {chosen.type === "menu" ? (
+                <p>
+                  <label htmlFor="se-menu-place">Which menu</label>
+                  <br />
+                  <select
+                    id="se-menu-place"
+                    value={
+                      typeof chosen.props["place"] === "string" ? chosen.props["place"] : "primary"
+                    }
+                    onChange={(e) => change(setProps(blocks, chosen.id, { place: e.target.value }))}
+                    style={{ minBlockSize: "32px" }}
+                  >
+                    <option value="primary">Main menu</option>
+                    <option value="footer">Footer menu</option>
+                  </select>
+                </p>
+              ) : null}
+              {chosen.type === "query-loop" ? (
+                <p>
+                  <label htmlFor="se-count">How many posts (1 to 20)</label>
+                  <br />
+                  <input
+                    id="se-count"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={Number(chosen.props["count"]) || 5}
+                    onChange={(e) =>
+                      change(
+                        setProps(blocks, chosen.id, {
+                          count: Math.min(20, Math.max(1, Number(e.target.value) || 5)),
+                        }),
+                      )
+                    }
+                    style={{ minBlockSize: "32px" }}
+                  />
+                </p>
+              ) : null}
+              {chosen.type === "section" ? (
+                <p>
+                  <label htmlFor="se-section-tag">What this area is</label>
+                  <br />
+                  <select
+                    id="se-section-tag"
+                    value={typeof chosen.props["tag"] === "string" ? chosen.props["tag"] : "div"}
+                    onChange={(e) => change(setProps(blocks, chosen.id, { tag: e.target.value }))}
+                    style={{ minBlockSize: "32px" }}
+                  >
+                    {SECTION_TAGS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </p>
+              ) : null}
+              {chosen.type === "part" && parts.length > 1 ? (
+                <p>
+                  <label htmlFor="se-part">Which shared part</label>
+                  <br />
+                  <select
+                    id="se-part"
+                    value={typeof chosen.props["name"] === "string" ? chosen.props["name"] : ""}
+                    onChange={(e) => change(setProps(blocks, chosen.id, { name: e.target.value }))}
+                    style={{ minBlockSize: "32px" }}
+                  >
+                    {parts.map((name) => (
+                      <option key={name} value={name}>
+                        {layoutTitle(`parts/${name}`, name)}
+                      </option>
+                    ))}
+                  </select>
+                </p>
+              ) : null}
+            </section>
+          ) : (
+            <p>Click a part of the preview, or a line of the outline, to select it.</p>
+          )}
+
+          <section aria-label="Add a block">
+            <h2 style={{ fontSize: "1rem" }}>Add</h2>
+            <p>
+              <label htmlFor="se-add">
+                {chosen ? "Add after the selected block" : "Add at the end"}
+              </label>
+              <br />
+              <select
+                id="se-add"
+                value={adding}
+                onChange={(e) => setAdding(e.target.value)}
+                style={{ minBlockSize: "32px", maxInlineSize: "100%" }}
+              >
+                <optgroup label="Blocks">
+                  {ADDABLE.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </optgroup>
+                {parts.length > 0 ? (
+                  <optgroup label="Headers and footers">
+                    {parts.map((name) => (
+                      <option key={name} value={`part:${name}`}>
+                        {layoutTitle(`parts/${name}`, name)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {sections.length > 0 ? (
+                  <optgroup label="Ready-made sections from the theme">
+                    {sections.map((s) => (
+                      <option key={s.name} value={`section:${s.name}`}>
+                        {s.title}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+              </select>{" "}
+              <Button onPress={addBlock}>Add</Button>
+            </p>
+          </section>
+
+          <section aria-label="This layout">
+            <h2 style={{ fontSize: "1rem" }}>This layout</h2>
+            <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              {open.hasDraft ? (
+                <Button
+                  onPress={() =>
+                    void run(async () => {
+                      const response = await fetch(
+                        `${base}/layout?key=${encodeURIComponent(openKey)}`,
+                        { method: "DELETE" },
+                      );
+                      if (!response.ok)
+                        throw new Error(
+                          failure(
+                            await response.json().catch(() => null),
+                            "The draft could not be thrown away.",
+                          ),
+                        );
+                      return "The draft is thrown away.";
+                    })
+                  }
+                >
+                  Throw away the draft
+                </Button>
+              ) : null}
+              {open.state !== "theme" && open.inTheme ? (
+                resetting ? (
+                  <>
+                    <Button
+                      color="danger"
+                      onPress={() =>
+                        void run(async () => {
+                          setResetting(false);
+                          await post(
+                            `${base}/layout`,
+                            { action: "reset", key: openKey },
+                            "It could not be reset.",
+                          );
+                          return "The theme's layout is used again. Your changes are in the history.";
+                        })
+                      }
+                    >
+                      Yes, use the theme's layout
+                    </Button>
+                    <Button onPress={() => setResetting(false)}>Keep my changes</Button>
+                  </>
+                ) : (
+                  <Button onPress={() => setResetting(true)}>Reset to the theme's layout</Button>
+                )
+              ) : null}
+            </p>
+            <details>
+              <summary>{`History (${versions.length})`}</summary>
+              {versions.length === 0 ? (
+                <p>Nothing published yet.</p>
+              ) : (
+                <ol>
+                  {versions.map((v) => (
+                    <li key={v.id}>
+                      {formatWhen(new Date(v.publishedAt).toISOString(), null)}
+                      {v.publishedBy ? ` by ${v.publishedBy}` : ""}{" "}
+                      <Button
+                        size="sm"
+                        onPress={() =>
+                          void run(async () => {
+                            await post(
+                              `${base}/layout`,
+                              { action: "restore", versionId: v.id },
+                              "It could not be restored.",
+                            );
+                            return "Restored as a draft. Publish to show it on the site.";
+                          })
+                        }
+                      >
+                        Restore
+                      </Button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </details>
+          </section>
+          {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
+          <p role="status">{note}</p>
+        </aside>
+      </div>
+
+      <Modal
+        isOpen={editingText !== null}
+        onClose={() => setEditingText(null)}
+        title="Edit the text"
+      >
+        {editingText ? (
+          <EntryEditor
+            label="Text"
+            initialBlocks={[editingText] as unknown as Block[]}
+            onImageUpload={uploadForEditor}
+            onFileUpload={uploadForEditor}
+            onVideoUpload={uploadForEditor}
+            onSave={async (next) => {
+              const taken = usedIds(blocks);
+              taken.delete(editingText.id);
+              const fixed = (next as unknown as LayoutBlock[]).map((b, i) =>
+                i === 0
+                  ? { ...b, id: editingText.id }
+                  : taken.has(b.id)
+                    ? { ...b, id: newBlockId(taken) }
+                    : b,
+              );
+              change(replaceBlock(blocks, editingText.id, fixed));
+              setEditingText(null);
+              return { repairs: [] };
+            }}
+          />
+        ) : null}
+      </Modal>
+    </div>
+  );
+}

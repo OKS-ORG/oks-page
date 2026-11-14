@@ -1,6 +1,13 @@
 import type { Block } from "@oks-page/content-safety";
 import { describe, expect, test } from "vitest";
-import { layoutCandidates, pickLayout, toDrawNodes, type ThemeLayouts } from "./theme-layouts.js";
+import {
+  layoutCandidates,
+  partsUsedBy,
+  pickLayout,
+  toDrawNodes,
+  type DrawNode,
+  type ThemeLayouts,
+} from "./theme-layouts.js";
 
 const block = (
   type: string,
@@ -94,5 +101,43 @@ describe("turning a layout into a draw tree", () => {
     ]);
     const menu = nodes[3]!;
     expect(menu.kind === "site" && menu.children).toEqual([]);
+  });
+});
+
+describe("the site editor's preview and banner", () => {
+  test("split: every content block on its own, and every node keeps its block id", () => {
+    const one = paragraph("one");
+    const two = paragraph("two");
+    const title = block("post-title");
+    const nodes = toDrawNodes([one, two, block("section", {}, [title])], { split: true });
+    expect(nodes.map((n) => [n.kind, n.id])).toEqual([
+      ["html", one.id],
+      ["html", two.id],
+      ["site", nodes[2]!.id],
+    ]);
+    const section = nodes[2]!;
+    expect(section.kind === "site" && section.children[0]!.id).toBe(title.id);
+    // Without split, ids are not kept and content runs are joined.
+    expect(toDrawNodes([one, two]).map((n) => n.id)).toEqual([undefined]);
+  });
+
+  test("the parts a layout draws, through other parts, without looping", () => {
+    const part = (name: string): DrawNode => ({
+      kind: "site",
+      type: "part",
+      props: { name },
+      children: [],
+    });
+    const parts: Record<string, DrawNode[]> = {
+      header: [part("brand")],
+      brand: [part("header")],
+      footer: [],
+    };
+    const layout: DrawNode[] = [
+      part("header"),
+      { kind: "site", type: "section", props: {}, children: [part("footer")] },
+      part("missing"),
+    ];
+    expect(partsUsedBy(layout, parts).sort()).toEqual(["brand", "footer", "header"]);
   });
 });

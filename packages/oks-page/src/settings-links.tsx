@@ -3,6 +3,7 @@ const GROUPS = [
   { key: "general", label: "General", href: "/admin/settings/general" },
   { key: "look", label: "Look", href: "/admin/settings/look" },
   { key: "themes", label: "Themes", href: "/admin/settings/themes" },
+  { key: "site-editor", label: "Site editor", href: "/admin/settings/site-editor" },
   { key: "media", label: "Media", href: "/admin/settings/media" },
   { key: "security", label: "Security", href: "/admin/settings/security" },
   { key: "maintenance", label: "Maintenance", href: "/admin/settings/maintenance" },

@@ -35,6 +35,17 @@ const text = (value: unknown, most: number): string | null =>
 const placeOf = (props: Record<string, unknown>): string =>
   typeof props["place"] === "string" && NAME.test(props["place"]) ? props["place"] : "primary";
 const MENU_LABELS: Record<string, string> = { primary: "Main menu", footer: "Footer menu" };
+/** What the editor's preview shows for a block that draws nothing. */
+const EMPTY_LABELS: Record<string, string> = {
+  "site-logo": "Logo",
+  menu: "Menu",
+  "post-meta": "Date and author",
+  "query-loop": "Latest posts",
+  breadcrumbs: "Breadcrumbs",
+  "post-featured-image": "Featured picture",
+  pagination: "Page numbers",
+  part: "Header or footer",
+};
 
 /** The menu places and whether a list of posts is used, so the data is read once before drawing. */
 function needs(nodes: DrawNode[], parts: Record<string, DrawNode[]>) {
@@ -62,12 +73,18 @@ export async function ThemedPage({
   parts,
   page,
   before,
+  editor = false,
 }: {
   layout: DrawNode[];
   parts: Record<string, DrawNode[]>;
   page: ThemedPageInfo;
   /** Drawn before the layout (the preview notice). */
   before?: ReactNode;
+  /**
+   * The site editor's preview: every block is wrapped in an element that carries its id, so a click can select it, and
+   * a block that shows nothing here (no logo yet, an empty menu) shows its name instead.
+   */
+  editor?: boolean;
 }) {
   const wanted = needs(layout, parts);
   const [site, look, latest, ...menuLists] = await Promise.all([
@@ -84,141 +101,150 @@ export async function ThemedPage({
   let searchForms = 0;
   const draw = (nodes: DrawNode[], depth: number, stack: string[]): ReactNode[] =>
     nodes.map((node, i) => {
-      if (--left < 0) return null;
-      if (node.kind === "html")
-        return (
-          <div key={i} className="oks-blocks" dangerouslySetInnerHTML={{ __html: node.html }} />
+      let drawn = drawNode(node, i, depth, stack);
+      if (!editor || !node.id) return drawn;
+      if (drawn === null && node.kind === "site")
+        drawn = (
+          <p className="oks-editor-empty">{`${EMPTY_LABELS[node.type] ?? node.type} (nothing to show here)`}</p>
         );
-      const props = node.props;
-      switch (node.type) {
-        case "site-title":
-          return (
-            <p key={i} className="oks-site-title">
-              <a href="/" style={LINK}>
-                {site.siteName}
-              </a>
-            </p>
-          );
-        case "site-logo":
-          return look.logo ? (
-            <a key={i} href="/" className="oks-site-logo" style={LINK}>
-              <img
-                src={look.logo.url}
-                alt={look.logo.alt}
-                {...(look.logo.width && look.logo.height
-                  ? { width: look.logo.width, height: look.logo.height }
-                  : {})}
-                style={{ maxBlockSize: "4rem", inlineSize: "auto" }}
-              />
-            </a>
-          ) : null;
-        case "menu": {
-          const place = placeOf(props);
-          const items = menus.get(place) ?? [];
-          if (items.length === 0) return null;
-          const label = text(props["label"], 60) ?? MENU_LABELS[place] ?? `Menu: ${place}`;
-          return (
-            <nav key={i} aria-label={label} className={`oks-menu oks-menu-${place}`}>
-              <MenuList items={items} />
-            </nav>
-          );
-        }
-        case "post-title":
-          return (
-            <h1 key={i} className="oks-title">
-              {page.title}
-            </h1>
-          );
-        case "post-content":
-          return (
-            <div
-              key={i}
-              className="oks-content"
-              {...(page.pagefind ? { "data-pagefind-body": "" } : {})}
-            >
-              {page.content}
-            </div>
-          );
-        case "post-meta":
-          return page.meta ? (
-            <p key={i} className="oks-post-meta">
-              <time dateTime={day(page.meta.publishedAt)}>{day(page.meta.publishedAt)}</time>
-              {page.meta.authorName ? ` · ${page.meta.authorName}` : null}
-            </p>
-          ) : null;
-        case "query-loop": {
-          const count = Number(props["count"]);
-          const shown = latest.slice(
-            0,
-            Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5,
-          );
-          if (shown.length === 0) return null;
-          return (
-            <ul key={i} className="oks-latest-posts">
-              {shown.map((post) => (
-                <li key={post.path}>
-                  <a href={post.path}>{post.title}</a>{" "}
-                  <time dateTime={day(post.publishedAt)}>{day(post.publishedAt)}</time>
-                </li>
-              ))}
-            </ul>
-          );
-        }
-        case "search-form": {
-          const id = `oks-search-${++searchForms}`;
-          return (
-            <form key={i} role="search" action="/search" method="get" className="oks-search-form">
-              <label htmlFor={id}>Search this site</label>{" "}
-              <input id={id} type="search" name="q" maxLength={200} />{" "}
-              <button type="submit">Search</button>
-            </form>
-          );
-        }
-        case "breadcrumbs":
-          return page.isFront ? null : (
-            <nav key={i} aria-label="Breadcrumb" className="oks-breadcrumbs">
-              <ol>
-                <li>
-                  <a href="/">Home</a>
-                </li>
-                <li aria-current="page">{page.title}</li>
-              </ol>
-            </nav>
-          );
-        case "section": {
-          const tag =
-            typeof props["tag"] === "string" && SECTION_TAGS.has(props["tag"])
-              ? props["tag"]
-              : "div";
-          const name =
-            typeof props["name"] === "string" && NAME.test(props["name"]) ? props["name"] : null;
-          const Tag = tag as "div";
-          return (
-            <Tag key={i} className={name ? `oks-section oks-section-${name}` : "oks-section"}>
-              {draw(node.children, depth, stack)}
-            </Tag>
-          );
-        }
-        case "part": {
-          const name = props["name"];
-          if (
-            typeof name !== "string" ||
-            !Object.hasOwn(parts, name) ||
-            stack.includes(name) ||
-            depth >= MAX_PART_DEPTH
-          )
-            return null;
-          return (
-            <div key={i} className={`oks-part oks-part-${name}`} style={{ display: "contents" }}>
-              {draw(parts[name]!, depth + 1, [...stack, name])}
-            </div>
-          );
-        }
-        default:
-          // Pagination and featured pictures are not drawn yet; unknown site blocks are kept as data and not drawn.
-          return null;
-      }
+      return (
+        <div key={i} data-oks-block={node.id} className="oks-editor-block">
+          {drawn}
+        </div>
+      );
     });
+  const drawNode = (node: DrawNode, i: number, depth: number, stack: string[]): ReactNode => {
+    if (--left < 0) return null;
+    if (node.kind === "html")
+      return <div key={i} className="oks-blocks" dangerouslySetInnerHTML={{ __html: node.html }} />;
+    const props = node.props;
+    switch (node.type) {
+      case "site-title":
+        return (
+          <p key={i} className="oks-site-title">
+            <a href="/" style={LINK}>
+              {site.siteName}
+            </a>
+          </p>
+        );
+      case "site-logo":
+        return look.logo ? (
+          <a key={i} href="/" className="oks-site-logo" style={LINK}>
+            <img
+              src={look.logo.url}
+              alt={look.logo.alt}
+              {...(look.logo.width && look.logo.height
+                ? { width: look.logo.width, height: look.logo.height }
+                : {})}
+              style={{ maxBlockSize: "4rem", inlineSize: "auto" }}
+            />
+          </a>
+        ) : null;
+      case "menu": {
+        const place = placeOf(props);
+        const items = menus.get(place) ?? [];
+        if (items.length === 0) return null;
+        const label = text(props["label"], 60) ?? MENU_LABELS[place] ?? `Menu: ${place}`;
+        return (
+          <nav key={i} aria-label={label} className={`oks-menu oks-menu-${place}`}>
+            <MenuList items={items} />
+          </nav>
+        );
+      }
+      case "post-title":
+        return (
+          <h1 key={i} className="oks-title">
+            {page.title}
+          </h1>
+        );
+      case "post-content":
+        return (
+          <div
+            key={i}
+            className="oks-content"
+            {...(page.pagefind ? { "data-pagefind-body": "" } : {})}
+          >
+            {page.content}
+          </div>
+        );
+      case "post-meta":
+        return page.meta ? (
+          <p key={i} className="oks-post-meta">
+            <time dateTime={day(page.meta.publishedAt)}>{day(page.meta.publishedAt)}</time>
+            {page.meta.authorName ? ` · ${page.meta.authorName}` : null}
+          </p>
+        ) : null;
+      case "query-loop": {
+        const count = Number(props["count"]);
+        const shown = latest.slice(
+          0,
+          Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5,
+        );
+        if (shown.length === 0) return null;
+        return (
+          <ul key={i} className="oks-latest-posts">
+            {shown.map((post) => (
+              <li key={post.path}>
+                <a href={post.path}>{post.title}</a>{" "}
+                <time dateTime={day(post.publishedAt)}>{day(post.publishedAt)}</time>
+              </li>
+            ))}
+          </ul>
+        );
+      }
+      case "search-form": {
+        const id = `oks-search-${++searchForms}`;
+        return (
+          <form key={i} role="search" action="/search" method="get" className="oks-search-form">
+            <label htmlFor={id}>Search this site</label>{" "}
+            <input id={id} type="search" name="q" maxLength={200} />{" "}
+            <button type="submit">Search</button>
+          </form>
+        );
+      }
+      case "breadcrumbs":
+        return page.isFront ? null : (
+          <nav key={i} aria-label="Breadcrumb" className="oks-breadcrumbs">
+            <ol>
+              <li>
+                <a href="/">Home</a>
+              </li>
+              <li aria-current="page">{page.title}</li>
+            </ol>
+          </nav>
+        );
+      case "section": {
+        const tag =
+          typeof props["tag"] === "string" && SECTION_TAGS.has(props["tag"]) ? props["tag"] : "div";
+        const name =
+          typeof props["name"] === "string" && NAME.test(props["name"]) ? props["name"] : null;
+        const Tag = tag as "div";
+        return (
+          <Tag key={i} className={name ? `oks-section oks-section-${name}` : "oks-section"}>
+            {draw(node.children, depth, stack)}
+          </Tag>
+        );
+      }
+      case "part": {
+        const name = props["name"];
+        if (
+          typeof name !== "string" ||
+          !Object.hasOwn(parts, name) ||
+          stack.includes(name) ||
+          depth >= MAX_PART_DEPTH
+        )
+          return null;
+        return (
+          <div key={i} className={`oks-part oks-part-${name}`} style={{ display: "contents" }}>
+            {draw(parts[name]!, depth + 1, [...stack, name])}
+          </div>
+        );
+      }
+      default:
+        // Pagination and featured pictures are not drawn yet; unknown site blocks are kept as data and not drawn.
+        return null;
+    }
+  };
 
   return (
     <>

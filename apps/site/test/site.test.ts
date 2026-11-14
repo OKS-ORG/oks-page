@@ -5884,5 +5884,157 @@ describe.skipIf(!findBrowser())(
 
       await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });
+
+    test("the site editor: select on the live preview, change, publish, undo, add, history, and a theme update with compare and keep mine", async () => {
+      const page = await signedIn(owner);
+      const themes = (await call(page, "GET", "/api/admin/themes")).json as {
+        themes: { id: string; key: string }[];
+      };
+      const willow = themes.themes.find((t) => t.key === "willow")!;
+      await call(page, "POST", `/api/admin/themes/${willow.id}`, { action: "use" });
+      const post = async () => (await fetch(site.base + "/blog/hello-world")).text();
+      expect(await post()).toContain("Open every day but Monday");
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(site.base + "/admin/settings/site-editor");
+      await page.getByRole("heading", { name: "Site editor", level: 1 }).waitFor();
+      const layouts = page.getByRole("navigation", { name: "Layouts" });
+      for (const name of [
+        "Home",
+        "Default (used when no other layout fits)",
+        "Category and tag pages",
+        "Header",
+        "Footer",
+      ])
+        await layouts
+          .getByRole("button", { name: new RegExp(`^${name.replace(/[()]/g, "\\$&")}`) })
+          .waitFor();
+
+      // Open the footer: the banner gives the real reach; the preview shows the published footer.
+      await layouts.getByRole("button", { name: /^Footer/ }).click();
+      await page
+        .getByText(/The Footer shows on every page that uses it: this changes .*posts?/)
+        .waitFor();
+      const preview = page.frameLocator('iframe[title="Preview of your site with your changes"]');
+      await preview.getByText("Open every day but Monday").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+
+      // A click on the preview selects the block; delete it: a draft, not public until Publish.
+      await preview.getByText("Open every day but Monday").click();
+      const tools = page.getByRole("complementary", { name: "Tools" });
+      await tools
+        .getByRole("heading", { name: "Selected: Text: Open every day but Monday" })
+        .waitFor();
+      await tools.getByRole("button", { name: "Delete" }).click();
+      await page.getByText("Draft kept").waitFor();
+      expect(await post()).toContain("Open every day but Monday");
+      await expect
+        .poll(async () => await preview.getByText("Open every day but Monday").count())
+        .toBe(0);
+      await page.getByRole("button", { name: "Publish changes (1)" }).click();
+      await page.getByText("Published 1 layout. Your site shows the changes now.").waitFor();
+      expect(await post()).not.toContain("Open every day but Monday");
+
+      // Undo brings it back (as a draft); publishing shows it again.
+      await tools.getByRole("button", { name: "Undo" }).click();
+      await page.getByText("Draft kept").waitFor();
+      await page.getByRole("button", { name: "Publish changes (1)" }).click();
+      await page.getByText("Published 1 layout. Your site shows the changes now.").waitFor();
+      expect(await post()).toContain("Open every day but Monday");
+
+      // Add a search box at the end of the footer, then throw the draft away.
+      await tools
+        .getByLabel(/Add (after the selected block|at the end)/)
+        .selectOption("search-form");
+      await tools.getByRole("button", { name: "Add", exact: true }).click();
+      await tools.getByRole("heading", { name: "Selected: Search box" }).waitFor();
+      await page.getByText("Draft kept").waitFor();
+      await preview.getByRole("searchbox", { name: "Search this site" }).last().waitFor();
+      await tools.getByRole("button", { name: "Throw away the draft" }).click();
+      await page.getByText("The draft is thrown away.").waitFor();
+
+      // The text editor opens for a text block.
+      await preview.getByText("Open every day but Monday").click();
+      await tools.getByRole("button", { name: "Edit the text" }).click();
+      await page.getByRole("dialog", { name: "Edit the text" }).waitFor();
+      await page.keyboard.press("Escape");
+      await page.getByRole("dialog", { name: "Edit the text" }).waitFor({ state: "hidden" });
+
+      // History: every published version (this footer was published in the test before too); restoring one makes a draft.
+      await tools.getByText(/^History \(4\)$/).click();
+      await tools.getByRole("button", { name: "Restore" }).last().click();
+      await page.getByText("Restored as a draft. Publish to show it on the site.").waitFor();
+      await tools.getByRole("button", { name: "Throw away the draft" }).click();
+      await page.getByText("The draft is thrown away.").waitFor();
+
+      // A theme update that changes the footer: the editor says so; compare, then keep mine.
+      const block = (
+        type: string,
+        props: Record<string, unknown> = {},
+        children: unknown[] = [],
+        content: unknown = null,
+      ) => ({
+        id: `${type}-${Math.random().toString(36).slice(2, 8)}`,
+        type,
+        props,
+        content,
+        children,
+      });
+      const layoutJson = (...blocks: unknown[]) => JSON.stringify({ blocks });
+      const update = tgz({
+        "theme.json": JSON.stringify({ key: "willow", name: "Willow", version: "1.1.0" }),
+        "parts/header.json": layoutJson(block("site-title")),
+        "parts/footer.json": layoutJson(
+          block("paragraph", {}, [], [{ type: "text", text: "Willow 1.1 footer" }]),
+        ),
+        "templates/index.json": layoutJson(
+          block("part", { name: "header" }),
+          block("section", { tag: "main" }, [block("post-title"), block("post-content")]),
+          block("part", { name: "footer" }),
+        ),
+      });
+      await page.goto(site.base + "/admin/settings/themes");
+      await page
+        .getByLabel("Theme file (.tgz)")
+        .setInputFiles({ name: "willow-1.1.0.tgz", mimeType: "application/gzip", buffer: update });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Willow is now version 1.1.0. Your site uses it now.").waitFor();
+      // The owner's footer is still on the site.
+      expect(await post()).toContain("Open every day but Monday");
+
+      await page.goto(site.base + "/admin/settings/site-editor");
+      await layouts.getByRole("button", { name: /^Footer\s*The theme changed this/ }).click();
+      await page.getByText("The theme changed this layout since you edited it").waitFor();
+      await page.getByRole("button", { name: "Compare" }).click();
+      await page
+        .frameLocator('iframe[title="The theme\'s new layout"]')
+        .getByText("Willow 1.1 footer")
+        .waitFor();
+      await page
+        .frameLocator('iframe[title="Your layout"]')
+        .getByText("Open every day but Monday")
+        .waitFor();
+      await page.getByRole("button", { name: "Keep mine" }).click();
+      await page.getByText("Your layout is kept.").waitFor();
+      await layouts.getByRole("button", { name: /^Footer\s*Your changes/ }).waitFor();
+
+      // On a phone, the editor says it needs a wider screen.
+      await page.setViewportSize({ width: 390, height: 800 });
+      await page.getByText("The site editor needs a wider screen").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.setViewportSize({ width: 1280, height: 900 });
+
+      // An editor is sent away; the preview is not found for them.
+      const editor = await signedIn(cara);
+      await editor.goto(site.base + "/admin/settings/site-editor");
+      await editor.waitForURL((url) => url.pathname === "/admin");
+      // Admin pages stream, so the refusal comes with status 200; what matters is that nothing of the layout is sent.
+      await editor.goto(site.base + `/admin/site-editor/preview?theme=${willow.id}`);
+      const refused = await editor.content();
+      expect(refused).not.toContain("data-oks-block");
+      expect(refused).not.toContain("Open every day but Monday");
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
+    });
   },
 );

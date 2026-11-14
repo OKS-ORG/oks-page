@@ -23,7 +23,7 @@ import {
   saveLayoutDraft,
 } from "./theme-edits.js";
 import { installTheme, useTheme } from "./theme-install.js";
-import { loadActiveThemeLayouts } from "./theme-layouts.js";
+import { layoutUsage, loadActiveThemeLayouts } from "./theme-layouts.js";
 
 function tgz(files: Record<string, string>): Buffer {
   const parts: Buffer[] = [];
@@ -130,6 +130,8 @@ for (const { kind, open, skip } of openers) {
         {
           siteName: "Anna's Garden",
           tagline: "Plants and pots",
+          // The starter pages (Home, About, Contact) and post (Hello world), for the banner's numbers.
+          starterContent: true,
           admin: { name: "Anna", email: "anna@example.com", password: "a-long-password" },
         },
       );
@@ -360,6 +362,18 @@ for (const { kind, open, skip } of openers) {
       // It is still drawn for posts.
       const layouts = await loadActiveThemeLayouts(db.runner, siteId);
       expect(Object.keys(layouts!.templates).sort()).toEqual(["index", "single-post"]);
+    });
+
+    test("the banner's numbers: how many published pages and posts a layout or a header reaches", async () => {
+      const layouts = (await loadActiveThemeLayouts(db.runner, siteId))!;
+      // The new site has Home, About and Contact (pages) and Hello world (a post), all published.
+      const index = await layoutUsage(db.runner, siteId, layouts, "templates/index");
+      expect(index).toEqual({ entries: { page: 3 }, archives: true, search: true, inLayouts: [] });
+      const post = await layoutUsage(db.runner, siteId, layouts, "templates/single-post");
+      expect(post).toEqual({ entries: { post: 1 }, archives: false, search: false, inLayouts: [] });
+      const header = await layoutUsage(db.runner, siteId, layouts, "parts/header");
+      expect(header.entries).toEqual({ page: 3, post: 1 });
+      expect(header.inLayouts.sort()).toEqual(["index", "single-post"]);
     });
   });
 }
