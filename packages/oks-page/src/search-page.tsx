@@ -1,8 +1,9 @@
 // /search?q=...: the site's search page. Not indexed by search engines; results are never cached.
 import { getSiteMenu, getThemeLayouts } from "@data";
-import { extractOf, layoutCandidates, pickLayout, search } from "@oks-page/core";
+import { extractOf, layoutCandidates, pickLayout, recordSearch, search } from "@oks-page/core";
 import type { Metadata } from "next";
-import { connection } from "next/server";
+import { after, connection } from "next/server";
+import { getRunner, getSiteId } from "./db";
 import { PublicFrame } from "./public-frame";
 import { ThemedPage } from "./theme-layout";
 import { getSearchIndex } from "./search-index";
@@ -31,6 +32,18 @@ export default async function SearchPage({ searchParams }: Props) {
   const page = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), pages) : 1;
   const shown = result?.hits.slice((page - 1) * PER_PAGE, page * PER_PAGE) ?? [];
   const usedWords = result?.corrected ?? result?.words ?? [];
+  // The search statistics (spec 08, section 16.3): the words and whether anything was found, counted once per search
+  // (not again for the next result pages or for "search as typed"), after the page is sent.
+  if (searched && !(asked > 1) && !exact) {
+    const found = total > 0;
+    after(async () => {
+      try {
+        await recordSearch(getRunner(), await getSiteId(), q, found);
+      } catch (error) {
+        console.error("[oks] A search could not be counted:", error);
+      }
+    });
+  }
 
   const body = (
     <>

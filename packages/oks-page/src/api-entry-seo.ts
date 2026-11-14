@@ -35,6 +35,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   const result = await setEntrySeo(getRunner(), await actorOf(member), member.siteId, id, {
     ...("description" in input ? { description: input["description"] } : {}),
     ...("noindex" in input ? { noindex: input["noindex"] } : {}),
+    ...("hideFromSearch" in input ? { hideFromSearch: input["hideFromSearch"] } : {}),
   });
   if (!result.ok) return reply(result, STATUS[result.code]);
   refreshEntry(id, result.slug);

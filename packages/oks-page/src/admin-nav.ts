@@ -36,6 +36,7 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["media.upload", "media.edit_own", "media.edit_any"],
   },
   { key: "users", label: "Users", href: "/admin/users", needs: ["users.manage"] },
+  { key: "tools", label: "Tools", href: "/admin/tools/search", needs: ["settings.manage"] },
   {
     key: "settings",
     label: "Settings",

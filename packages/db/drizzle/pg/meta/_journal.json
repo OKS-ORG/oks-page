@@ -57,6 +57,13 @@
       "when": 1794638803671,
       "tag": "0007_email_texts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794672028041,
+      "tag": "0008_search_terms",
+      "breakpoints": true
     }
   ]
 }

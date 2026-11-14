@@ -8,6 +8,7 @@ import {
   loadGeneralSettings,
   publishDue,
   purgeEditingNotices,
+  purgeSearchStats,
   purgeTrash,
   queueEmail,
   runDailyDomainCheck,
@@ -76,6 +77,7 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
   if (now() - lastPurge >= PURGE_EVERY) {
     lastPurge = now();
     await purgeEditingNotices(getRunner(), now);
+    await purgeSearchStats(getRunner(), now);
     const gone = await purgeTrash(getRunner(), now);
     if (gone > 0)
       console.log(`[oks] Deleted ${gone} item(s) that had been in the trash for 30 days.`);

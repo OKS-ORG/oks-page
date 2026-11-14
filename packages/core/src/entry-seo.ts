@@ -29,13 +29,16 @@ const parseObject = (raw: unknown): Record<string, unknown> => {
     : {};
 };
 
+/** What the SEO box shows: the description, the "do not list" switch and "Hide from site search" (kept in `meta`). */
+export type EntrySeoBox = EntrySeo & { hideFromSearch: boolean };
+
 /** What the SEO box shows for an entry; only for someone who may edit it. */
 export async function loadEntrySeo(
   runner: SqlRunner,
   actor: Actor,
   siteId: string,
   id: string,
-): Promise<EntrySeoResult<{ seo: EntrySeo }>> {
+): Promise<EntrySeoResult<{ seo: EntrySeoBox }>> {
   const loaded = await loadForEdit(runner, actor, siteId, id);
   if (!loaded.ok)
     return {
@@ -43,11 +46,17 @@ export async function loadEntrySeo(
       code: loaded.code === "forbidden" ? "forbidden" : "not_found",
       message: loaded.message,
     };
-  const rows = await runner.all(`select "seo" from "entries" where "id" = ? and "site_id" = ?`, [
-    id,
-    siteId,
-  ]);
-  return { ok: true, seo: readEntrySeo(rows[0]?.["seo"]) };
+  const rows = await runner.all(
+    `select "seo", "meta" from "entries" where "id" = ? and "site_id" = ?`,
+    [id, siteId],
+  );
+  return {
+    ok: true,
+    seo: {
+      ...readEntrySeo(rows[0]?.["seo"]),
+      hideFromSearch: parseObject(rows[0]?.["meta"])["hideFromSearch"] === true,
+    },
+  };
 }
 
 /**
@@ -59,9 +68,9 @@ export async function setEntrySeo(
   actor: Actor,
   siteId: string,
   id: string,
-  input: { description?: unknown; noindex?: unknown },
+  input: { description?: unknown; noindex?: unknown; hideFromSearch?: unknown },
   now: () => number = Date.now,
-): Promise<EntrySeoResult<{ seo: EntrySeo; slug: string }>> {
+): Promise<EntrySeoResult<{ seo: EntrySeoBox; slug: string }>> {
   const loaded = await loadForEdit(runner, actor, siteId, id);
   if (!loaded.ok)
     return {
@@ -70,7 +79,7 @@ export async function setEntrySeo(
       message: loaded.message,
     };
   const rows = await runner.all(
-    `select "seo", "slug" from "entries" where "id" = ? and "site_id" = ?`,
+    `select "seo", "meta", "slug" from "entries" where "id" = ? and "site_id" = ?`,
     [id, siteId],
   );
   const stored = parseObject(rows[0]?.["seo"]);
@@ -104,16 +113,35 @@ export async function setEntrySeo(
       };
     noindex = input.noindex;
   }
+  const meta = parseObject(rows[0]?.["meta"]);
+  let hideFromSearch = meta["hideFromSearch"] === true;
+  if (input.hideFromSearch !== undefined) {
+    if (typeof input.hideFromSearch !== "boolean")
+      return {
+        ok: false,
+        code: "invalid",
+        message: "The choice must be on or off.",
+        field: "hideFromSearch",
+      };
+    hideFromSearch = input.hideFromSearch;
+  }
+  const nextMeta: Record<string, unknown> = { ...meta };
+  if (hideFromSearch) nextMeta["hideFromSearch"] = true;
+  else delete nextMeta["hideFromSearch"];
   const next: Record<string, unknown> = { ...stored };
   if (description) next["description"] = description;
   else delete next["description"];
   if (noindex) next["noindex"] = true;
   else delete next["noindex"];
   await runner.all(
-    `update "entries" set "seo" = ?, "updated_at" = ? where "id" = ? and "site_id" = ?`,
-    [JSON.stringify(next), new Date(now()), id, siteId],
+    `update "entries" set "seo" = ?, "meta" = ?, "updated_at" = ? where "id" = ? and "site_id" = ?`,
+    [JSON.stringify(next), JSON.stringify(nextMeta), new Date(now()), id, siteId],
   );
-  return { ok: true, seo: { description, noindex }, slug: String(rows[0]?.["slug"] ?? "") };
+  return {
+    ok: true,
+    seo: { description, noindex, hideFromSearch },
+    slug: String(rows[0]?.["slug"] ?? ""),
+  };
 }
 
 export interface FeedPosts {

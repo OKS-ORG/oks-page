@@ -7401,3 +7401,94 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(await axeViolations(page)).toEqual([]);
   });
 });
+
+describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-search-stats-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("searches are counted by word and day only; Tools > Site search lists them; Hide from site search (SEO-75)", async () => {
+    const about = (await db.run("select id, title from entries where slug = 'about'"))[0]!;
+    const title = String(about["title"]);
+    const search = async (query: string) => (await fetch(site.base + "/search?" + query)).text();
+    expect(await search("q=" + encodeURIComponent(title))).toContain('href="/about"');
+    await search("q=" + encodeURIComponent(title.toUpperCase()));
+    await search("q=zzqqxx");
+    await search("q=anna%40example.com");
+    await search("q=%2B44%2020%207946%200958");
+    // The next result pages and "search as typed" are not counted again.
+    await search("q=zzqqxx&page=2");
+    await search("q=zzqqxx&exact=1");
+    const term = title.toLocaleLowerCase();
+    await expect
+      .poll(async () => db.run("select term, searches, no_results from search_terms order by term"))
+      .toEqual(
+        [
+          { term, searches: 2, no_results: 0 },
+          { term: "zzqqxx", searches: 1, no_results: 1 },
+        ].sort((a, b) => (a.term < b.term ? -1 : 1)),
+      );
+
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await page.getByRole("link", { name: "Tools" }).first().click();
+    await page.getByRole("heading", { name: "Site search", level: 1 }).waitFor();
+    await page.getByText("in the last 90 days: 3 searches.", { exact: false }).waitFor();
+    const popular = page.getByRole("table", { name: "Popular searches" });
+    await popular.getByRole("rowheader", { name: term }).waitFor();
+    const none = page.getByRole("table", { name: "Searches with no results" });
+    await none.getByRole("rowheader", { name: "zzqqxx" }).waitFor();
+    expect(await none.getByRole("rowheader").count()).toBe(1);
+    expect(await page.content()).not.toContain("anna@example.com</a>");
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Hide from site search, in the SEO box of the page.
+    await page.goto(site.base + `/admin/pages/${String(about["id"])}`);
+    await page.getByLabel("Hide from site search").check();
+    await page.getByRole("button", { name: "Update search engine settings" }).click();
+    await page.getByText("Search engine settings saved.").waitFor();
+    expect(await search("q=" + encodeURIComponent(title))).not.toContain('href="/about"');
+    // Still on the site and in the sitemap.
+    expect((await fetch(site.base + "/about")).status).toBe(200);
+    expect(await (await fetch(site.base + "/sitemap.xml")).text()).toContain("/about");
+  });
+});

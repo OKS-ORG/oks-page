@@ -125,6 +125,36 @@ for (const { kind, open, skip } of openers) {
         expect(await seoOf(id)).toEqual({});
       });
 
+      test("Hide from site search: kept in meta with what is there, off again, and refused when not on or off", async () => {
+        const id = await addPost("Hello");
+        await db.run("update entries set meta = ? where id = ?", [
+          JSON.stringify({ layout: "wide" }),
+          id,
+        ]);
+        expect(await loadEntrySeo(db.runner, admin, siteId, id)).toMatchObject({
+          seo: { hideFromSearch: false },
+        });
+        expect(
+          await setEntrySeo(db.runner, admin, siteId, id, { hideFromSearch: true }),
+        ).toMatchObject({
+          ok: true,
+          seo: { description: "", noindex: false, hideFromSearch: true },
+        });
+        const metaOf = async () => {
+          const raw = (await db.run("select meta from entries where id = ?", [id]))[0]!["meta"];
+          return typeof raw === "string" ? JSON.parse(raw) : raw;
+        };
+        expect(await metaOf()).toEqual({ layout: "wide", hideFromSearch: true });
+        expect(
+          await setEntrySeo(db.runner, admin, siteId, id, { hideFromSearch: "yes" }),
+        ).toMatchObject({
+          code: "invalid",
+          field: "hideFromSearch",
+        });
+        await setEntrySeo(db.runner, admin, siteId, id, { hideFromSearch: false });
+        expect(await metaOf()).toEqual({ layout: "wide" });
+      });
+
       test("other things kept in the value stay, and the page counts as changed", async () => {
         const id = await addPost("Hello", {
           seo: { canonical: "https://example.org/x" },

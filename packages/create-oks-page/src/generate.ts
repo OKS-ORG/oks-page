@@ -195,6 +195,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-writing-page")};\n`,
     },
     {
+      path: "app/admin/tools/search/page.tsx",
+      content: `export { default, metadata } from ${from("tools-search-page")};\n`,
+    },
+    {
       path: "app/admin/settings/privacy/page.tsx",
       content: `export { default, metadata } from ${from("settings-privacy-page")};\n`,
     },

@@ -10,6 +10,7 @@ const ROW: React.CSSProperties = { margin: "0.75rem 0" };
 export function EntrySeoPanel({ id }: { id: string }) {
   const [description, setDescription] = useState("");
   const [noindex, setNoindex] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export function EntrySeoPanel({ id }: { id: string }) {
       .then((r) => r.json())
       .then(
         (body: {
-          seo?: { description: string; noindex: boolean };
+          seo?: { description: string; noindex: boolean; hideFromSearch: boolean };
           error?: { message: string };
         }) => {
           if (!live) return;
@@ -30,6 +31,7 @@ export function EntrySeoPanel({ id }: { id: string }) {
           }
           setDescription(body.seo.description);
           setNoindex(body.seo.noindex);
+          setHidden(body.seo.hideFromSearch);
           setLoaded(true);
         },
       )
@@ -47,16 +49,17 @@ export function EntrySeoPanel({ id }: { id: string }) {
       const response = await fetch(`/api/admin/entries/${id}/seo`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description, noindex }),
+        body: JSON.stringify({ description, noindex, hideFromSearch: hidden }),
       });
       const body = (await response.json().catch(() => null)) as {
-        seo?: { description: string; noindex: boolean };
+        seo?: { description: string; noindex: boolean; hideFromSearch: boolean };
         error?: { message?: string };
       } | null;
       if (!response.ok || !body?.seo)
         throw new Error(body?.error?.message ?? "It could not be saved.");
       setDescription(body.seo.description);
       setNoindex(body.seo.noindex);
+      setHidden(body.seo.hideFromSearch);
       setNote("Search engine settings saved.");
     } catch (error) {
       setNote("");
@@ -109,6 +112,17 @@ export function EntrySeoPanel({ id }: { id: string }) {
             <p>
               The page stays on the site. It also leaves the sitemap, the site search and the feeds.
             </p>
+          </div>
+          <div style={ROW}>
+            <label>
+              <input
+                type="checkbox"
+                checked={hidden}
+                onChange={(event) => setHidden(event.target.checked)}
+              />{" "}
+              Hide from site search
+            </label>
+            <p>Visitors searching your site do not find this page. Search engines still can.</p>
           </div>
           <p>
             <Button type="submit">Update search engine settings</Button>

@@ -325,6 +325,13 @@ export async function seedEverything(db: TestDb): Promise<void> {
     updated_by: user,
     updated_at: T,
   });
+  await ins(db, "search_terms", {
+    site_id: site,
+    term: "sourdough",
+    day: "2026-11-14",
+    searches: 3,
+    no_results: 1,
+  });
   const ext = id(27);
   await ins(db, "extensions", {
     id: ext,

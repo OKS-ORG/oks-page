@@ -1133,6 +1133,25 @@ export const emailTexts = pgTable(
   ],
 );
 
+// Site search statistics (spec 08, section 16.3): only the word, the day and the counts; nothing that points to a person.
+export const searchTerms = pgTable(
+  "search_terms",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    term: text("term").notNull(),
+    day: text("day").notNull(),
+    searches: integer("searches").notNull().default(0),
+    noResults: integer("no_results").notNull().default(0),
+  },
+  (t) => [
+    check("ck_search_terms_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    primaryKey({ columns: [t.siteId, t.term, t.day] }),
+    index("ix_search_terms_day").on(t.siteId, t.day),
+  ],
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -1231,6 +1250,7 @@ export const tableNames = [
   "audit_log",
   "email_log",
   "email_texts",
+  "search_terms",
   "api_keys",
   "cache_tags",
 ] as const;

@@ -17,6 +17,7 @@ describe("the menu for each default role", () => {
       "menus",
       "media",
       "users",
+      "tools",
       "settings",
     ]);
   });
