@@ -283,6 +283,10 @@ export function EmailSettingsScreen({
         <p role="status">{note}</p>
       </form>
 
+      <p>
+        <a href="/admin/settings/email/texts">Change the words of the emails</a>
+      </p>
+
       <section aria-labelledby="email-log-heading">
         <h2 id="email-log-heading">Emails of the last 30 days</h2>
         <p>The text of an email is never kept, only who it went to, what it was and how it went.</p>

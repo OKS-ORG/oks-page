@@ -316,6 +316,15 @@ export async function seedEverything(db: TestDb): Promise<void> {
     created_at: T,
     last_attempt_at: T,
   });
+  await ins(db, "email_texts", {
+    site_id: site,
+    email_key: "invitation",
+    locale: "",
+    subject: "Join us",
+    body: "Hello {name}, [Join]({link})",
+    updated_by: user,
+    updated_at: T,
+  });
   const ext = id(27);
   await ins(db, "extensions", {
     id: ext,

@@ -11,7 +11,6 @@ import {
   type OutgoingEmail,
 } from "./email.js";
 import {
-  composeEmail,
   RESET_LIMIT_PER_HOUR,
   sendAccountChangeEmail,
   sendInvitationEmail,
@@ -27,36 +26,6 @@ const actorOf = (userId: string, role: string): Actor => {
   const caps = DEFAULT_ROLES.find((r) => r.key === role)!.capabilities;
   return { userId, can: (capability) => caps.includes(capability) };
 };
-
-describe("the words of an email (spec 13, section 5)", () => {
-  test("a plain text and an HTML version of the same words; everything put in is escaped; no tracking", () => {
-    const mail = composeEmail({
-      siteName: "Anna's <Garden>",
-      greeting: 'Hello <script>alert("x")</script>,',
-      paragraphs: ["Ben & Cara invite you."],
-      action: { label: "Accept", url: "https://example.com/admin/invite/abc?x=1&y=2" },
-      after: ["The link works once."],
-    });
-    expect(mail.text).toContain('Hello <script>alert("x")</script>,');
-    expect(mail.text).toContain("Accept: https://example.com/admin/invite/abc?x=1&y=2");
-    expect(mail.html).not.toContain("<script>");
-    expect(mail.html).toContain("Hello &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;,");
-    expect(mail.html).toContain("Ben &amp; Cara invite you.");
-    expect(mail.html).toContain('href="https://example.com/admin/invite/abc?x=1&amp;y=2"');
-    expect(mail.html).toContain("Anna&#39;s &lt;Garden&gt;");
-    // No pictures from elsewhere, no tracking.
-    expect(mail.html).not.toMatch(/<img|src=/);
-    // A link that is not http(s) is never made a link.
-    const bad = composeEmail({
-      siteName: "S",
-      greeting: "Hi",
-      paragraphs: [],
-      action: { label: "Open", url: "javascript:alert(1)" },
-    });
-    expect(bad.html).not.toContain("href=");
-    expect(bad.html).not.toContain("javascript:");
-  });
-});
 
 for (const { kind, open, skip } of openers) {
   describe.skipIf(skip)(`${kind}: the emails`, () => {

@@ -6834,4 +6834,73 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await visitor.getByRole("button", { name: "Change my password" }).click();
     await visitor.getByText("This link no longer works", { exact: false }).waitFor();
   });
+
+  test("the words of an email: a security email refused without its link, saved, used for the next email, tested, and reset (EM-10, EM-11)", async () => {
+    const page = await signedIn(owner);
+    await page.goto(site.base + "/admin/settings/email");
+    await page.getByRole("link", { name: "Change the words of the emails" }).click();
+    await page.getByRole("heading", { name: "Email texts", level: 1 }).waitFor();
+    const list = page.getByRole("navigation", { name: "Emails" });
+    await list.getByRole("button", { name: /^Password reset\s*Security email · original/ }).click();
+    await page
+      .getByText("People use this email to get into their account.", { exact: false })
+      .waitFor();
+    const preview = page.frameLocator('iframe[title="Preview of the email"]');
+    await preview.getByText("Someone asked to set a new password", { exact: false }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Without {link} it cannot be saved.
+    await page.getByLabel("Text").fill("Hello {name}, we will call you.");
+    await page.getByText("The text must contain {link}", { exact: false }).first().waitFor();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Not saved").waitFor();
+
+    // New words, with a placeholder put in by its button.
+    await page.getByLabel("Subject").fill("Your new password for {site}");
+    await page
+      .getByLabel("Text")
+      .fill("Hi {name},\n\n**Here is your link:** [new password]({link})\n\n");
+    await page.getByRole("button", { name: "{site}" }).click();
+    await preview.getByText("Here is your link:", { exact: false }).waitFor();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Saved. Emails use your words from now on.").waitFor();
+    await list
+      .getByRole("button", { name: /^Password reset\s*Security email · changed by you/ })
+      .waitFor();
+
+    // Send me a test: with sample values.
+    const count = () => received.filter((m) => m.to.includes("anna@example.com")).length;
+    let before = count();
+    await page.getByRole("button", { name: "Send me a test" }).click();
+    await page.getByText("A test is on its way to anna@example.com, with sample values.").waitFor();
+    await expect.poll(count, { timeout: 15_000 }).toBe(before + 1);
+    expect(received.at(-1)!.data).toContain("Subject: Test: Your new password for Anna's Garden");
+
+    // The next real reset uses the new words.
+    before = count();
+    const asked = await fetch(site.base + "/api/auth/request-password-reset", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ email: "anna@example.com", redirectTo: "/admin/reset-password" }),
+    });
+    expect(asked.status).toBe(200);
+    await expect.poll(count, { timeout: 15_000 }).toBe(before + 1);
+    const mail = received.filter((m) => m.to.includes("anna@example.com")).at(-1)!.data;
+    expect(mail).toContain("Subject: Your new password for Anna's Garden");
+    expect(mail.replace(/=\r?\n/g, "")).toContain("Here is your link:");
+    // The change is in the audit log (a security email).
+    expect(
+      await db.run(
+        "select action from audit_log where target_type = 'email_text' and target_id = 'password-reset'",
+      ),
+    ).toEqual([{ action: "email_text.change" }]);
+
+    // Back to the original.
+    await page.getByRole("button", { name: "Reset to the original" }).click();
+    await page.getByText("Back to the original words.").waitFor();
+    expect(await page.getByLabel("Subject").inputValue()).toBe("Choose a new password for {site}");
+    await list
+      .getByRole("button", { name: /^Password reset\s*Security email · original/ })
+      .waitFor();
+  });
 });

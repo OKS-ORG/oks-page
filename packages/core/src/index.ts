@@ -36,6 +36,7 @@ export * from "./theme-export.js";
 export * from "./secret-box.js";
 export * from "./email.js";
 export * from "./emails.js";
+export * from "./email-texts.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

@@ -966,6 +966,27 @@ export const emailLog = sqliteTable(
   ],
 );
 
+// The owner's own words for an email (spec 13, section 6): one row per email and language; without a row the original
+// text is used. `locale` is "" for the site's language.
+export const emailTexts = sqliteTable(
+  "email_texts",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    emailKey: text("email_key").notNull(),
+    locale: text("locale").notNull().default(""),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    updatedBy: text("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    check("ck_email_texts_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    primaryKey({ columns: [t.siteId, t.emailKey, t.locale] }),
+  ],
+);
+
 export const apiKeys = sqliteTable(
   "api_keys",
   {
@@ -1056,6 +1077,7 @@ export const tableNames = [
   "jobs",
   "audit_log",
   "email_log",
+  "email_texts",
   "api_keys",
   "cache_tags",
 ] as const;

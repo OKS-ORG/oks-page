@@ -175,6 +175,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-security-page")};\n`,
     },
     {
+      path: "app/admin/settings/email/texts/page.tsx",
+      content: `export { default, metadata } from ${from("settings-email-texts-page")};\n`,
+    },
+    {
       path: "app/admin/settings/email/page.tsx",
       content: `export { default, metadata } from ${from("settings-email-page")};\n`,
     },
@@ -297,6 +301,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/media/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-media")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/email-texts/route.ts",
+      content: `export { DELETE, GET, POST, PUT } from ${from("api-settings-email-texts")};\n`,
     },
     {
       path: "app/api/admin/settings/email/route.ts",
