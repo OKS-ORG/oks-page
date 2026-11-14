@@ -35,7 +35,24 @@ export interface CreateAuthOptions {
   addressLimit?: { window: number; max: number };
   /** For tests: the time used by the per-account limit. */
   clock?: () => number;
+  /**
+   * Sends the password reset link (spec 13). Without it, password reset is off. It is called only for an address that
+   * has an account; the answer to the person is the same either way.
+   */
+  sendResetPassword?: (data: AccountPerson & { token: string }) => Promise<void>;
+  /** Told after a password or two-factor change, for the security email (spec 13, section 5). */
+  onAccountChange?: (data: AccountPerson & { change: AccountChange }) => Promise<void>;
 }
+
+export interface AccountPerson {
+  userId: string;
+  email: string;
+  name: string;
+}
+export type AccountChange = "password" | "two-factor-on" | "two-factor-off";
+
+/** How long a password reset link works (spec 13, section 7: an expired one is never sent late). */
+export const RESET_TOKEN_SECONDS = 60 * 60;
 
 const CLIENT_HEADER = "x-oks-client-ip";
 
@@ -76,6 +93,25 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
     options.clock,
   );
   const address = options.addressLimit ?? { window: 300, max: 5 };
+  type Person = {
+    id: string;
+    email: string;
+    name?: string | null;
+    twoFactorEnabled?: boolean | null;
+  };
+  const personOf = (user: Person): AccountPerson => ({
+    userId: user.id,
+    email: user.email,
+    name: user.name ?? "",
+  });
+  /** A security email must never break the change it is about. */
+  const notify = async (user: Person, change: AccountChange) => {
+    try {
+      await options.onAccountChange?.({ ...personOf(user), change });
+    } catch {
+      // the change is done; the email is only a notice
+    }
+  };
 
   const auth = betterAuth({
     database: drizzleAdapter(options.db as never, {
@@ -94,7 +130,20 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
     baseURL: options.baseUrl,
     trustedOrigins: [options.baseUrl, ...(options.trustedOrigins ?? [])],
     logger: { level: "error" },
-    emailAndPassword: { enabled: true, minPasswordLength: options.passwordMinLength ?? 10 },
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: options.passwordMinLength ?? 10,
+      ...(options.sendResetPassword
+        ? {
+            resetPasswordTokenExpiresIn: RESET_TOKEN_SECONDS,
+            // A new password signs out every session, as a changed one does (spec 02, section 4).
+            revokeSessionsOnPasswordReset: true,
+            sendResetPassword: async ({ user, token }: { user: Person; token: string }) =>
+              options.sendResetPassword!({ ...personOf(user), token }),
+            onPasswordReset: async ({ user }: { user: Person }) => notify(user, "password"),
+          }
+        : {}),
+    },
     advanced: {
       database: { generateId: () => newId() },
       // Only the header our own wrapper writes is read. Anything the browser sends under other names is ignored.
@@ -133,13 +182,29 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-in/email") return;
         const returned = ctx.context.returned as { status?: number } | undefined;
         const failed =
           returned instanceof APIError ||
           (typeof returned?.status === "number" && returned.status >= 400);
-        const email = (ctx.body as { email?: string } | undefined)?.email;
-        if (!failed && typeof email === "string") await limiter.succeeded(email);
+        if (failed) return;
+        if (ctx.path === "/sign-in/email") {
+          const email = (ctx.body as { email?: string } | undefined)?.email;
+          if (typeof email === "string") await limiter.succeeded(email);
+          return;
+        }
+        // The security emails: a changed password, two-factor turned off, or turned on (its first code checked).
+        const user = (ctx.context.session as { user?: Person } | null | undefined)?.user;
+        if (!user) return;
+        if (ctx.path === "/change-password") await notify(user, "password");
+        else if (ctx.path === "/two-factor/disable") await notify(user, "two-factor-off");
+        else if (ctx.path === "/two-factor/verify-totp" && !user.twoFactorEnabled) {
+          const now = await options.runner.all(
+            `select "two_factor_enabled" from "users" where "id" = ?`,
+            [user.id],
+          );
+          const on = now[0]?.["two_factor_enabled"];
+          if (on === true || on === 1) await notify(user, "two-factor-on");
+        }
       }),
     },
   });

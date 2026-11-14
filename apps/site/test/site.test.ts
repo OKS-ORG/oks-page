@@ -975,6 +975,11 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
   const status = (page: Page) => page.locator(".oks-entry-actions [role=status]");
   const text = async (path: string) => {
     const response = await fetch(site.base + path);
+    // A server error is never expected here: show what the server said, so a rare one can be understood.
+    if (response.status >= 500)
+      console.error(
+        `[test] ${path} answered ${response.status}. Server log:\n${site.log().slice(-4000)}`,
+      );
     return { status: response.status, body: await response.text() };
   };
 
@@ -5502,6 +5507,10 @@ describe.skipIf(!findBrowser())(
       );
     };
     const axeViolations = async (page: Page) => {
+      // A window that is still fading in has text at part of its color: judge the screen once it has settled.
+      await page.evaluate(() =>
+        Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))),
+      );
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -6105,6 +6114,11 @@ describe.skipIf(!findBrowser())(
       ]);
       const picture = page.frameLocator('iframe[title="Picture of Big welcome"]');
       await picture.getByText("Welcome to Birch").waitFor();
+      // Both pictures are drawn before the window is checked.
+      await page
+        .frameLocator('iframe[title="Picture of Visit us"]')
+        .getByText("Find us at the market")
+        .waitFor();
       expect(await picture.locator("[inert]").count()).toBe(1);
       expect(await axeViolations(page)).toEqual([]);
       await library.getByLabel("Contact (1)").check();
@@ -6709,5 +6723,115 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await page
       .getByText("Email is not set up: password reset and invitations by email are off.")
       .waitFor();
+  });
+
+  test("by email: an invitation, and a forgotten password with its link and the notice afterwards (spec 13, section 5)", async () => {
+    const page = await signedIn(owner);
+    // Without email the sign-in page offers no reset, and the reset page says why.
+    const visitor = await browser.newPage();
+    await visitor.goto(site.base + "/admin/login");
+    await visitor.getByRole("heading", { name: "Sign in", level: 1 }).waitFor();
+    expect(await visitor.getByRole("link", { name: "Forgot your password?" }).count()).toBe(0);
+    await visitor.goto(site.base + "/admin/forgot-password");
+    await visitor.getByText("This site cannot send email yet", { exact: false }).waitFor();
+
+    // Email on again (the settings are kept by the API only after a test).
+    const on = await page.request.put(site.base + "/api/admin/settings/email", {
+      headers: { origin: site.base },
+      data: {
+        provider: "other",
+        host: "localhost",
+        port: smtpPort,
+        security: "starttls",
+        username: "anna",
+        password: "smtp-password",
+        fromName: "Anna's Garden",
+        fromAddress: "hello@annas-garden.example",
+        testTo: "anna@example.com",
+      },
+    });
+    expect(on.status()).toBe(200);
+    const mailTo = async (to: string, count: number) => {
+      await expect
+        .poll(() => received.filter((m) => m.to.includes(to)).length, { timeout: 15_000 })
+        .toBe(count);
+      return received.filter((m) => m.to.includes(to)).at(-1)!.data;
+    };
+    // The link in an email (quoted-printable lines are joined back first).
+    const linkIn = (data: string, path: string) => {
+      const plain = data.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
+      const found = new RegExp(`https?://[^\\s"<>]*${path}[^\\s"<>]*`).exec(plain)?.[0];
+      expect(found, plain).toBeTruthy();
+      return found!;
+    };
+
+    // An invitation by email.
+    await page.goto(site.base + "/admin/users");
+    const form = page.getByRole("form", { name: "Invite someone" });
+    await form.getByLabel("Name").fill("Ben");
+    await form.getByRole("textbox", { name: /^Email/ }).fill("ben@example.com");
+    await form.getByLabel("Send the invitation by email").waitFor();
+    expect(await form.getByLabel("Send the invitation by email").isChecked()).toBe(true);
+    expect(await axeViolations(page)).toEqual([]);
+    await form.getByRole("button", { name: "Invite and send the email" }).click();
+    await page
+      .getByText("It is on its way to ben@example.com by email.", { exact: false })
+      .waitFor();
+    const invitation = await mailTo("ben@example.com", 1);
+    expect(invitation).toContain("Subject: You are invited to Anna's Garden");
+    const inviteLink = linkIn(invitation, "/admin/invite/");
+    const ben = await browser.newPage();
+    await ben.goto(inviteLink.replace(/^https?:\/\/[^/]+/, site.base));
+    await ben.getByText("Your email:", { exact: false }).waitFor();
+
+    // A forgotten password: the link on the sign-in page, the same answer for any address, the email, the new password.
+    await visitor.goto(site.base + "/admin/login");
+    await visitor.getByRole("link", { name: "Forgot your password?" }).click();
+    await visitor.getByRole("heading", { name: "Forgot your password?", level: 1 }).waitFor();
+    expect(await axeViolations(visitor)).toEqual([]);
+    await visitor.getByLabel("Email").fill("nobody@example.com");
+    await visitor.getByRole("button", { name: "Send me a link" }).click();
+    await visitor
+      .getByText("If an account uses nobody@example.com, an email with a link is on its way.", {
+        exact: false,
+      })
+      .waitFor();
+    await visitor.reload();
+    const before = received.filter((m) => m.to.includes("anna@example.com")).length;
+    await visitor.getByLabel("Email").fill("anna@example.com");
+    await visitor.getByRole("button", { name: "Send me a link" }).click();
+    await visitor
+      .getByText("If an account uses anna@example.com, an email with a link is on its way.", {
+        exact: false,
+      })
+      .waitFor();
+    const resetMail = await mailTo("anna@example.com", before + 1);
+    expect(resetMail).toContain("Subject: Choose a new password for Anna's Garden");
+    expect(received.some((m) => m.to.includes("nobody@example.com"))).toBe(false);
+    const resetLink = linkIn(resetMail, "/admin/reset-password");
+    await visitor.goto(resetLink.replace(/^https?:\/\/[^/]+/, site.base));
+    await visitor.getByRole("heading", { name: "Choose a new password", level: 1 }).waitFor();
+    expect(await axeViolations(visitor)).toEqual([]);
+    await visitor.getByLabel(/^New password/).fill("a fresh long password");
+    await visitor.getByLabel(/^The new password again/).fill("a fresh long password");
+    await visitor.getByRole("button", { name: "Change my password" }).click();
+    await visitor
+      .getByText("Your password is changed, and you are signed out everywhere.", { exact: false })
+      .waitFor();
+    // The notice follows; the old session is gone; the new password works; the link does not work twice.
+    const notice = await mailTo(
+      "anna@example.com",
+      received.filter((m) => m.to.includes("anna@example.com")).length + 1,
+    );
+    expect(notice).toContain("Subject: Your password was changed: Anna's Garden");
+    await page.goto(site.base + "/admin");
+    await page.waitForURL((url) => url.pathname === "/admin/login");
+    owner.password = "a fresh long password";
+    await signedIn(owner);
+    await visitor.goto(resetLink.replace(/^https?:\/\/[^/]+/, site.base));
+    await visitor.getByLabel(/^New password/).fill("yet another long password");
+    await visitor.getByLabel(/^The new password again/).fill("yet another long password");
+    await visitor.getByRole("button", { name: "Change my password" }).click();
+    await visitor.getByText("This link no longer works", { exact: false }).waitFor();
   });
 });

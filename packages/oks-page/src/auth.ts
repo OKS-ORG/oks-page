@@ -1,6 +1,12 @@
 // The site's one Better Auth instance, made on first use from the same database as the pages (spec 02).
 import { createAuth, type OksAuth } from "@oks-page/auth";
-import { getDrizzle, getRunner } from "./db";
+import {
+  loadGeneralSettings,
+  sendAccountChangeEmail,
+  sendPasswordResetEmail,
+} from "@oks-page/core";
+import { getDrizzle, getRunner, getSiteId } from "./db";
+import { kickEmailJobs, siteSecrets } from "./mail";
 
 /** The header our auth wrapper reads for the client's address (the library's own forwarding headers are ignored). */
 export const CLIENT_HEADER = "x-oks-client-ip";
@@ -27,11 +33,37 @@ export function getAuth(origin: string): OksAuth {
     throw new Error(
       "OKS_SECRET is not set. It must be a secret of at least 32 characters (the installer writes one).",
     );
+  const baseUrl = process.env["OKS_SITE_URL"] ?? origin;
+  const site = new URL(baseUrl).origin;
+  const siteName = async (siteId: string) =>
+    (await loadGeneralSettings(getRunner(), siteId)).siteName;
   shared.__oksAuth = createAuth({
     db: getDrizzle(),
     runner: getRunner(),
     secret,
-    baseUrl: process.env["OKS_SITE_URL"] ?? origin,
+    baseUrl,
+    // Password reset and the security emails (spec 13). When email is not set up, nothing is queued.
+    sendResetPassword: async ({ email, name, token }) => {
+      const siteId = await getSiteId();
+      const sent = await sendPasswordResetEmail(getRunner(), siteId, siteSecrets(), {
+        to: email,
+        name,
+        siteName: await siteName(siteId),
+        link: `${site}/admin/reset-password?token=${encodeURIComponent(token)}`,
+      });
+      if (sent.sent) kickEmailJobs();
+    },
+    onAccountChange: async ({ email, name, change }) => {
+      const siteId = await getSiteId();
+      const sent = await sendAccountChangeEmail(getRunner(), siteId, siteSecrets(), {
+        to: email,
+        name,
+        siteName: await siteName(siteId),
+        change,
+        accountLink: `${site}/admin/account`,
+      });
+      if (sent.sent) kickEmailJobs();
+    },
   });
   return shared.__oksAuth;
 }

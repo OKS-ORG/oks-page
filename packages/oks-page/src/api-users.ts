@@ -3,6 +3,9 @@
 // (api-invitation.ts) cancels an invitation.
 import {
   createInvitation,
+  emailWorks,
+  loadGeneralSettings,
+  sendInvitationEmail,
   listInvitations,
   listMembers,
   listRoles,
@@ -14,6 +17,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { kickEmailJobs, siteSecrets } from "./mail";
 import { siteOrigin } from "./site-origin";
 
 export const USER_STATUS: Record<UserErrorCode, number> = {
@@ -34,6 +38,7 @@ export async function GET() {
     members: await listMembers(runner, member.siteId),
     roles: await listRoles(runner, member.siteId),
     invitations: await listInvitations(runner, member.siteId),
+    emailWorks: await emailWorks(runner, member.siteId),
   });
 }
 
@@ -56,11 +61,23 @@ export async function POST(request: Request) {
   };
   const result = await createInvitation(getRunner(), await actorOf(member), member.siteId, invite);
   if (!result.ok) return reply(result, USER_STATUS[result.code]);
-  return NextResponse.json(
-    {
-      link: `${siteOrigin(request)}/admin/invite/${result.token}`,
-      invitation: result.invitation,
-    },
-    { status: 201 },
-  );
+  const link = `${siteOrigin(request)}/admin/invite/${result.token}`;
+  // Sent by email too when asked and email works (spec 13, section 5); the link is shown either way.
+  let emailed = false;
+  if (input["sendEmail"] === true) {
+    const roles = await listRoles(getRunner(), member.siteId);
+    const sent = await sendInvitationEmail(getRunner(), member.siteId, siteSecrets(), {
+      to: result.invitation.email,
+      name: result.invitation.name,
+      inviter: member.user.name,
+      siteName: (await loadGeneralSettings(getRunner(), member.siteId)).siteName,
+      role:
+        roles.find((r) => r.key === result.invitation.roleKey)?.label ?? result.invitation.roleKey,
+      link,
+      expiresAt: new Date(result.invitation.expiresAt).getTime(),
+    });
+    emailed = sent.sent;
+    if (sent.sent) kickEmailJobs();
+  }
+  return NextResponse.json({ link, invitation: result.invitation, emailed }, { status: 201 });
 }

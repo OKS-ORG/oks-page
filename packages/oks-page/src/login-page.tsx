@@ -1,10 +1,10 @@
 // /admin/login: the sign-in page. A signed-in member goes straight to the dashboard; a new install goes to the wizard.
-import { isSetupDone } from "@oks-page/core";
+import { emailWorks, isSetupDone } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { signedInMember } from "./admin-session";
-import { getRunner } from "./db";
+import { getRunner, getSiteId } from "./db";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in", robots: { index: false } };
@@ -19,6 +19,11 @@ export default async function LoginPage() {
     <main>
       <h1>Sign in</h1>
       <LoginForm />
+      {(await emailWorks(getRunner(), await getSiteId())) ? (
+        <p>
+          <a href="/admin/forgot-password">Forgot your password?</a>
+        </p>
+      ) : null}
     </main>
   );
 }

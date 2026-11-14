@@ -1,5 +1,6 @@
 // /admin/users: the people of the site, their roles and the waiting invitations, for a signed-in member who may manage users.
 import {
+  emailWorks,
   isSetupDone,
   listInvitations,
   listMembers,
@@ -48,6 +49,7 @@ export default async function UsersPage() {
         roles={roles}
         invitations={invitations}
         timeZone={general.timeZone}
+        emailWorks={await emailWorks(getRunner(), member.siteId)}
       />
     </AdminFrame>
   );

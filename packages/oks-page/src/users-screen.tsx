@@ -61,12 +61,15 @@ export function UsersScreen({
   roles,
   invitations,
   timeZone,
+  emailWorks = false,
 }: {
   you: string;
   members: Member[];
   roles: RoleChoice[];
   invitations: Invitation[];
   timeZone: string | null;
+  /** When email works, the invitation can also go out by email (spec 13). */
+  emailWorks?: boolean;
 }) {
   const label = (key: string) => roles.find((r) => r.key === key)?.label ?? key;
   const [name, setName] = useState("");
@@ -75,9 +78,14 @@ export function UsersScreen({
     roles.find((r) => r.key === "editor")?.key ?? roles[0]?.key ?? "",
   );
   const [days, setDays] = useState("7");
+  const [byEmail, setByEmail] = useState(emailWorks);
   const [inviteProblem, setInviteProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [made, setMade] = useState<{ link: string; invitation: Invitation } | null>(null);
+  const [made, setMade] = useState<{
+    link: string;
+    invitation: Invitation;
+    emailed?: boolean;
+  } | null>(null);
   const [waiting, setWaiting] = useState<Invitation[]>(invitations);
   const [copied, setCopied] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -98,11 +106,12 @@ export function UsersScreen({
       email,
       roleKey,
       days: Number(days),
+      sendEmail: emailWorks && byEmail,
     });
     setBusy(false);
     if (!result.ok)
       return setInviteProblem(failure(result.body, "The invitation could not be made."));
-    const body = result.body as { link: string; invitation: Invitation };
+    const body = result.body as { link: string; invitation: Invitation; emailed?: boolean };
     setMade(body);
     setWaiting((now) => [...now, body.invitation]);
     setName("");
@@ -241,9 +250,16 @@ export function UsersScreen({
       <section aria-labelledby="invite-heading">
         <h2 id="invite-heading">Invite someone</h2>
         <p>
-          You get a link to send to the person. They open it and choose their own password, so you
-          never know it. The link works once.
+          You get a link to send to the person
+          {emailWorks ? ", and the site can email it to them" : ""}. They open it and choose their
+          own password, so you never know it. The link works once.
         </p>
+        {emailWorks ? null : (
+          <p>
+            The site cannot send email yet, so you send the link yourself.{" "}
+            <a href="/admin/settings/email">Set up email</a>
+          </p>
+        )}
         <form onSubmit={(event) => void invite(event)} aria-label="Invite someone">
           {inviteProblem ? (
             <Alert color="danger" title="Not invited" description={inviteProblem} />
@@ -285,16 +301,30 @@ export function UsersScreen({
               ))}
             </select>
           </div>
+          {emailWorks ? (
+            <div style={ROW}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={byEmail}
+                  onChange={(event) => setByEmail(event.target.checked)}
+                />{" "}
+                Send the invitation by email
+              </label>
+            </div>
+          ) : null}
           <Button type="submit" color="primary" isDisabled={busy}>
-            Make an invitation link
+            {emailWorks && byEmail ? "Invite and send the email" : "Make an invitation link"}
           </Button>
         </form>
         {made ? (
           <div role="group" aria-label="The invitation link">
             <p>
               The invitation for <strong>{made.invitation.name}</strong> as{" "}
-              <strong>{label(made.invitation.roleKey)}</strong> is ready. Send them this link; it is
-              shown only now.
+              <strong>{label(made.invitation.roleKey)}</strong> is ready.{" "}
+              {made.emailed
+                ? `It is on its way to ${made.invitation.email} by email. You can also send them this link yourself; it is shown only now.`
+                : "Send them this link; it is shown only now."}
             </p>
             <div style={ROW}>
               <label htmlFor="invite-link">Invitation link</label>
