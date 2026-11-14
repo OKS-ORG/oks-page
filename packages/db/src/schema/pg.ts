@@ -1074,6 +1074,40 @@ export const auditLog = pgTable(
   ],
 );
 
+// The email record (spec 13, section 7): one row per email, kept 30 days. The message text is never stored, so reset
+// links and private words stay out of it.
+export const emailLog = pgTable(
+  "email_log",
+  {
+    id: text("id").primaryKey().notNull(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    emailKey: text("email_key").notNull(),
+    toAddress: text("to_address").notNull(),
+    subject: text("subject").notNull(),
+    provider: text("provider").notNull(),
+    status: text("status").notNull().default("queued"),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, precision: 3, mode: "date" }),
+  },
+  (t) => [
+    check("ck_email_log_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_email_log_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    check(
+      "ck_email_log_status",
+      sql`${t.status} in ('queued', 'sent', 'retrying', 'failed', 'dropped')`,
+    ),
+    index("ix_email_log_time").on(t.siteId, t.createdAt),
+  ],
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -1170,6 +1204,7 @@ export const tableNames = [
   "not_found_log",
   "jobs",
   "audit_log",
+  "email_log",
   "api_keys",
   "cache_tags",
 ] as const;

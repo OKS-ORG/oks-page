@@ -24,6 +24,8 @@ export interface JobHandler {
   run(job: Job): Promise<void>;
   /** Called once when the job has failed for good. */
   giveUp?(job: Job, error: Error): Promise<void>;
+  /** How long to wait before the next try, after `attempts` tries (30 s times the tries when not given). */
+  retryDelay?(attempts: number): number;
 }
 
 const BACKOFF_MS = 30_000;
@@ -34,13 +36,14 @@ export async function enqueueJob(
   kind: string,
   payload: unknown,
   now: () => number = Date.now,
+  options: { maxAttempts?: number } = {},
 ): Promise<string> {
   const id = newId();
   const at = new Date(now());
   await runner.all(
     `insert into "jobs" ("id", "site_id", "kind", "payload", "run_at", "status", "attempts", "max_attempts", "created_at")
-     values (?, ?, ?, ?, ?, 'queued', 0, 5, ?)`,
-    [id, siteId, kind, JSON.stringify(payload), at, at],
+     values (?, ?, ?, ?, ?, 'queued', 0, ?, ?)`,
+    [id, siteId, kind, JSON.stringify(payload), at, options.maxAttempts ?? 5, at],
   );
   return id;
 }
@@ -95,6 +98,7 @@ export async function failJob(
   job: Job,
   error: Error,
   now: () => number = Date.now,
+  retryDelay?: (attempts: number) => number,
 ): Promise<boolean> {
   const final = error instanceof PermanentJobError || job.attempts >= job.maxAttempts;
   const at = now();
@@ -106,7 +110,11 @@ export async function failJob(
   } else {
     await runner.all(
       `update "jobs" set "status" = 'queued', "last_error" = ?, "locked_by" = null, "locked_at" = null, "run_at" = ? where "id" = ?`,
-      [error.message.slice(0, 1000), new Date(at + BACKOFF_MS * job.attempts), job.id],
+      [
+        error.message.slice(0, 1000),
+        new Date(at + (retryDelay ? retryDelay(job.attempts) : BACKOFF_MS * job.attempts)),
+        job.id,
+      ],
     );
   }
   return final;
@@ -154,7 +162,7 @@ export async function drainJobs(
         counts.done += 1;
       } catch (caught) {
         const error = caught instanceof Error ? caught : new Error(String(caught));
-        const final = await failJob(runner, job, error, now);
+        const final = await failJob(runner, job, error, now, handler.retryDelay?.bind(handler));
         if (final) {
           counts.failed += 1;
           await handler.giveUp?.(job, error).catch(() => undefined);

@@ -303,6 +303,19 @@ export async function seedEverything(db: TestDb): Promise<void> {
     published_at: T,
     published_by: user,
   });
+  await ins(db, "email_log", {
+    id: id(63),
+    site_id: site,
+    email_key: "test",
+    to_address: "anna@example.com",
+    subject: "A test",
+    provider: "smtp",
+    status: "sent",
+    error: null,
+    attempts: 1,
+    created_at: T,
+    last_attempt_at: T,
+  });
   const ext = id(27);
   await ins(db, "extensions", {
     id: ext,

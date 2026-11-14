@@ -1,5 +1,5 @@
 // What the dashboard shows (spec 07, "Home"): counts of the site's content and the latest edits.
-import { loadGeneralSettings } from "@oks-page/core";
+import { emailWorks, loadGeneralSettings } from "@oks-page/core";
 import { getRunner } from "./db";
 
 export interface DashboardData {
@@ -9,6 +9,8 @@ export interface DashboardData {
   /** Published pages, published posts, and entries still in draft (any type). */
   counts: { pages: number; posts: number; drafts: number };
   recent: { id: string; title: string; type: string; status: string; updatedAt: string }[];
+  /** False while email is not set up (spec 13, section 3: the dashboard says so). */
+  emailWorks: boolean;
 }
 
 const toIso = (value: unknown): string =>
@@ -37,6 +39,7 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
   return {
     siteName: general.siteName,
     timeZone: general.timeZone,
+    emailWorks: await emailWorks(runner, siteId),
     counts,
     recent: recent.map((row) => ({
       id: String(row["id"]),

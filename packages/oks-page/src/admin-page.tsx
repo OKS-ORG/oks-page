@@ -23,6 +23,7 @@ export default async function AdminPage() {
       user={me.user}
       nav={navFor((c) => actor.can(c))}
       data={await loadDashboard(me.siteId)}
+      canManageSettings={actor.can("settings.manage")}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
     />

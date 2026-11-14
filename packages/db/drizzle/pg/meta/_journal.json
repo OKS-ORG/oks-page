@@ -43,6 +43,13 @@
       "when": 1794621990549,
       "tag": "0005_saved_sections",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794632256197,
+      "tag": "0006_email_log",
+      "breakpoints": true
     }
   ]
 }

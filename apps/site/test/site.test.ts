@@ -1,6 +1,6 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
-import { type ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -20,6 +20,7 @@ import axe from "axe-core";
 import { generateSync } from "otplib";
 import sharp from "sharp";
 import { chromium, type Browser } from "playwright-core";
+import { SMTPServer } from "smtp-server";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
 beforeAll(() => buildSite(), 300_000);
@@ -6509,3 +6510,204 @@ describe.skipIf(!findBrowser())(
     });
   },
 );
+
+describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  let smtp: SMTPServer;
+  let smtpPort = 0;
+  const received: { to: string[]; data: string }[] = [];
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    // A local mail server with STARTTLS and a certificate made for this run; the site trusts it through
+    // NODE_EXTRA_CA_CERTS, as a real site trusts a real provider's certificate.
+    const dir = mkdtempSync(join(tmpdir(), "oks-mail-"));
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        join(dir, "key.pem"),
+        "-out",
+        join(dir, "cert.pem"),
+        "-days",
+        "2",
+        "-subj",
+        "/CN=localhost",
+        "-addext",
+        "subjectAltName=DNS:localhost,IP:127.0.0.1",
+      ],
+      { stdio: "ignore" },
+    );
+    smtp = new SMTPServer({
+      key: readFileSync(join(dir, "key.pem")),
+      cert: readFileSync(join(dir, "cert.pem")),
+      authOptional: false,
+      onAuth(auth, _session, done) {
+        if (auth.username === "anna" && auth.password === "smtp-password")
+          done(null, { user: "anna" });
+        else done(new Error("Invalid username or password"));
+      },
+      onData(stream, session, done) {
+        const chunks: Buffer[] = [];
+        stream.on("data", (c: Buffer) => chunks.push(c));
+        stream.on("end", () => {
+          received.push({
+            to: session.envelope.rcptTo.map((r) => r.address),
+            data: Buffer.concat(chunks).toString("utf8"),
+          });
+          done();
+        });
+      },
+      logger: false,
+    });
+    await new Promise<void>((resolve) => smtp.listen(0, "127.0.0.1", resolve));
+    smtpPort = (smtp.server.address() as { port: number }).port;
+
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-email-")), "site.sqlite"));
+    site = await startSite("sqlite", db, {
+      OKS_SECRET: "e".repeat(40),
+      NODE_EXTRA_CA_CERTS: join(dir, "cert.pem"),
+    });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ siteName: "Anna's Garden", admin: { name: "Anna", ...owner } }),
+    });
+    expect(made.status).toBe(200);
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'editor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+    await new Promise<void>((resolve) => (smtp ? smtp.close(() => resolve()) : resolve()));
+  });
+
+  const signedIn = async (who: { email: string; password: string }) => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    return page;
+  };
+  const axeViolations = async (page: Awaited<ReturnType<typeof signedIn>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("off until a test email is accepted: the note, a refused password keeps it off, the right one turns it on; the password never comes back; editors are refused (EM-01, EM-02, EM-05)", async () => {
+    const page = await signedIn(owner);
+    // The dashboard says email is off, with a way to set it up; an editor does not get the note.
+    await page
+      .getByText("Email is not set up: password reset and invitations by email are off.")
+      .waitFor();
+    const editor = await signedIn(cara);
+    expect(await editor.getByText("Email is not set up").count()).toBe(0);
+    const api = (await editor.request.get(site.base + "/api/admin/settings/email")).status();
+    expect(api).toBe(403);
+
+    await page.getByRole("link", { name: "Set up email" }).click();
+    await page.getByRole("heading", { name: "Email settings", level: 1 }).waitFor();
+    await page.getByText("Password reset and invitations by email are off.").first().waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+    // A preset fills in the server and the port.
+    await page.getByLabel("Email provider").selectOption("postmark");
+    expect(await page.getByLabel("Mail server (SMTP)").inputValue()).toBe("smtp.postmarkapp.com");
+    expect(await page.getByLabel("Port", { exact: true }).inputValue()).toBe("587");
+
+    await page.getByLabel("Email provider").selectOption("other");
+    await page.getByLabel("Mail server (SMTP)").fill("localhost");
+    await page.getByLabel("Port", { exact: true }).fill(String(smtpPort));
+    await page.getByRole("radio", { name: /STARTTLS/ }).check();
+    await page.getByLabel("User name").fill("anna");
+    await page.getByLabel("Password or API key").fill("wrong-password");
+    await page.getByLabel("Sender name").fill("Anna's Garden");
+    await page.getByLabel("Sender address").fill("hello@annas-garden.example");
+    expect(await page.getByLabel("Send the test email to").inputValue()).toBe("anna@example.com");
+    await page.getByRole("button", { name: "Send a test email and save" }).click();
+    await page
+      .getByText(
+        "The test email was not sent: The mail server refused the user name or the password. Email stays off.",
+      )
+      .waitFor();
+    expect(received).toHaveLength(0);
+
+    await page.getByLabel("Password or API key").fill("smtp-password");
+    await page.getByRole("button", { name: "Send a test email and save" }).click();
+    await page
+      .getByText("The test email was accepted. Email works now. Look for it at anna@example.com.")
+      .waitFor();
+    await page.getByText(/^Email works\./).waitFor();
+    expect(received).toHaveLength(1);
+    expect(received[0]!.to).toEqual(["anna@example.com"]);
+    expect(received[0]!.data).toContain("Subject: Test email from Anna's Garden");
+    // The record shows both tries; the password is not in the page, the answer or the database.
+    const record = page.getByRole("region", { name: "Emails of the last 30 days" });
+    await record.getByText("Sent", { exact: true }).waitFor();
+    await record
+      .getByText(/^Not sent: The mail server refused the user name or the password\./)
+      .waitFor();
+    expect(await page.getByLabel("Password or API key").inputValue()).toBe("");
+    await page
+      .getByText("A password is saved. Leave this empty to keep it.", { exact: false })
+      .waitFor();
+    expect(await page.content()).not.toContain("smtp-password");
+    const answer = await (await page.request.get(site.base + "/api/admin/settings/email")).text();
+    expect(answer).not.toContain("smtp-password");
+    expect(
+      JSON.stringify(await db.run("select value from settings where key = 'email'")),
+    ).not.toContain("smtp-password");
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Saved again with the password left empty: the saved one is used.
+    await page.reload();
+    await page.getByLabel("Sender name").fill("Anna");
+    await page.getByRole("button", { name: "Send a test email and save" }).click();
+    await page.getByText("The test email was accepted.", { exact: false }).waitFor();
+    expect(received).toHaveLength(2);
+
+    // The dashboard note is gone; turning email off brings it back.
+    await page.goto(site.base + "/admin");
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect(await page.getByText("Email is not set up").count()).toBe(0);
+    await page.goto(site.base + "/admin/settings/email");
+    await page.getByRole("button", { name: "Turn email off" }).click();
+    await page
+      .getByText("Email is off. Password reset and invitations by email are off too.")
+      .waitFor();
+    await page.goto(site.base + "/admin");
+    await page
+      .getByText("Email is not set up: password reset and invitations by email are off.")
+      .waitFor();
+  });
+});

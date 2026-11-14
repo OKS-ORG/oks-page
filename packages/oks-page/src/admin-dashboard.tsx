@@ -12,9 +12,18 @@ export interface AdminDashboardProps {
   data: DashboardData;
   product: string;
   version: string;
+  /** True for people who may manage the settings (they get the "Set up email" note). */
+  canManageSettings?: boolean;
 }
 
-export function AdminDashboard({ user, nav, data, product, version }: AdminDashboardProps) {
+export function AdminDashboard({
+  user,
+  nav,
+  data,
+  product,
+  version,
+  canManageSettings = false,
+}: AdminDashboardProps) {
   return (
     <AdminFrame
       user={user}
@@ -25,6 +34,12 @@ export function AdminDashboard({ user, nav, data, product, version }: AdminDashb
       title="Home"
       breadcrumbs={[{ label: data.siteName }]}
     >
+      {canManageSettings && !data.emailWorks ? (
+        <p role="note">
+          Email is not set up: password reset and invitations by email are off.{" "}
+          <a href="/admin/settings/email">Set up email</a>
+        </p>
+      ) : null}
       <Card>
         <CardHeader>{data.siteName}</CardHeader>
         <CardBody>

@@ -212,6 +212,7 @@ describe("sqlite migrations", () => {
       "0003_extension_settings",
       "0004_theme_layout_changes",
       "0005_saved_sections",
+      "0006_email_log",
     ]);
   });
 });
@@ -348,6 +349,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0003_extension_settings",
       "0004_theme_layout_changes",
       "0005_saved_sections",
+      "0006_email_log",
     ]);
   });
 });
