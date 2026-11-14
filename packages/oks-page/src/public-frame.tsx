@@ -1,6 +1,6 @@
 // What every public page has around its content: the header menu above it and the footer menu below it. A menu with
 // nothing in it draws nothing. Used by the server build and the export build, so both write the same page.
-import { getLook } from "@data";
+import { getLook, getSiteInfo } from "@data";
 import type { PublicMenuItem } from "@oks-page/core";
 import type { Look } from "./data/types";
 import type { ReactNode } from "react";
@@ -49,10 +49,11 @@ export async function PublicFrame({
   footer: PublicMenuItem[];
   children: ReactNode;
 }) {
-  const look = await getLook();
+  const [look, site] = await Promise.all([getLook(), getSiteInfo()]);
   const { logo } = look;
+  // The site's language and writing direction (Settings > Languages) on everything the visitor reads.
   return (
-    <>
+    <div lang={site.lang} dir={site.dir} className="oks-site">
       <LookStyles look={look} />
       {header.length > 0 || logo ? (
         <header>
@@ -81,6 +82,6 @@ export async function PublicFrame({
           </nav>
         </footer>
       ) : null}
-    </>
+    </div>
   );
 }

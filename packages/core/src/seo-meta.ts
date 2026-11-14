@@ -123,6 +123,8 @@ export interface FeedInfo {
   /** The address path of the feed itself. */
   selfPath: string;
   title: string;
+  /** False: a summary only, without the whole text (Settings > Reading). True when not given. */
+  fullText?: boolean;
 }
 
 const escapeXml = (text: string) =>
@@ -153,7 +155,11 @@ export function buildRss(info: FeedInfo, items: FeedItem[]): string {
         `<pubDate>${new Date(i.publishedAt).toUTCString()}</pubDate>`,
         ...(i.authorName ? [`<dc:creator>${escapeXml(i.authorName)}</dc:creator>`] : []),
         `<description>${escapeXml(i.excerpt)}</description>`,
-        `<content:encoded>${escapeXml(absolutizeHtml(i.html, info.origin))}</content:encoded>`,
+        ...(info.fullText === false
+          ? []
+          : [
+              `<content:encoded>${escapeXml(absolutizeHtml(i.html, info.origin))}</content:encoded>`,
+            ]),
         "</item>",
       ].join("");
     })
@@ -185,7 +191,9 @@ export function buildAtom(info: FeedInfo, items: FeedItem[]): string {
         `<updated>${new Date(i.modifiedAt).toISOString()}</updated>`,
         ...(i.authorName ? [`<author><name>${escapeXml(i.authorName)}</name></author>`] : []),
         `<summary>${escapeXml(i.excerpt)}</summary>`,
-        `<content type="html">${escapeXml(absolutizeHtml(i.html, info.origin))}</content>`,
+        ...(info.fullText === false
+          ? []
+          : [`<content type="html">${escapeXml(absolutizeHtml(i.html, info.origin))}</content>`]),
         "</entry>",
       ].join("");
     })

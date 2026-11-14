@@ -1,5 +1,9 @@
 // The queries behind both data modules (server and export). No caching here.
 import {
+  directionOf,
+  loadReadingRoutes,
+  loadSiteLanguage,
+  type ReadingRoutes,
   chosenLayout,
   enhanceImages,
   excerptOf,
@@ -18,7 +22,7 @@ import {
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
-import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
+import type { EntryView, Look, PostSummary, SiteInfo, TermArchive } from "./types";
 
 /**
  * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
@@ -66,8 +70,43 @@ export async function loadLatestPosts(): Promise<FeedItem[]> {
 
 /** The site's name and tagline (Settings, General). */
 export async function loadSiteInfo(): Promise<SiteInfo> {
-  const general = await loadGeneralSettings(getRunner(), await getSiteId());
-  return { siteName: general.siteName, tagline: general.tagline };
+  const siteId = await getSiteId();
+  const general = await loadGeneralSettings(getRunner(), siteId);
+  const language = await loadSiteLanguage(getRunner(), siteId);
+  return {
+    siteName: general.siteName,
+    tagline: general.tagline,
+    lang: language.tag,
+    dir: directionOf(language),
+  };
+}
+
+/** Where the home page and the posts page are (Settings > Reading). */
+export async function loadReading(): Promise<ReadingRoutes> {
+  return loadReadingRoutes(getRunner(), await getSiteId());
+}
+
+/** The newest published posts that may be listed (not those set to stay out of lists), newest first. */
+export async function loadPostSummaries(limit: number): Promise<PostSummary[]> {
+  const rows = await getRunner().all(
+    `select "title", "slug", "plain_text", "seo", "published_at" from "entries"
+      where "site_id" = ? and "type_key" = 'post' and "status" = 'published' and "locale" = ''
+      order by "published_at" desc, "id" desc limit ?`,
+    [await getSiteId(), limit * 2],
+  );
+  const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
+  return rows
+    .filter((r) => !readEntrySeo(r["seo"]).noindex)
+    .slice(0, limit)
+    .map((r) => {
+      const seo = readEntrySeo(r["seo"]);
+      return {
+        title: String(r["title"]),
+        slug: String(r["slug"]),
+        publishedAt: ms(r["published_at"]),
+        excerpt: seo.description || excerptOf(String(r["plain_text"])),
+      };
+    });
 }
 
 /**

@@ -4,7 +4,9 @@ import { cacheTag } from "next/cache";
 import type { FeedItem, PublicMenuItem, ThemeLayouts } from "@oks-page/core";
 import { slugTag } from "../cache-tags";
 import {
+  loadPostSummaries,
   loadPublishedEntry,
+  loadReading,
   loadSiteInfo,
   loadLatestPosts,
   loadLook,
@@ -13,10 +15,25 @@ import {
   loadThemeLayouts,
   slugOf,
 } from "./entries";
-import type { EntryView, Look, SiteInfo, TermArchive } from "./types";
+import type { ReadingRoutes } from "@oks-page/core";
+import type { EntryView, Look, PostSummary, SiteInfo, TermArchive } from "./types";
 
 export { slugOf };
-export type { EntryView, Look, SiteInfo, TermArchive };
+export type { EntryView, Look, PostSummary, ReadingRoutes, SiteInfo, TermArchive };
+
+/** Where the home page and the posts page are. Tagged `settings` and `menus` (a page's address or status changes it). */
+export async function getReading(): Promise<ReadingRoutes> {
+  "use cache";
+  cacheTag("settings", "menus");
+  return loadReading();
+}
+
+/** The newest posts for the home page or the posts page. Tagged "feed": every change to a post refreshes it. */
+export async function getPostSummaries(limit: number): Promise<PostSummary[]> {
+  "use cache";
+  cacheTag("feed");
+  return loadPostSummaries(limit);
+}
 
 /** The site's name and tagline, for every page's title and tags. Tagged `settings`: refreshed when they are saved. */
 export async function getSiteInfo(): Promise<SiteInfo> {

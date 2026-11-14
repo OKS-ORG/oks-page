@@ -1,5 +1,10 @@
 // Site settings the proxy needs on every request, read at most once per few seconds in each process.
 import {
+  loadReadingRoutes,
+  type ReadingRoutes,
+  READING_SETTINGS_KEY,
+  readReadingSettings,
+  type ReadingSettings,
   MAINTENANCE_SETTINGS_KEY,
   SEO_SETTINGS_KEY,
   readMaintenanceSettings,
@@ -48,6 +53,23 @@ export async function maintenanceSettings(): Promise<MaintenanceSettings> {
 /** Whether the owner asked search engines to stay away (robots.txt, the sitemap and a `noindex` header). Off by default. */
 export async function seoSettings(): Promise<SeoSettings> {
   return readSeoSettings(await readSetting(SEO_SETTINGS_KEY));
+}
+
+/** Settings > Reading (the feeds read whether to carry the whole text). */
+export async function readingSettings(): Promise<ReadingSettings> {
+  return readReadingSettings(await readSetting(READING_SETTINGS_KEY));
+}
+
+/**
+ * Where the home page and the posts page are (Settings > Reading), for the proxy: "/" is a page even when the site has
+ * no page at "home", and the chosen home page's own address leads to "/". Kept for the same few seconds as a setting.
+ */
+export async function readingRoutes(): Promise<ReadingRoutes> {
+  const hit = cache.get("reading-routes");
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.value as ReadingRoutes;
+  const value = await loadReadingRoutes(getRunner(), await getSiteId());
+  cache.set("reading-routes", { value, at: Date.now() });
+  return value;
 }
 
 /** The "I use a CDN" setting (decision D81). Off unless the owner turns it on. */

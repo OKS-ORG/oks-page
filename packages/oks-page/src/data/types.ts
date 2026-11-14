@@ -20,10 +20,21 @@ export interface EntryView {
   layout: string;
 }
 
-/** What every page needs to know about the site: its name and its tagline. */
+/** What every page needs to know about the site: its name, its tagline and its language. */
 export interface SiteInfo {
   siteName: string;
   tagline: string;
+  /** The language of the site's content ("en", "ar"…), Settings > Languages. */
+  lang: string;
+  dir: "ltr" | "rtl";
+}
+
+/** A post in a list of the newest posts. */
+export interface PostSummary {
+  title: string;
+  slug: string;
+  publishedAt: number;
+  excerpt: string;
 }
 
 /** The look as the public pages use it: the theme's CSS file, the owner's CSS, and the logo if there is one. */

@@ -6,7 +6,7 @@ import { connection } from "next/server";
 import { getSiteInfo } from "./data/server";
 import { slugOf } from "./data/entries";
 import { getFeedPosts } from "./feed-data";
-import { seoSettings } from "./settings";
+import { readingSettings, seoSettings } from "./settings";
 import { siteOrigin } from "./site-origin";
 
 type Kind = "rss" | "atom";
@@ -32,6 +32,7 @@ async function respond(request: Request, kind: Kind, categorySlug: string | null
     homePath: category ? `/category/${category.slug}` : "/",
     selfPath: category ? `/category/${category.slug}/${file}` : `/${file}`,
     title: category ? `${category.name} – ${site.siteName}` : site.siteName,
+    fullText: (await readingSettings()).feedFullText,
   };
   const body = kind === "rss" ? buildRss(info, feed.items) : buildAtom(info, feed.items);
   return new Response(body, {

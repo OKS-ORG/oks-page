@@ -53,7 +53,9 @@ export type PageKind =
       chosen?: string;
     }
   | { kind: "archive"; termKind: string }
-  | { kind: "search" };
+  | { kind: "search" }
+  /** The list of the newest posts (the home page or the posts page, Settings > Reading). */
+  | { kind: "posts" };
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SITE = new Set<string>(SITE_BLOCKS);
@@ -80,7 +82,8 @@ export function layoutCandidates(page: PageKind): string[] {
   } else if (page.kind === "archive") {
     add(page.termKind);
     add("archive");
-  } else add("search");
+  } else if (page.kind === "posts") add("home");
+  else add("search");
   add("index");
   return out;
 }

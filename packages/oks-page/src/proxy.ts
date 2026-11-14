@@ -16,7 +16,7 @@ import {
 } from "./headers";
 import { mayPassMaintenance } from "./maintenance-gate";
 import { mayPreview } from "./preview-gate";
-import { cdnEnabled, maintenanceSettings, seoSettings } from "./settings";
+import { cdnEnabled, maintenanceSettings, readingRoutes, seoSettings } from "./settings";
 
 /** Every page shows the header and footer menus, so a CDN purge of a menu reaches every page. */
 const MENU_TAGS = ["menu:primary", "menu:footer"];
@@ -39,12 +39,14 @@ export async function proxy(request: NextRequest) {
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
   let seo: Awaited<ReturnType<typeof seoSettings>>;
+  let reading: Awaited<ReturnType<typeof readingRoutes>>;
   try {
-    [found, cdn, maintenance, seo] = await Promise.all([
+    [found, cdn, maintenance, seo, reading] = await Promise.all([
       findPublished(slug),
       cdnEnabled(),
       maintenanceSettings(),
       seoSettings(),
+      readingRoutes(),
     ]);
     // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
     if (!found) archive = await findTermArchive(slug);
@@ -101,6 +103,14 @@ export async function proxy(request: NextRequest) {
   const categoryFeed = /^category\/([^/]+)\/(?:feed|atom)\.xml$/.exec(slug);
   if (categoryFeed && (await findTermArchive(`category/${categoryFeed[1]}`)))
     return apply(NextResponse.next(), {});
+  // Settings > Reading: the chosen home page's own address leads to "/" (one address per page), and "/" is always a page
+  // when the home page shows the newest posts or a chosen page.
+  if (reading.homeShows === "page" && reading.homeSlug !== "home" && slug === reading.homeSlug)
+    return apply(NextResponse.redirect(new URL("/", request.url), 308), {});
+  if (slug === "home" && (reading.homeShows === "posts" || reading.homeSlug !== "home")) {
+    const tags = [`site:${await getSiteId()}`, "feed", ...MENU_TAGS];
+    return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+  }
   if (found) {
     const tags = [
       `site:${await getSiteId()}`,

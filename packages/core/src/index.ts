@@ -38,6 +38,7 @@ export * from "./email.js";
 export * from "./emails.js";
 export * from "./email-texts.js";
 export * from "./email-domain.js";
+export * from "./reading-settings.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

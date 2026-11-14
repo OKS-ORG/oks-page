@@ -6961,3 +6961,184 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     expect(await axeViolations(page)).toEqual([]);
   });
 });
+
+describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-reading-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "r".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const visible = async (path: string) => {
+    const response = await fetch(site.base + path, { redirect: "manual" });
+    const html = (await response.text()).replace(/<script[\s\S]*?<\/script>/g, "");
+    return { status: response.status, location: response.headers.get("location"), html };
+  };
+  const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("Reading: the home page shows the latest posts or a chosen page, a posts page, posts per page, and feeds with a summary only", async () => {
+    // Before: "/" is the Home page; feeds carry the full text.
+    expect((await visible("/")).html).toContain("This is your home page.");
+    expect(await (await fetch(site.base + "/feed.xml")).text()).toContain("content:encoded");
+    // Two more posts, so the list and its length show.
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    for (const title of ["Spring planting", "Summer pots"]) {
+      const made = await page.evaluate(async (t) => {
+        const r = await fetch("/api/admin/entries", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "post", title: t }),
+        });
+        return (await r.json()) as { id: string; revision: number };
+      }, title);
+      const saved = await page.evaluate(
+        async ([id, t, rev]) => {
+          const r = await fetch(`/api/admin/entries/${id}`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              title: t,
+              slugPart: (t as string).toLowerCase().replace(/ /g, "-"),
+              status: "published",
+              blocks: [
+                {
+                  id: "p1",
+                  type: "paragraph",
+                  props: {},
+                  content: [{ type: "text", text: `About ${t}.` }],
+                  children: [],
+                },
+              ],
+              revision: rev,
+            }),
+          });
+          return r.status;
+        },
+        [made.id, title, made.revision] as const,
+      );
+      expect(saved).toBe(200);
+    }
+
+    await page.goto(site.base + "/admin/settings/reading");
+    await page.getByRole("heading", { name: "Reading settings", level: 1 }).waitFor();
+    expect(await page.getByRole("button", { name: "Save changes" }).isDisabled()).toBe(true);
+    expect(await axeViolations(page)).toEqual([]);
+    await page.getByLabel("Your latest posts").check();
+    await page.getByLabel("Posts per page").fill("2");
+    await page.getByLabel("A summary").check();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Reading settings saved. Your site shows the change now.").waitFor();
+
+    // "/" lists the 2 newest posts with their summaries; feeds carry a summary only.
+    let home = (await visible("/")).html;
+    expect(home).toContain("Summer pots");
+    expect(home).toContain("Spring planting");
+    expect(home).not.toContain("Hello world");
+    expect(home).toContain("About Summer pots.");
+    const feed = await (await fetch(site.base + "/feed.xml")).text();
+    expect(feed).not.toContain("content:encoded");
+    expect(feed).toContain("<description>About Summer pots.</description>");
+
+    // A page you choose as home, and About as the posts page; the chosen page's own address leads to "/".
+    await page.getByLabel("A page you choose").check();
+    await page.getByLabel("Home page").selectOption({ label: "Contact" });
+    await page.getByLabel("Posts page").selectOption({ label: "About" });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Reading settings saved.", { exact: false }).waitFor();
+    home = (await visible("/")).html;
+    expect(home).toMatch(/<h1[^>]*>Contact<\/h1>/);
+    const about = (await visible("/about")).html;
+    expect(about).toMatch(/<h1[^>]*>About<\/h1>/);
+    expect(about).toContain("Summer pots");
+    const contact = await visible("/contact");
+    expect(contact.status).toBe(308);
+    expect(contact.location).toMatch(/\/$/);
+    // The same page cannot be both.
+    await page.getByLabel("Posts page").selectOption({ label: "Contact" });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("The home page and the posts page must be different pages.").waitFor();
+    // Back to the start for the next test.
+    const reset = await page.evaluate(
+      async () =>
+        (
+          await fetch("/api/admin/settings/reading", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              homeShows: "page",
+              homePageId: null,
+              postsPageId: null,
+              perPage: 10,
+              feedFullText: true,
+            }),
+          })
+        ).status,
+    );
+    expect(reset).toBe(200);
+    expect((await visible("/")).html).toContain("This is your home page.");
+  });
+
+  test("Languages: the site's language and direction on public pages; the admin stays English and left to right", async () => {
+    let html = (await visible("/")).html;
+    expect(html).toContain('lang="en" dir="ltr"');
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await page.goto(site.base + "/admin/settings/languages");
+    await page.getByRole("heading", { name: "Languages settings", level: 1 }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.getByLabel("Language of your site").selectOption("ar");
+    await page.getByLabel("From the language (right to left)").waitFor();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Language saved. Your site shows the change now.").waitFor();
+    html = (await visible("/")).html;
+    expect(html).toContain('lang="ar" dir="rtl"');
+    expect((await visible("/about")).html).toContain('lang="ar" dir="rtl"');
+    // The admin is not turned around.
+    expect(await page.evaluate(() => document.querySelector('[dir="rtl"]'))).toBeNull();
+    // Always left to right, whatever the language.
+    await page.getByLabel("Always left to right").check();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Language saved.", { exact: false }).waitFor();
+    expect((await visible("/")).html).toContain('lang="ar" dir="ltr"');
+  });
+});

@@ -287,11 +287,11 @@ export async function ThemedPage({
 
   const drawn = draw(layout, 0, []);
   return (
-    <>
+    <div lang={site.lang} dir={site.dir} className="oks-site">
       <LookStyles look={look} />
       {hiding ? <style dangerouslySetInnerHTML={{ __html: HIDE_CSS }} /> : null}
       {before}
       {drawn}
-    </>
+    </div>
   );
 }
