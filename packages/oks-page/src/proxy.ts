@@ -3,9 +3,9 @@
 //     trashed or a scheduled entry is not reachable (SEO-50), and a made-up address does not fill the cache.
 //     The lookup is one indexed read (SEO-51: under 5 ms at the 95th percentile).
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
-import { countRedirectHit, findRedirect } from "@oks-page/core";
+import { countRedirectHit } from "@oks-page/core";
 import { NextResponse, type NextRequest } from "next/server";
-import { findPublished, findTermArchive, slugOf } from "./data/entries";
+import { findAddress, findTermArchive, slugOf } from "./data/entries";
 import { getRunner, getSiteId, NO_SITE } from "./db";
 import {
   NOT_FOUND_CACHE_HEADER,
@@ -33,26 +33,28 @@ export async function proxy(request: NextRequest) {
   const path = decoded.normalize("NFC").replace(/\/+$/, "");
   const slug = slugOf(path === "" ? undefined : path.slice(1).split("/"));
   const started = performance.now();
-  let found: Awaited<ReturnType<typeof findPublished>>;
+  let found: Awaited<ReturnType<typeof findAddress>>["entry"];
   let archive: Awaited<ReturnType<typeof findTermArchive>> = null;
-  let moved: Awaited<ReturnType<typeof findRedirect>> = null;
+  let moved: Awaited<ReturnType<typeof findAddress>>["redirect"] = null;
+  let address: Awaited<ReturnType<typeof findAddress>>;
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
   let seo: Awaited<ReturnType<typeof seoSettings>>;
   let reading: Awaited<ReturnType<typeof readingRoutes>>;
   try {
-    [found, cdn, maintenance, seo, reading] = await Promise.all([
-      findPublished(slug),
+    [address, cdn, maintenance, seo, reading] = await Promise.all([
+      // The entry and the redirect in one round trip.
+      findAddress(slug, path),
       cdnEnabled(),
       maintenanceSettings(),
       seoSettings(),
       readingRoutes(),
     ]);
+    found = address.entry;
     // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
     if (!found) archive = await findTermArchive(slug);
     // Still nothing: it may be an old address that was redirected (a page that got a new address, or one set by hand).
-    if (!found && !archive && path !== "")
-      moved = await findRedirect(getRunner(), await getSiteId(), path);
+    if (!found && !archive && path !== "") moved = address.redirect;
   } catch (error) {
     // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
     if (error instanceof Error && error.message === NO_SITE)

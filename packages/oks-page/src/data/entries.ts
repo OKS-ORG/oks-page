@@ -174,6 +174,41 @@ export async function findPublished(slug: string): Promise<{ id: string; type: s
   return r ? { id: String(r["id"]), type: String(r["type_key"]) } : null;
 }
 
+/**
+ * What the request proxy needs to know about an address, in one round trip to the database: the published entry at it,
+ * and the redirect from it (spec 08, section 7). On PostgreSQL the first query of a request pays most of the wait, so one
+ * query instead of two keeps a missing address as fast as a found one.
+ */
+export async function findAddress(
+  slug: string,
+  path: string,
+): Promise<{
+  entry: { id: string; type: string } | null;
+  redirect: { id: string; to: string; status: number } | null;
+}> {
+  const siteId = await getSiteId();
+  const rows = await getRunner().all(
+    `select * from (select 'entry' as "kind", "id", "type_key" as "detail", 0 as "code" from "entries"
+        where "site_id" = ? and "slug" = ? and "status" = 'published' and "locale" = '' limit 1) as e
+     union all
+     select * from (select 'redirect' as "kind", "id", "to_path" as "detail", "status_code" as "code" from "redirects"
+        where "site_id" = ? and "from_path" = ? limit 1) as r`,
+    [siteId, slug, siteId, path],
+  );
+  const entry = rows.find((r) => r["kind"] === "entry");
+  const redirect = rows.find((r) => r["kind"] === "redirect");
+  return {
+    entry: entry ? { id: String(entry["id"]), type: String(entry["detail"]) } : null,
+    redirect: redirect
+      ? {
+          id: String(redirect["id"]),
+          to: String(redirect["detail"]),
+          status: Number(redirect["code"]),
+        }
+      : null,
+  };
+}
+
 /** Splits an address like "category/travel" into the list and the term's address, or null if it is not one. */
 export function archiveParts(slug: string): { kind: "category" | "tag"; slug: string } | null {
   const parts = slug.split("/");
