@@ -28,9 +28,21 @@ function treeRssMb(pid: number): number {
   return rows.filter(([p]) => family.has(p)).reduce((sum, [, , rss]) => sum + rss, 0) / 1024;
 }
 
+/**
+ * The limit after 3,000 requests for each setting.
+ *
+ * - With a capped heap, memory stays level (about 210 MB), so a leak or a heavy new dependency shows here first: this is
+ *   the strict check.
+ * - With Node's default heap on a machine with no memory limit (about 2 GB of heap allowed here), V8 lets the heap
+ *   grow before it cleans up, and afterwards keeps the freed heap pages instead of giving them back. Measured in
+ *   November 2026: the reading is about 440 MB or about 780 MB depending on when the big clean-up falls, while the
+ *   heap itself stays about 300 MB with 71 MB alive, and the same on main. In a container with a memory limit Node
+ *   fits its heap to the limit (spike S8: 76 to 114 MB). So this reading is the peak that V8 keeps, not what the site
+ *   needs, and its limit is only a guard against something extreme.
+ */
 const SETTINGS = [
-  { name: "Node's default heap", nodeOptions: "" },
-  { name: "heap capped at 128 MB", nodeOptions: "--max-old-space-size=128" },
+  { name: "Node's default heap", nodeOptions: "", limitMb: 1000 },
+  { name: "heap capped at 128 MB", nodeOptions: "--max-old-space-size=128", limitMb: 400 },
 ];
 
 describe.skipIf(process.platform !== "linux")(
@@ -51,7 +63,7 @@ describe.skipIf(process.platform !== "linux")(
       await db?.close();
     });
 
-    for (const { name, nodeOptions } of SETTINGS) {
+    for (const { name, nodeOptions, limitMb } of SETTINGS) {
       test(`${name}: memory after start, after 200 requests and after 3,000, and the start time`, async () => {
         const started = Date.now();
         const site = await startSite(
@@ -88,9 +100,8 @@ describe.skipIf(process.platform !== "linux")(
           // the hosting requirements table; no minimum RAM is promised from these limits.
           expect(failed).toBe(0);
           expect(afterStartMb).toBeLessThan(512);
-          // Node 24 with its default heap has been seen at 650 to 680 MB here while a capped heap stays steady, so this
-          // limit is wide enough not to fail on garbage-collection timing.
-          expect(after3000Mb).toBeLessThan(800);
+          // See SETTINGS: the capped heap is the strict check; the default heap's reading is the peak V8 keeps.
+          expect(after3000Mb).toBeLessThan(limitMb);
           expect(startSeconds).toBeLessThan(30);
         } finally {
           site.server.kill();
