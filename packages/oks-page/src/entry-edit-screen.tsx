@@ -15,6 +15,7 @@ import {
 } from "./entry-editing";
 import { EntryRevisions } from "./entry-revisions";
 import { EntryPreview } from "./entry-preview";
+import { EntryLayoutPanel } from "./entry-layout-panel";
 import { EntrySeoPanel } from "./entry-seo-panel";
 import { EntryTermsPanel } from "./entry-terms-panel";
 import { uploadForEditor } from "./media-client";
@@ -234,6 +235,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
         }}
       />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
+      <EntryLayoutPanel id={props.id} />
       <EntrySeoPanel id={props.id} />
       <EntryPreview id={props.id} />
       <AutosaveStatus savedAt={keptAt} timeZone={props.timeZone ?? null} />

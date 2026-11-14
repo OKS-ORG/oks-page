@@ -20,8 +20,9 @@ import { checkParts, type ThemeLayout } from "./theme-package.js";
 export const LAYOUT_HISTORY = 20;
 
 /** "theme": the theme's own; "owner": the owner's change on the theme's current layout; "owner-outdated": the theme
- * changed the layout since the owner changed it. */
-export type LayoutState = "theme" | "owner" | "owner-outdated";
+ * changed the layout since the owner changed it; "owner-made": a layout the owner made (spec 05, 17.6), which theme
+ * updates never touch. */
+export type LayoutState = "theme" | "owner" | "owner-outdated" | "owner-made";
 
 export interface LayoutInfo {
   /** "templates/<name>" or "parts/<name>". */
@@ -97,7 +98,7 @@ const blocksOf = (raw: unknown): Block[] | null => {
   return checkBlocks(value).body.blocks;
 };
 
-function themeLayoutOf(version: ThemeVersion, key: string): ThemeLayout | null {
+export function themeLayoutOf(version: ThemeVersion, key: string): ThemeLayout | null {
   const match = KEY.exec(key);
   if (!match) return null;
   const list = match[1] === "templates" ? version.templates : version.parts;
@@ -110,12 +111,19 @@ interface OverrideRow {
   draft: Block[] | null;
   baseHash: string;
   baseVersion: string;
+  /** "theme" for a change to a theme layout, "owner-made" for a layout the owner made. */
+  kind?: string;
+  /** The name an owner-made layout shows ("Landing page"). */
+  name?: string;
 }
 
-async function overridesOf(runner: SqlRunner, themeId: string): Promise<Map<string, OverrideRow>> {
+export async function overridesOf(
+  runner: SqlRunner,
+  themeId: string,
+): Promise<Map<string, OverrideRow>> {
   const rows = await runner.all(
-    `select "template_key", "content", "draft", "base_hash", "base_version" from "theme_overrides"
-      where "theme_id" = ? and "kind" = 'theme'`,
+    `select "template_key", "content", "draft", "base_hash", "base_version", "kind", "name" from "theme_overrides"
+      where "theme_id" = ?`,
     [themeId],
   );
   const out = new Map<string, OverrideRow>();
@@ -128,6 +136,8 @@ async function overridesOf(runner: SqlRunner, themeId: string): Promise<Map<stri
       draft: blocksOf(row["draft"]),
       baseHash: String(row["base_hash"]),
       baseVersion: String(row["base_version"]),
+      kind: String(row["kind"]),
+      name: String(row["name"]),
     });
   }
   return out;
@@ -135,6 +145,16 @@ async function overridesOf(runner: SqlRunner, themeId: string): Promise<Map<stri
 
 function info(key: string, theme: ThemeLayout | null, row: OverrideRow | undefined): LayoutInfo {
   const [, folder, name] = KEY.exec(key)!;
+  if (row?.kind === "owner-made")
+    return {
+      key,
+      kind: folder === "templates" ? "template" : "part",
+      name: name!,
+      title: row.name || name!,
+      state: "owner-made",
+      hasDraft: !!row.draft,
+      inTheme: false,
+    };
   let state: LayoutState = "theme";
   if (row?.published)
     state = theme && row.baseHash === layoutHash(theme.blocks) ? "owner" : "owner-outdated";
@@ -150,7 +170,7 @@ function info(key: string, theme: ThemeLayout | null, row: OverrideRow | undefin
   };
 }
 
-async function themeFor(runner: SqlRunner, actor: Actor, siteId: string, themeId: string) {
+export async function themeFor(runner: SqlRunner, actor: Actor, siteId: string, themeId: string) {
   if (!actor.can("themes.manage")) return forbidden;
   const found = await loadThemeVersion(runner, siteId, themeId);
   if (!found)
@@ -209,7 +229,7 @@ export async function getLayout(
  * The checks a set of layouts must pass together: every part a layout names exists, no part includes itself, nesting
  * and size stay within the limits. `changed` replaces the theme's blocks for the given keys.
  */
-function checkTogether(version: ThemeVersion, changed: Map<string, Block[]>): string[] {
+export function checkTogether(version: ThemeVersion, changed: Map<string, Block[]>): string[] {
   const problems: string[] = [];
   const use = (folder: "templates" | "parts", list: ThemeLayout[]) => {
     const out = list.map((l) => ({ ...l, blocks: changed.get(`${folder}/${l.name}`) ?? l.blocks }));

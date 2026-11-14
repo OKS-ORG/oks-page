@@ -16,6 +16,8 @@ export interface EntryView {
   noindex: boolean;
   /** The address of the first picture in the page (a library file), or null: the picture of a link preview. */
   image: string | null;
+  /** The layout the page chose in its settings ("" for its usual one). */
+  layout: string;
 }
 
 /** What every page needs to know about the site: its name and its tagline. */

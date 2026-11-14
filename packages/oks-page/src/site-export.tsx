@@ -59,7 +59,7 @@ export default async function Page({ params }: Props) {
     );
   }
   const drawn = await themed(
-    { kind: "entry", type: entry.type, slug },
+    { kind: "entry", type: entry.type, slug, chosen: entry.layout },
     {
       title: entry.title,
       content: <article dangerouslySetInnerHTML={{ __html: entry.html }} />,

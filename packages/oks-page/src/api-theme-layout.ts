@@ -5,6 +5,7 @@
 //   POST    { action: "keep-mine" | "reset", key } or { action: "restore", versionId }
 // Only people who may change the site design (`themes.manage`).
 import {
+  deleteOwnerLayout,
   discardLayoutDraft,
   getLayout,
   keepMyLayout,
@@ -12,6 +13,7 @@ import {
   listLayoutVersions,
   loadThemeLayouts,
   loadThemeVersion,
+  pagesChoosing,
   resetLayout,
   restoreLayoutVersion,
   saveLayoutDraft,
@@ -23,6 +25,7 @@ import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { LAYOUT_STATUS } from "./api-theme-layouts";
 import { getRunner } from "./db";
+import { refreshEntry } from "./refresh-cache";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -40,10 +43,16 @@ export async function GET(request: Request, context: Context) {
   // Where the layout shows, with the real numbers, for the editor's banner.
   const layouts = await loadThemeLayouts(getRunner(), member.siteId, { themeId: id, drafts: true });
   const usage = layouts ? await layoutUsage(getRunner(), member.siteId, layouts, key) : null;
+  // For a named layout the owner made: the pages that chose it (listed before deleting it).
+  const pages =
+    result.layout.state === "owner-made" && key.startsWith("templates/")
+      ? await pagesChoosing(getRunner(), member.siteId, key.slice("templates/".length))
+      : [];
   return NextResponse.json({
     layout: result.layout,
     versions: versions.ok ? versions.versions : [],
     usage,
+    pages,
   });
 }
 
@@ -116,6 +125,14 @@ export async function POST(request: Request, context: Context) {
       revalidateTag("theme", { expire: 0 });
     return NextResponse.json({ ok: true });
   }
+  if (body["action"] === "delete") {
+    const result = await deleteOwnerLayout(runner, actor, member.siteId, id, key);
+    if (!result.ok) return reply(result, LAYOUT_STATUS[result.code]);
+    for (const page of result.moved) refreshEntry(page.id, page.slug);
+    if ((await loadThemeVersion(runner, member.siteId, id))?.isActive)
+      revalidateTag("theme", { expire: 0 });
+    return NextResponse.json({ ok: true, moved: result.moved });
+  }
   if (body["action"] === "restore") {
     const result = await restoreLayoutVersion(
       runner,
@@ -127,5 +144,8 @@ export async function POST(request: Request, context: Context) {
     if (!result.ok) return reply(result, LAYOUT_STATUS[result.code]);
     return NextResponse.json({ ok: true, layout: result.layout, repairs: result.repairs });
   }
-  return reply({ code: "invalid", message: "Say what to do: keep-mine, reset or restore." }, 400);
+  return reply(
+    { code: "invalid", message: "Say what to do: keep-mine, reset, restore or delete." },
+    400,
+  );
 }

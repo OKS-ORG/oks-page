@@ -1,5 +1,6 @@
 // The queries behind both data modules (server and export). No caching here.
 import {
+  chosenLayout,
   enhanceImages,
   excerptOf,
   firstImageOf,
@@ -91,7 +92,7 @@ export const slugOf = (path: string[] | undefined) => {
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
-    `select e."id", e."title", e."slug", e."type_key", e."html", e."plain_text", e."seo", e."published_at", e."updated_at", u."name" as "author"
+    `select e."id", e."title", e."slug", e."type_key", e."html", e."plain_text", e."seo", e."meta", e."published_at", e."updated_at", u."name" as "author"
        from "entries" e left join "users" u on u."id" = e."author_id"
       where e."site_id" = ? and e."slug" = ? and e."status" = 'published' and e."locale" = ''
       order by case e."type_key" when 'page' then 0 else 1 end limit 1`,
@@ -116,6 +117,7 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
     description: seo.description || excerptOf(plain),
     noindex: seo.noindex,
     image: firstImageOf(written),
+    layout: chosenLayout(r["meta"]),
   };
 }
 

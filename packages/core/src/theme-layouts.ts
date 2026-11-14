@@ -45,7 +45,13 @@ export interface ThemeLayouts {
 
 /** What kind of page is being drawn. */
 export type PageKind =
-  | { kind: "entry"; type: string; slug: string }
+  | {
+      kind: "entry";
+      type: string;
+      slug: string;
+      /** A layout the page chose in its settings ("custom-landing-page"); used first when the theme has it. */
+      chosen?: string;
+    }
   | { kind: "archive"; termKind: string }
   | { kind: "search" };
 
@@ -59,6 +65,7 @@ export function layoutCandidates(page: PageKind): string[] {
     if (NAME.test(name) && !out.includes(name)) out.push(name);
   };
   if (page.kind === "entry") {
+    if (page.chosen) add(page.chosen);
     // "/" is the entry with the address "home".
     if (page.slug === "home") add("front-page");
     const slug = page.slug.replaceAll("/", "-");
@@ -76,6 +83,21 @@ export function layoutCandidates(page: PageKind): string[] {
   } else add("search");
   add("index");
   return out;
+}
+
+/** The layout an entry chose in its settings (kept in its `meta` as `layout`), or "" for the usual one. */
+export function chosenLayout(meta: unknown): string {
+  let value = meta;
+  if (typeof meta === "string") {
+    try {
+      value = JSON.parse(meta);
+    } catch {
+      return "";
+    }
+  }
+  const layout =
+    value && typeof value === "object" ? (value as Record<string, unknown>)["layout"] : undefined;
+  return typeof layout === "string" && NAME.test(layout) ? layout : "";
 }
 
 /** The first layout of the list the theme has, or null (the site then draws the page the built-in way). */
@@ -206,7 +228,7 @@ export async function loadThemeLayouts(
   const sections = await loadSectionBlocks(runner, siteId, { drafts: options.drafts ?? false });
   const owner = new Map<string, unknown>();
   const rows = await runner.all(
-    `select "template_key", "content", "draft" from "theme_overrides" where "theme_id" = ? and "kind" = 'theme'`,
+    `select "template_key", "content", "draft" from "theme_overrides" where "theme_id" = ?`,
     [themeId],
   );
   for (const row of rows) {
@@ -335,14 +357,17 @@ export async function layoutUsage(
         usage.inLayouts.push(template);
       }
   const rows = await runner.all(
-    `select "slug", "type_key" from "entries" where "site_id" = ? and "status" = 'published' and "locale" = ''`,
+    `select "slug", "type_key", "meta" from "entries" where "site_id" = ? and "status" = 'published' and "locale" = ''`,
     [siteId],
   );
   for (const row of rows) {
     const type = String(row["type_key"]);
-    const chosen = layoutCandidates({ kind: "entry", type, slug: String(row["slug"]) }).find((n) =>
-      Object.hasOwn(layouts.templates, n),
-    );
+    const chosen = layoutCandidates({
+      kind: "entry",
+      type,
+      slug: String(row["slug"]),
+      chosen: chosenLayout(row["meta"]),
+    }).find((n) => Object.hasOwn(layouts.templates, n));
     if (chosen && counting.has(chosen)) usage.entries[type] = (usage.entries[type] ?? 0) + 1;
   }
   const first = (kind: PageKind) =>

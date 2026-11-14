@@ -46,7 +46,7 @@ export default async function PreviewPage({ params, searchParams }: Props) {
   const layouts = await getThemeLayouts();
   const layout = pickLayout(
     layouts,
-    layoutCandidates({ kind: "entry", type: entry.type, slug: entry.slug }),
+    layoutCandidates({ kind: "entry", type: entry.type, slug: entry.slug, chosen: entry.layout }),
   );
   if (layout && layouts)
     return (

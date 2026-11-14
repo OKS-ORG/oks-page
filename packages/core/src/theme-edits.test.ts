@@ -36,8 +36,22 @@ import {
   SECTION_HISTORY,
   updateSavedSection,
 } from "./saved-sections.js";
+import {
+  createOwnerLayout,
+  deleteOwnerLayout,
+  layoutChoices,
+  loadEntryLayout,
+  setEntryLayout,
+  typesWithoutLayout,
+} from "./owner-layouts.js";
 import { installTheme, useTheme } from "./theme-install.js";
-import { layoutUsage, loadActiveThemeLayouts, loadThemeLayouts } from "./theme-layouts.js";
+import {
+  layoutCandidates,
+  layoutUsage,
+  loadActiveThemeLayouts,
+  loadThemeLayouts,
+  pickLayout,
+} from "./theme-layouts.js";
 
 function tgz(files: Record<string, string>): Buffer {
   const parts: Buffer[] = [];
@@ -613,6 +627,156 @@ for (const { kind, open, skip } of openers) {
         section: { hasDraft: true },
       });
       expect(words(await getSavedSection(db.runner, admin, siteId, id))).toContain('"v3"');
+    });
+
+    // ----- layouts the owner makes (spec 05, 17.6; TH-72)
+    const entryId = async (slug: string) =>
+      String((await db.run("select id from entries where slug = ?", [slug]))[0]!["id"]);
+    const drawnFor = async (slug: string, type: string, chosen = "") => {
+      const layouts = (await loadActiveThemeLayouts(db.runner, siteId))!;
+      return words(pickLayout(layouts, layoutCandidates({ kind: "entry", type, slug, chosen })));
+    };
+
+    test("a named layout: made from another, chosen by a page, never touched by a theme update, deleted with its pages moved back (TH-72)", async () => {
+      expect(
+        await createOwnerLayout(db.runner, editor, siteId, themeId, { for: "pages", name: "X" }),
+      ).toMatchObject({ code: "forbidden" });
+      for (const [name, message] of [["", /a name of 1 to 60/]] as const)
+        expect(
+          await createOwnerLayout(db.runner, admin, siteId, themeId, { for: "pages", name }),
+        ).toMatchObject({ ok: false, message: expect.stringMatching(message) });
+      const made = await createOwnerLayout(db.runner, admin, siteId, themeId, {
+        for: "pages",
+        name: "Landing page",
+        from: "templates/index",
+      });
+      expect(made).toMatchObject({
+        ok: true,
+        layout: {
+          key: "templates/custom-landing-page",
+          title: "Landing page",
+          state: "owner-made",
+        },
+      });
+      // The same name again (whatever the case) is refused; a second named layout gets its own address.
+      expect(
+        await createOwnerLayout(db.runner, admin, siteId, themeId, {
+          for: "pages",
+          name: "landing PAGE",
+        }),
+      ).toMatchObject({ ok: false });
+      expect(await states()).toMatchObject({
+        "templates/custom-landing-page": ["owner-made", false, false],
+      });
+      // It starts as a copy of the index, published; change it like any layout.
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/custom-landing-page", [
+        text("big landing"),
+      ]);
+      await publishLayouts(db.runner, admin, siteId, themeId);
+      expect(await layoutChoices(db.runner, siteId)).toEqual([
+        { name: "custom-landing-page", title: "Landing page" },
+      ]);
+
+      // A page chooses it; only layouts of the theme in use can be chosen; only people who may edit the page.
+      const about = await entryId("about");
+      expect(await setEntryLayout(db.runner, admin, siteId, about, "custom-nothing")).toMatchObject(
+        {
+          ok: false,
+          message: expect.stringMatching(/not one of the theme in use/),
+        },
+      );
+      expect(
+        await setEntryLayout(db.runner, admin, siteId, about, "custom-landing-page"),
+      ).toMatchObject({ ok: true, layout: "custom-landing-page" });
+      expect(await loadEntryLayout(db.runner, admin, siteId, about)).toMatchObject({
+        ok: true,
+        layout: "custom-landing-page",
+        choices: [{ title: "Landing page" }],
+      });
+      expect(await drawnFor("about", "page", "custom-landing-page")).toContain("big landing");
+      // The banner counts the page that chose it.
+      const usage = await layoutUsage(
+        db.runner,
+        siteId,
+        (await loadActiveThemeLayouts(db.runner, siteId))!,
+        "templates/custom-landing-page",
+      );
+      expect(usage.entries).toEqual({ page: 1 });
+
+      // A theme update keeps it as it is.
+      await install(maple("1.1.0", "new theme index"));
+      expect(await states()).toMatchObject({
+        "templates/custom-landing-page": ["owner-made", false, false],
+      });
+      expect(await drawnFor("about", "page", "custom-landing-page")).toContain("big landing");
+      // Another theme has no such layout: the page uses that theme's usual layout; switching back brings it back.
+      const other = await install(
+        tgz({
+          "theme.json": JSON.stringify({ key: "birch", name: "Birch", version: "1.0.0" }),
+          "templates/index.json": layout(text("birch")),
+        }),
+      );
+      await useTheme(db.runner, admin, siteId, other.id);
+      expect(await drawnFor("about", "page", "custom-landing-page")).toContain("birch");
+      await useTheme(db.runner, admin, siteId, themeId);
+      expect(await drawnFor("about", "page", "custom-landing-page")).toContain("big landing");
+
+      // Theme layouts cannot be deleted; this one can, and the page goes back to its usual layout.
+      expect(
+        await deleteOwnerLayout(db.runner, admin, siteId, themeId, "templates/index"),
+      ).toMatchObject({ ok: false, message: expect.stringMatching(/can be reset instead/) });
+      const deleted = await deleteOwnerLayout(
+        db.runner,
+        admin,
+        siteId,
+        themeId,
+        "templates/custom-landing-page",
+      );
+      expect(deleted).toMatchObject({ ok: true, moved: [{ slug: "about", title: "About" }] });
+      expect(await loadEntryLayout(db.runner, admin, siteId, about)).toMatchObject({
+        layout: "",
+        choices: [],
+      });
+      expect(await states()).not.toHaveProperty("templates/custom-landing-page");
+      expect(
+        await db.run("select action from audit_log where action = 'layout.delete'"),
+      ).toHaveLength(1);
+    });
+
+    test("a layout for a content type that has none: its entries use it at once; a type that has one is refused", async () => {
+      await db.run(
+        `insert into content_types (id, site_id, key, label, url_rule, has_body, hierarchical, options, created_at, updated_at)
+          values (?, ?, 'recipe', 'Recipe', '/recipes/{slug}', ?, ?, '{}', ?, ?)`,
+        [newId(), siteId, true, false, T, T],
+      );
+      expect(
+        (await typesWithoutLayout(db.runner, siteId, themeId)).map((t) => t.key).sort(),
+      ).toEqual(["page", "recipe"]);
+      expect(
+        await createOwnerLayout(db.runner, admin, siteId, themeId, { for: "post", from: "blank" }),
+      ).toMatchObject({
+        ok: false,
+        message: expect.stringMatching(/already has a layout of its own/),
+      });
+      expect(
+        await createOwnerLayout(db.runner, admin, siteId, themeId, { for: "nonsense" }),
+      ).toMatchObject({ ok: false, message: "Choose a content type of this site." });
+      const made = await createOwnerLayout(db.runner, admin, siteId, themeId, {
+        for: "recipe",
+        from: "blank",
+      });
+      expect(made).toMatchObject({
+        ok: true,
+        layout: { key: "templates/single-recipe", title: "Recipe", state: "owner-made" },
+      });
+      // Blank: the page's title and content only, used by recipes (and not by posts).
+      const recipe = await drawnFor("recipes/soup", "recipe");
+      expect(recipe).toContain("post-title");
+      expect(recipe).not.toContain("header");
+      expect(await drawnFor("blog/hello-world", "post")).toContain("header");
+      expect((await typesWithoutLayout(db.runner, siteId, themeId)).map((t) => t.key)).toEqual([
+        "page",
+      ]);
     });
   });
 }

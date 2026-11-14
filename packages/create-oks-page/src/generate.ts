@@ -259,6 +259,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, PUT } from ${from("api-entry-seo")};\n`,
     },
     {
+      path: "app/api/admin/entries/[id]/layout/route.ts",
+      content: `export { GET, PUT } from ${from("api-entry-layout")};\n`,
+    },
+    {
       path: "app/api/admin/entries/[id]/preview-link/route.ts",
       content: `export { POST } from ${from("api-entry-preview")};\n`,
     },

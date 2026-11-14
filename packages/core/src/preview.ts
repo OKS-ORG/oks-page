@@ -4,6 +4,7 @@
 // at its time. It shows the last saved version, never a version in the shared cache.
 import type { SqlRunner } from "@oks-page/db";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { chosenLayout } from "./theme-layouts.js";
 
 export const PREVIEW_DEFAULT_DAYS = 7;
 export const PREVIEW_MAX_DAYS = 30;
@@ -53,6 +54,8 @@ export interface PreviewEntry {
   status: string;
   html: string;
   updatedAt: number;
+  /** The layout the entry chose in its settings ("" for its usual one). */
+  layout: string;
 }
 
 /** The saved version of an entry in any state except the trash, or null. Never cached: a draft must not be shared. */
@@ -62,7 +65,7 @@ export async function loadPreviewEntry(
   id: string,
 ): Promise<PreviewEntry | null> {
   const rows = await runner.all(
-    `select "id", "title", "slug", "type_key", "status", "html", "updated_at" from "entries"
+    `select "id", "title", "slug", "type_key", "status", "html", "updated_at", "meta" from "entries"
       where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
     [id, siteId],
   );
@@ -77,5 +80,6 @@ export async function loadPreviewEntry(
     status: String(r["status"]),
     html: String(r["html"]),
     updatedAt: updated instanceof Date ? updated.getTime() : Number(updated),
+    layout: chosenLayout(r["meta"]),
   };
 }

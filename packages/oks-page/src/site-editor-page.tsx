@@ -5,6 +5,7 @@ import {
   listLayouts,
   listSavedSections,
   sectionPlaces,
+  typesWithoutLayout,
   loadThemeVersion,
   SECTION_GROUP_LABELS,
   SECTION_GROUPS,
@@ -94,6 +95,7 @@ export default async function SiteEditorPage() {
           initialLayouts={layouts.layouts}
           pages={pages}
           initialSaved={saved}
+          initialTypes={themeId ? await typesWithoutLayout(runner, member.siteId, themeId) : []}
           sectionGroups={SECTION_GROUPS.map((g) => ({ value: g, label: SECTION_GROUP_LABELS[g] }))}
           parts={found.version.parts.map((p) => p.name)}
           sections={found.version.patterns

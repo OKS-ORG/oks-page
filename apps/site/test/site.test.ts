@@ -6362,5 +6362,99 @@ describe.skipIf(!findBrowser())(
 
       await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });
+
+    test("layouts the owner makes: a landing page made from a copy, chosen by a page, and deleted with the page moved back (TH-72)", async () => {
+      const page = await signedIn(owner);
+      const themes = (await call(page, "GET", "/api/admin/themes")).json as {
+        themes: { id: string; key: string }[];
+      };
+      const birch = themes.themes.find((t) => t.key === "birch")!;
+      await call(page, "POST", `/api/admin/themes/${birch.id}`, { action: "use" });
+      const visible = async (path: string) =>
+        (await (await fetch(site.base + path)).text()).replace(/<script[\s\S]*?<\/script>/g, "");
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(site.base + "/admin/settings/site-editor");
+      const nav = page.getByRole("navigation", { name: "Layouts" });
+      const tools = page.getByRole("complementary", { name: "Tools" });
+
+      // New layout: for pages to choose, a copy of the Default layout.
+      await nav.getByRole("button", { name: "New layout" }).click();
+      await nav.getByLabel("What is it for?").selectOption("pages");
+      await nav.getByLabel("Name").fill("Landing page");
+      await nav.getByLabel("Start from").selectOption("templates/index");
+      await nav.getByRole("button", { name: "Make the layout" }).click();
+      await page
+        .getByText('"Landing page" is made. Pages can choose it in their settings, under Layout.')
+        .waitFor();
+      await nav.getByRole("button", { name: /^Landing page\s*Made by you/ }).waitFor();
+      await page
+        .getByText("You are changing the Landing page layout. No published page uses it yet.")
+        .waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+
+      // Change it: a heading at the end; publish.
+      await tools.getByLabel(/Add (after the selected block|at the end)/).selectOption("heading");
+      await tools.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByText("Draft kept").waitFor();
+      await page.getByRole("button", { name: "Publish changes (1)" }).click();
+      await page.getByText("Published 1 layout. Your site shows the changes now.").waitFor();
+      expect(await visible("/about")).not.toContain("New heading");
+
+      // The About page chooses it in its settings; other pages keep theirs.
+      const aboutId = String(
+        (await db.run("select id from entries where slug = 'about'"))[0]!["id"],
+      );
+      await page.goto(site.base + `/admin/pages/${aboutId}`);
+      const box = page.getByRole("form", { name: "Layout" });
+      await box.getByLabel("How this page is laid out").selectOption({ label: "Landing page" });
+      await box.getByRole("button", { name: "Update the layout" }).click();
+      await page.getByText("Layout saved. The page uses it now.").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      expect(await visible("/about")).toContain("New heading");
+      expect(await visible("/contact")).not.toContain("New heading");
+      // Only a layout of the theme in use; an editor may not make layouts.
+      expect(
+        (
+          await call(page, "PUT", `/api/admin/entries/${aboutId}/layout`, {
+            layout: "custom-nothing",
+          })
+        ).status,
+      ).toBe(400);
+      const editor = await signedIn(cara);
+      expect(
+        (
+          await call(editor, "POST", `/api/admin/themes/${birch.id}/layouts`, {
+            action: "create",
+            for: "pages",
+            name: "X",
+          })
+        ).status,
+      ).toBe(403);
+
+      // The banner counts the page; deleting lists it and moves it back to its usual layout.
+      await page.goto(site.base + "/admin/settings/site-editor");
+      await nav.getByRole("button", { name: /^Landing page/ }).click();
+      await page
+        .getByText("You are changing the Landing page layout. This changes 1 page.")
+        .waitFor();
+      await tools.getByRole("button", { name: "Delete this layout" }).click();
+      const removing = tools.getByRole("group", { name: "Delete this layout" });
+      await removing.getByText("About").waitFor();
+      await removing
+        .getByRole("button", { name: "Move these pages to their usual layout, then delete" })
+        .click();
+      await page
+        .getByText('"Landing page" is deleted. Its pages use their usual layout again.')
+        .waitFor();
+      expect(await visible("/about")).not.toContain("New heading");
+      expect(await nav.getByRole("button", { name: /^Landing page/ }).count()).toBe(0);
+      // With nothing to choose, the page's Layout box is gone.
+      await page.goto(site.base + `/admin/pages/${aboutId}`);
+      await page.getByRole("form", { name: "Search engines" }).waitFor();
+      expect(await page.getByRole("form", { name: "Layout" }).count()).toBe(0);
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
+    });
   },
 );

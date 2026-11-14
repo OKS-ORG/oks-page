@@ -155,7 +155,7 @@ export default async function SiteEditorPreview({ searchParams }: Props) {
           : null,
       isFront: slug === "home",
     };
-    candidates = layoutCandidates({ kind: "entry", type: entry.type, slug });
+    candidates = layoutCandidates({ kind: "entry", type: entry.type, slug, chosen: entry.layout });
   }
   // A page layout being edited is used for the page shown, so the owner sees it whatever page fills the preview.
   const match = KEY.exec(key);

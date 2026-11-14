@@ -58,6 +58,24 @@ interface Props {
   initialSaved: SavedSection[];
   /** The groups a saved section can be in, with their names. */
   sectionGroups: { value: string; label: string }[];
+  /** The content types that have no page layout yet. */
+  initialTypes: ContentTypeChoice[];
+}
+
+export interface ContentTypeChoice {
+  key: string;
+  label: string;
+}
+interface LayoutPageRef {
+  id: string;
+  title: string;
+  slug: string;
+}
+/** The "New layout" form: for pages to choose (with a name) or for a content type; started from a layout or blank. */
+interface Making {
+  for: string;
+  name: string;
+  from: string;
 }
 
 export type SavedSection = SavedSectionInfo & { places: number };
@@ -94,6 +112,7 @@ const STATE_WORDS: Record<LayoutInfo["state"], string> = {
   theme: "The theme's",
   owner: "Your changes",
   "owner-outdated": "The theme changed this",
+  "owner-made": "Made by you",
 };
 
 /** The blocks that can be added, with plain names. */
@@ -240,7 +259,12 @@ export function SiteEditor({
   sections,
   initialSaved,
   sectionGroups,
+  initialTypes,
 }: Props) {
+  const [types, setTypes] = useState(initialTypes);
+  const [making, setMaking] = useState<Making | null>(null);
+  const [layoutPages, setLayoutPages] = useState<LayoutPageRef[]>([]);
+  const [removing, setRemoving] = useState(false);
   const [layouts, setLayouts] = useState(initialLayouts);
   const [saved, setSaved] = useState(initialSaved);
   const [savedPlaces, setSavedPlaces] = useState<SectionPlace[]>([]);
@@ -301,8 +325,12 @@ export function SiteEditor({
       fetch(`${base}/layouts`),
       fetch("/api/admin/sections"),
     ]);
-    const body = (await response.json().catch(() => null)) as { layouts?: LayoutInfo[] } | null;
+    const body = (await response.json().catch(() => null)) as {
+      layouts?: LayoutInfo[];
+      types?: ContentTypeChoice[];
+    } | null;
     if (response.ok && body?.layouts) setLayouts(body.layouts);
+    if (response.ok && body?.types) setTypes(body.types);
     const list = (await savedResponse.json().catch(() => null)) as {
       sections?: SavedSection[];
     } | null;
@@ -315,6 +343,8 @@ export function SiteEditor({
       setRenaming(null);
       setDeleting(false);
       setSaving2(null);
+      setRemoving(false);
+      setLayoutPages([]);
       if (key.startsWith(SECTION_KEY)) {
         const response = await fetch(sectionUrl(key.slice(SECTION_KEY.length)));
         const body = (await response.json().catch(() => null)) as {
@@ -344,11 +374,13 @@ export function SiteEditor({
         layout?: LayoutDetail;
         versions?: LayoutVersion[];
         usage?: LayoutUsage | null;
+        pages?: LayoutPageRef[];
       } | null;
       if (!response.ok || !body?.layout) {
         setProblem(failure(body, "The layout could not be opened."));
         return;
       }
+      setLayoutPages(body.pages ?? []);
       setDetail(body.layout);
       setVersions(body.versions ?? []);
       setUsage(body.usage ?? null);
@@ -702,6 +734,107 @@ export function SiteEditor({
                 {drafts > 0 ? `Publish changes (${drafts})` : "Nothing to publish"}
               </Button>
             </p>
+            {making ? (
+              <fieldset style={{ border: "1px solid currentColor", padding: "0.5rem" }}>
+                <legend>New layout</legend>
+                <p>
+                  <label htmlFor="se-new-for">What is it for?</label>
+                  <br />
+                  <select
+                    id="se-new-for"
+                    value={making.for}
+                    onChange={(e) => setMaking({ ...making, for: e.target.value })}
+                    style={{ minBlockSize: "32px", maxInlineSize: "100%" }}
+                  >
+                    <option value="pages">A layout pages can choose (like a landing page)</option>
+                    {types.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        {`Every ${t.label} entry (it has no layout of its own yet)`}
+                      </option>
+                    ))}
+                  </select>
+                </p>
+                {making.for === "pages" ? (
+                  <p>
+                    <label htmlFor="se-new-name">Name</label>
+                    <br />
+                    <input
+                      id="se-new-name"
+                      value={making.name}
+                      maxLength={60}
+                      onChange={(e) => setMaking({ ...making, name: e.target.value })}
+                      style={{ minBlockSize: "32px", inlineSize: "100%" }}
+                    />
+                  </p>
+                ) : (
+                  <p>Those entries use it as soon as it is made.</p>
+                )}
+                <p>
+                  <label htmlFor="se-new-from">Start from</label>
+                  <br />
+                  <select
+                    id="se-new-from"
+                    value={making.from}
+                    onChange={(e) => setMaking({ ...making, from: e.target.value })}
+                    style={{ minBlockSize: "32px", maxInlineSize: "100%" }}
+                  >
+                    <option value="blank">A blank page (only the title and the content)</option>
+                    {layouts
+                      .filter((l) => l.kind === "template")
+                      .map((l) => (
+                        <option key={l.key} value={l.key}>
+                          {`A copy of ${layoutTitle(l.key, l.title)}`}
+                        </option>
+                      ))}
+                  </select>
+                </p>
+                <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <Button
+                    color="primary"
+                    isDisabled={
+                      pending !== null || (making.for === "pages" && making.name.trim() === "")
+                    }
+                    onPress={() =>
+                      void (async () => {
+                        setProblem(null);
+                        const answer = await post(
+                          `${base}/layouts`,
+                          { action: "create", ...making },
+                          "The layout could not be made.",
+                        ).catch((error: Error) => {
+                          setProblem(error.message);
+                          return null;
+                        });
+                        const made = answer?.["layout"] as LayoutInfo | undefined;
+                        if (!made) return;
+                        setMaking(null);
+                        await refreshList();
+                        setOpenKey(made.key);
+                        setPage(defaultPage(made.key, pages));
+                        setNote(
+                          making.for === "pages"
+                            ? `"${made.title}" is made. Pages can choose it in their settings, under Layout.`
+                            : `The ${made.title} layout is made. ${made.title} entries use it now.`,
+                        );
+                      })()
+                    }
+                  >
+                    Make the layout
+                  </Button>
+                  <Button onPress={() => setMaking(null)}>Cancel</Button>
+                </p>
+              </fieldset>
+            ) : (
+              <p>
+                <Button
+                  onPress={() =>
+                    setMaking({ for: "pages", name: "", from: layouts[0]?.key ?? "blank" })
+                  }
+                >
+                  New layout
+                </Button>
+              </p>
+            )}
             {groups.map(([label, list]) =>
               list.length > 0 ? (
                 <div key={label}>
@@ -724,7 +857,9 @@ export function SiteEditor({
                           <small>
                             {STATE_WORDS[l.state]}
                             {l.hasDraft ? " · draft" : ""}
-                            {l.inTheme ? "" : " · no longer in the theme"}
+                            {l.inTheme || l.state === "owner-made"
+                              ? ""
+                              : " · no longer in the theme"}
                           </small>
                         </button>
                       </li>
@@ -1313,6 +1448,20 @@ export function SiteEditor({
                   Throw away the draft
                 </Button>
               ) : null}
+              {!isSection && open.key.startsWith("templates/") ? (
+                <Button
+                  onPress={() =>
+                    setMaking({ for: "pages", name: `Copy of ${title}`, from: open.key })
+                  }
+                >
+                  Duplicate this layout
+                </Button>
+              ) : null}
+              {open.state === "owner-made" && !removing ? (
+                <Button color="danger" onPress={() => setRemoving(true)}>
+                  Delete this layout
+                </Button>
+              ) : null}
               {open.state !== "theme" && open.inTheme ? (
                 resetting ? (
                   <>
@@ -1339,6 +1488,58 @@ export function SiteEditor({
                 )
               ) : null}
             </p>
+            {removing ? (
+              <div role="group" aria-label="Delete this layout">
+                {layoutPages.length > 0 ? (
+                  <>
+                    <p>These pages chose it. They go back to their usual layout:</p>
+                    <ul>
+                      {layoutPages.map((p) => (
+                        <li key={p.id}>{p.title || p.slug}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p>
+                    No page chose it
+                    {open.key.includes("/single-")
+                      ? "; its entries go back to the usual layout"
+                      : ""}
+                    .
+                  </p>
+                )}
+                <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <Button
+                    color="danger"
+                    isDisabled={pending !== null}
+                    onPress={() =>
+                      void (async () => {
+                        setProblem(null);
+                        const name = title;
+                        const answer = await post(
+                          `${base}/layout`,
+                          { action: "delete", key: openKey },
+                          "It could not be deleted.",
+                        ).catch((error: Error) => {
+                          setProblem(error.message);
+                          return null;
+                        });
+                        if (!answer) return;
+                        setRemoving(false);
+                        await refreshList();
+                        setOpenKey(layouts.find((l) => l.key !== openKey)?.key ?? openKey);
+                        setNote(`"${name}" is deleted. Its pages use their usual layout again.`);
+                      })()
+                    }
+                  >
+                    {layoutPages.length > 0
+                      ? "Move these pages to their usual layout, then delete"
+                      : "Yes, delete it"}
+                  </Button>
+                  <Button onPress={() => setRemoving(false)}>Keep it</Button>
+                </p>
+              </div>
+            ) : null}
             <details>
               <summary>{`History (${versions.length})`}</summary>
               {versions.length === 0 ? (
