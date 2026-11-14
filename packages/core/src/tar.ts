@@ -1,7 +1,7 @@
 // Reading a .tgz (a gzip-compressed tar) in memory, without writing a single file (spec 05, section 3.1). Nothing is trusted:
 // the unpacked size is capped while it is unzipped (so a small file that grows huge is stopped), every header is checked,
 // and every kind of entry that is not a plain file or a folder is reported as such, so the caller can refuse it.
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 export interface TarEntry {
   /** The path as written in the archive, with a leading "./" taken off. */
@@ -103,4 +103,44 @@ export function readTarGz(archive: Buffer, maxUnpackedBytes: number): TarResult 
     entries.push({ path, kind, type, data: kind === "file" ? data : Buffer.alloc(0) });
   }
   return { ok: true, entries };
+}
+
+function header(path: string, size: number, type: string): Buffer {
+  const h = Buffer.alloc(BLOCK);
+  h.write(path.slice(0, 100), 0, "utf8");
+  h.write("0000644\0", 100);
+  h.write("0000000\0", 108);
+  h.write("0000000\0", 116);
+  h.write(`${size.toString(8).padStart(11, "0")}\0`, 124);
+  h.write("00000000000\0", 136);
+  h.fill(32, 148, 156);
+  h.write(type, 156);
+  h.write("ustar\0" + "00", 257);
+  let sum = 0;
+  for (const byte of h) sum += byte;
+  h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+  return h;
+}
+const padded = (data: Buffer): Buffer =>
+  Buffer.concat([data, Buffer.alloc((BLOCK - (data.length % BLOCK)) % BLOCK)]);
+
+/**
+ * Writes plain files as a .tgz (the export of a theme). A path longer than the 100 bytes of a tar header gets a pax
+ * header before it, which the reader above understands.
+ */
+export function writeTarGz(files: { path: string; data: Buffer }[]): Buffer {
+  const parts: Buffer[] = [];
+  for (const file of files) {
+    if (Buffer.byteLength(file.path) > 100) {
+      const body = ` path=${file.path}\n`;
+      let length = Buffer.byteLength(body) + 1;
+      while (Buffer.byteLength(`${length}${body}`) !== length)
+        length = Buffer.byteLength(`${length}${body}`);
+      const pax = Buffer.from(`${length}${body}`);
+      parts.push(header("PaxHeader", pax.length, "x"), padded(pax));
+    }
+    parts.push(header(file.path, file.data.length, "0"), padded(file.data));
+  }
+  parts.push(Buffer.alloc(BLOCK * 2));
+  return gzipSync(Buffer.concat(parts));
 }

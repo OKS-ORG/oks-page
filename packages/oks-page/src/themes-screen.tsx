@@ -47,6 +47,9 @@ function whatIsInside(theme: InstalledTheme): string {
   return parts.join(", ");
 }
 
+/** Two lines that open more sit one under the other; each is a 24 px target (WCAG 2.2, target size). */
+const SUMMARY = { minBlockSize: "24px", lineHeight: "24px" } as const;
+
 export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
   const [themes, setThemes] = useState(initial);
   // The file is read from the field when the form is sent, so a file chosen while the page was still loading counts.
@@ -252,7 +255,30 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
                 )}
               </p>
               <details>
-                <summary>{`Report for ${theme.name} ${theme.version}`}</summary>
+                <summary style={SUMMARY}>{`Export ${theme.name} as a theme`}</summary>
+                <p>
+                  A theme file of {theme.name} as your site shows it now: your layout changes, the
+                  layouts you made, your saved sections, your colors, fonts and CSS. Drafts are left
+                  out. It installs on another site; here it would be a new theme.
+                </p>
+                <form
+                  method="get"
+                  action={`/api/admin/themes/${encodeURIComponent(theme.id)}/export`}
+                >
+                  <label htmlFor={`export-name-${theme.id}`}>Name of the new theme</label>
+                  <br />
+                  <input
+                    id={`export-name-${theme.id}`}
+                    name="name"
+                    defaultValue={`${theme.name} (custom)`}
+                    maxLength={60}
+                    style={{ minBlockSize: "32px" }}
+                  />{" "}
+                  <Button type="submit">Download the theme file</Button>
+                </form>
+              </details>
+              <details>
+                <summary style={SUMMARY}>{`Report for ${theme.name} ${theme.version}`}</summary>
                 <Report title={`What was checked in ${theme.name}`} report={theme.report} />
               </details>
             </li>

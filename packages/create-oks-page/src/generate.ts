@@ -355,6 +355,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { DELETE, GET, POST, PUT } from ${from("api-theme-layout")};\n`,
     },
     {
+      path: "app/api/admin/themes/[id]/export/route.ts",
+      content: `export { GET } from ${from("api-theme-export")};\n`,
+    },
+    {
       path: "app/api/admin/sections/route.ts",
       content: `export { GET, POST } from ${from("api-sections")};\n`,
     },

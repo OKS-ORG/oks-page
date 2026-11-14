@@ -32,6 +32,7 @@ export * from "./theme-layouts.js";
 export * from "./theme-edits.js";
 export * from "./saved-sections.js";
 export * from "./owner-layouts.js";
+export * from "./theme-export.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

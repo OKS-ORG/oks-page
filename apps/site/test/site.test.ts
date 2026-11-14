@@ -6456,5 +6456,56 @@ describe.skipIf(!findBrowser())(
 
       await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });
+
+    test("export as a theme: download the theme file, install it again as a new theme, and the site looks the same (TH-73)", async () => {
+      const page = await signedIn(owner);
+      const themes = (await call(page, "GET", "/api/admin/themes")).json as {
+        themes: { id: string; key: string }[];
+      };
+      const birch = themes.themes.find((t) => t.key === "birch")!;
+      await call(page, "POST", `/api/admin/themes/${birch.id}`, { action: "use" });
+      const visible = async (path: string) =>
+        (await (await fetch(site.base + path)).text())
+          .replace(/<script[\s\S]*?<\/script>/g, "")
+          .replace(/<link[^>]*>/g, "");
+      const before = await visible("/");
+      expect(before).toContain("Welcome to Birch");
+
+      // Only design managers may export.
+      const editor = await signedIn(cara);
+      expect((await call(editor, "GET", `/api/admin/themes/${birch.id}/export`)).status).toBe(403);
+
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByText("Export Birch as a theme").click();
+      await page.getByLabel("Name of the new theme").first().waitFor();
+      const row = page
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("heading", { name: /^Birch 1\.0\.0/ }) });
+      await row.getByLabel("Name of the new theme").fill("Birch for Anna");
+      expect(await axeViolations(page)).toEqual([]);
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        row.getByRole("button", { name: "Download the theme file" }).click(),
+      ]);
+      expect(download.suggestedFilename()).toBe("birch-for-anna-1.0.0.tgz");
+      const file = readFileSync((await download.path())!);
+      expect([file[0], file[1]]).toEqual([0x1f, 0x8b]);
+
+      // It installs as a new theme (Birch itself is untouched) and draws the same front page.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "birch-for-anna-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: file,
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Birch for Anna 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page.getByRole("button", { name: "Use Birch for Anna" }).click();
+      await page.getByText("Your site uses Birch for Anna now.").waitFor();
+      expect(await visible("/")).toBe(before);
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
+    });
   },
 );

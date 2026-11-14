@@ -44,7 +44,10 @@ import {
   setEntryLayout,
   typesWithoutLayout,
 } from "./owner-layouts.js";
+import { exportTheme } from "./theme-export.js";
 import { installTheme, useTheme } from "./theme-install.js";
+import { checkThemePackage } from "./theme-package.js";
+import { saveThemeStyles } from "./theme-settings.js";
 import {
   layoutCandidates,
   layoutUsage,
@@ -777,6 +780,128 @@ for (const { kind, open, skip } of openers) {
       expect((await typesWithoutLayout(db.runner, siteId, themeId)).map((t) => t.key)).toEqual([
         "page",
       ]);
+    });
+
+    // ----- export as a theme (spec 05, 17.6 and 17.10; TH-73)
+    test("export as a theme: the changes, the owner's layouts, saved sections and look in a package that installs on another site with the same pages (TH-73)", async () => {
+      // This site's changes: the index, a landing page, a saved section linked in the header, a color, fonts and CSS.
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/index", [
+        block("part", { name: "header" }),
+        text("my index"),
+      ]);
+      const hours = await createSavedSection(db.runner, admin, siteId, {
+        name: "Opening hours",
+        group: "contact",
+        blocks: [text("Open every day but Monday")],
+      });
+      if (!hours.ok) throw new Error(hours.message);
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "parts/header", [
+        { ...block("site-title"), id: "header-title" },
+        block("linked-section", { id: hours.section.id }),
+      ]);
+      await publishLayouts(db.runner, admin, siteId, themeId);
+      await createOwnerLayout(db.runner, admin, siteId, themeId, {
+        for: "pages",
+        name: "Landing page",
+        from: "templates/single-post",
+      });
+      // A draft is not exported.
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/single-post", [
+        text("draft only"),
+      ]);
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, {
+          mainColor: "#2a6f4f",
+          bodyFont: "system-serif",
+          customCss: ".oks-site-title { letter-spacing: 0.05em }",
+        }),
+      ).toMatchObject({ ok: true });
+
+      expect(await exportTheme(db.runner, storage, editor, siteId, themeId)).toMatchObject({
+        code: "forbidden",
+      });
+      const exported = await exportTheme(db.runner, storage, admin, siteId, themeId);
+      if (!exported.ok) throw new Error(exported.message);
+      expect(exported.fileName).toBe("maple-custom-1.0.0.tgz");
+      const check = checkThemePackage(exported.archive);
+      expect(check.ok, JSON.stringify(check.report)).toBe(true);
+      if (!check.ok) return;
+      const theme = check.theme;
+      expect(theme).toMatchObject({
+        key: "maple-custom",
+        name: "Maple (custom)",
+        version: "1.0.0",
+      });
+      expect(theme.templates.map((t) => t.name).sort()).toEqual([
+        "custom-landing-page",
+        "index",
+        "single-post",
+      ]);
+      expect(theme.templates.find((t) => t.name === "custom-landing-page")?.title).toBe(
+        "Landing page",
+      );
+      expect(words(theme.templates.find((t) => t.name === "index")!.blocks)).toContain("my index");
+      expect(words(theme.templates)).not.toContain("draft only");
+      // The linked section is put in place; it is also a ready-made section in its group.
+      const header = words(theme.parts.find((p) => p.name === "header")!.blocks);
+      expect(header).toContain("Open every day but Monday");
+      expect(header).not.toContain("linked-section");
+      expect(theme.patterns.map((p) => [p.name, p.title, p.group])).toEqual([
+        ["saved-opening-hours", "Opening hours", "contact"],
+      ]);
+      // The look and the CSS.
+      expect(theme.tokens.color?.["primary-700"]).toMatch(/^#|^oklch|^rgb/);
+      expect(theme.tokens.font).toMatchObject({ body: "system-serif" });
+      expect(theme.css).toContain("letter-spacing: 0.05em");
+      // A name that would be the same key gets "-custom"; a long name is refused.
+      const same = await exportTheme(db.runner, storage, admin, siteId, themeId, { name: "Maple" });
+      expect(same.ok && same.fileName).toBe("maple-custom-1.0.0.tgz");
+      expect(
+        await exportTheme(db.runner, storage, admin, siteId, themeId, { name: "x".repeat(61) }),
+      ).toMatchObject({ ok: false });
+
+      // Another site installs it and draws the same layouts as this one.
+      const here = (await loadActiveThemeLayouts(db.runner, siteId))!;
+      const other = await open();
+      const otherDir = await mkdtemp(path.join(tmpdir(), "oks-export-"));
+      try {
+        const otherStorage = localAdapter({ root: otherDir, baseUrl: "/uploads" });
+        const made = await runSetup(
+          other.runner,
+          async ({ name, email }) => {
+            const id = newId();
+            await other.run(
+              "insert into users (id, name, email, created_at, updated_at) values (?, ?, ?, ?, ?)",
+              [id, name, email, T, T],
+            );
+            return { userId: id };
+          },
+          {
+            siteName: "Other site",
+            tagline: "",
+            admin: { name: "Ben", email: "ben@example.com", password: "a-long-password" },
+          },
+        );
+        const ben = actorOf(made.userId, "administrator");
+        const installed = await installTheme(
+          other.runner,
+          otherStorage,
+          ben,
+          made.siteId,
+          exported.archive,
+        );
+        if (!installed.ok) throw new Error(installed.message);
+        await useTheme(other.runner, ben, made.siteId, installed.theme.id);
+        const there = (await loadActiveThemeLayouts(other.runner, made.siteId))!;
+        expect(words(there.templates["index"])).toBe(words(here.templates["index"]));
+        expect(words(there.templates["custom-landing-page"])).toBe(
+          words(here.templates["custom-landing-page"]),
+        );
+        expect(words(there.parts["header"])).toBe(words(here.parts["header"]));
+      } finally {
+        await other.close();
+        await rm(otherDir, { recursive: true, force: true });
+      }
     });
   });
 }
