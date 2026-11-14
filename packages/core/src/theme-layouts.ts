@@ -10,14 +10,30 @@ import { loadThemeVersion } from "./theme-install.js";
 import { SITE_BLOCKS } from "./theme-package.js";
 
 export type DrawNode =
-  | { kind: "html"; html: string; id?: string }
+  | { kind: "html"; html: string; id?: string; hide?: Screen[] }
   | {
       kind: "site";
       type: string;
       props: Record<string, unknown>;
       children: DrawNode[];
       id?: string;
+      hide?: Screen[];
     };
+
+/**
+ * The three screen sizes a block can be hidden on (spec 05, section 17.5; spec 06, PB-97), with the default
+ * breakpoints of spec 06, section 4.1: a phone is up to 767 px wide, a tablet 768 to 1024 px, a desktop 1025 px and up.
+ */
+export const SCREENS = ["phone", "tablet", "desktop"] as const;
+export type Screen = (typeof SCREENS)[number];
+export const SCREEN_MIN_WIDTH: Record<Screen, number> = { phone: 0, tablet: 768, desktop: 1025 };
+
+/** The screens a block is hidden on, from its `hide` setting: known names only, each once, in order. */
+export function hiddenOn(props: Record<string, unknown>): Screen[] {
+  const raw = props["hide"];
+  if (!Array.isArray(raw)) return [];
+  return SCREENS.filter((screen) => raw.includes(screen));
+}
 
 export interface ThemeLayouts {
   /** Layouts for whole pages, by name ("index", "single-post", "archive"...). */
@@ -77,14 +93,22 @@ export function pickLayout(layouts: ThemeLayouts | null, candidates: string[]): 
 export function toDrawNodes(blocks: Block[], options: { split?: boolean } = {}): DrawNode[] {
   const out: DrawNode[] = [];
   let run: Block[] = [];
+  let runHide: Screen[] = [];
   const flush = () => {
     if (run.length === 0) return;
     const { html } = writeBlocks(run);
     if (html)
-      out.push(options.split ? { kind: "html", html, id: run[0]!.id } : { kind: "html", html });
+      out.push({
+        kind: "html",
+        html,
+        ...(options.split ? { id: run[0]!.id } : {}),
+        ...(runHide.length > 0 ? { hide: runHide } : {}),
+      });
     run = [];
+    runHide = [];
   };
   for (const block of blocks) {
+    const hide = hiddenOn(block.props);
     if (SITE.has(block.type)) {
       flush();
       out.push({
@@ -94,14 +118,23 @@ export function toDrawNodes(blocks: Block[], options: { split?: boolean } = {}):
         // Only a section holds other blocks; the children of other site blocks are not drawn.
         children: block.type === "section" ? toDrawNodes(block.children, options) : [],
         ...(options.split ? { id: block.id } : {}),
+        ...(hide.length > 0 ? { hide } : {}),
       });
     } else {
+      // A block hidden on some screens is written on its own, so it can be hidden without its neighbours.
+      if (hide.length > 0) flush();
       run.push(block);
-      if (options.split) flush();
+      runHide = hide;
+      if (options.split || hide.length > 0) flush();
     }
   }
   flush();
   return out;
+}
+
+/** Stored blocks, checked again, as a draw tree (a ready-made section's picture in the section library). */
+export function checkedDrawNodes(blocks: unknown): DrawNode[] {
+  return toDrawNodes(checkBlocks({ version: 1, blocks }).body.blocks);
 }
 
 const parseStored = (raw: unknown): unknown => {

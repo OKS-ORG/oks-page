@@ -1,6 +1,7 @@
 import type { Block } from "@oks-page/content-safety";
 import { describe, expect, test } from "vitest";
 import {
+  hiddenOn,
   layoutCandidates,
   partsUsedBy,
   pickLayout,
@@ -139,5 +140,36 @@ describe("the site editor's preview and banner", () => {
       part("missing"),
     ];
     expect(partsUsedBy(layout, parts).sort()).toEqual(["brand", "footer", "header"]);
+  });
+});
+
+describe("hiding a block on phone, tablet or desktop (spec 05, 17.5; spec 06, PB-97)", () => {
+  test("only known screens count, each once, in order", () => {
+    expect(hiddenOn({ hide: ["desktop", "phone", "phone", "watch", 3] })).toEqual([
+      "phone",
+      "desktop",
+    ]);
+    expect(hiddenOn({ hide: "phone" })).toEqual([]);
+    expect(hiddenOn({})).toEqual([]);
+  });
+
+  test("a hidden content block is written on its own, so its neighbours still show", () => {
+    const one = paragraph("one");
+    const two = { ...paragraph("two"), props: { hide: ["phone"] } };
+    const three = paragraph("three");
+    const four = paragraph("four");
+    const nodes = toDrawNodes([one, two, three, four]);
+    expect(nodes.map((n) => [n.kind === "html" && n.html.includes("one"), n.hide ?? []])).toEqual([
+      [true, []],
+      [false, ["phone"]],
+      [false, []],
+    ]);
+    expect(nodes[2]!.kind === "html" && nodes[2]!.html).toContain("four");
+    // A site block keeps its hiding too, inside sections as well.
+    const inner = block("search-form", { hide: ["tablet", "desktop"] });
+    const tree = toDrawNodes([block("section", {}, [inner])]);
+    const section = tree[0]!;
+    expect(section.kind === "site" && section.children[0]!.hide).toEqual(["tablet", "desktop"]);
+    expect(section.hide).toBeUndefined();
   });
 });

@@ -13,6 +13,8 @@ import {
   copyWithNewIds,
   duplicateBlock,
   findBlock,
+  hiddenScreens,
+  hiddenWords,
   insertBlocks,
   isContentBlock,
   layoutTitle,
@@ -20,7 +22,9 @@ import {
   newBlockId,
   removeBlock,
   replaceBlock,
+  setHidden,
   setProps,
+  SCREEN_SIZES,
   type LayoutBlock,
 } from "./layout-tree";
 import { uploadForEditor } from "./media-client";
@@ -40,9 +44,21 @@ interface Props {
   pages: PreviewPage[];
   /** The theme's headers, footers and other shared parts, by name. */
   parts: string[];
-  /** The theme's ready-made sections, which are added as copies. */
-  sections: { name: string; title: string; blocks: unknown[] }[];
+  /** The theme's ready-made sections, in library order, which are added as copies. */
+  sections: { name: string; title: string; blocks: unknown[]; group: string }[];
 }
+
+/** The preview sizes, each drawn at its real width and scaled down to fit (spec 06, section 4.1 breakpoints). */
+const PREVIEW_SIZES = [
+  { value: "desktop", label: "Desktop", width: 1280 },
+  { value: "tablet", label: "Tablet", width: 820 },
+  { value: "phone", label: "Phone", width: 390 },
+] as const;
+type PreviewSize = (typeof PREVIEW_SIZES)[number]["value"];
+const SCREEN_LABELS = { phone: "Phone", tablet: "Tablet", desktop: "Desktop" } as const;
+/** The section library's pictures: a section drawn 1280 px wide, shown at a quarter of its size. */
+const PICTURE_WIDTH = 1280;
+const PICTURE_SCALE = 0.25;
 
 const SAVE_AFTER_MS = 700;
 const failure = (body: unknown, fallback: string): string =>
@@ -205,7 +221,12 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
   const [resetting, setResetting] = useState(false);
   const [editingText, setEditingText] = useState<LayoutBlock | null>(null);
   const [adding, setAdding] = useState(ADDABLE[0]!.value);
+  const [size, setSize] = useState<PreviewSize>("desktop");
+  const [library, setLibrary] = useState(false);
+  const [libraryGroup, setLibraryGroup] = useState("all");
+  const [box, setBox] = useState({ width: 0, height: 0 });
   const frame = useRef<HTMLIFrameElement>(null);
+  const holder = useRef<HTMLDivElement>(null);
   const base = `/api/admin/themes/${encodeURIComponent(themeId)}`;
   const open = layouts.find((l) => l.key === openKey) ?? layouts[0]!;
   const title = layoutTitle(open.key, open.title);
@@ -248,6 +269,19 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
   useEffect(() => {
     void load(openKey);
   }, [load, openKey]);
+
+  // The preview box: the page is drawn at the chosen size's real width and scaled to fit the box.
+  useEffect(() => {
+    const el = holder.current;
+    if (!el) return;
+    const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const watcher = new ResizeObserver(measure);
+    watcher.observe(el);
+    return () => watcher.disconnect();
+  }, [comparing]);
+  const previewWidth = PREVIEW_SIZES.find((p) => p.value === size)!.width;
+  const scale = box.width > 0 ? Math.min(1, box.width / previewWidth) : 1;
 
   // A change is kept as a draft a moment after the last one.
   useEffect(() => {
@@ -358,6 +392,17 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
   const chosen = selected ? findBlock(blocks, selected) : null;
   const usedIds = (list: LayoutBlock[]) => allIds(list);
 
+  function addSection(name: string) {
+    const taken = usedIds(blocks);
+    const ready = sections.find((s) => s.name === name);
+    const added = (ready?.blocks ?? []).map((b) => copyWithNewIds(b as LayoutBlock, taken));
+    setLibrary(false);
+    if (added.length === 0) return;
+    change(insertBlocks(blocks, selected, added));
+    setSelected(added[0]!.id);
+    setNote(`Added a copy of "${ready!.title}". Change it as you like.`);
+  }
+
   function addBlock() {
     const taken = usedIds(blocks);
     let added: LayoutBlock[];
@@ -371,9 +416,6 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
           children: [],
         },
       ];
-    } else if (adding.startsWith("section:")) {
-      const ready = sections.find((s) => s.name === adding.slice(8));
-      added = (ready?.blocks ?? []).map((b) => copyWithNewIds(b as LayoutBlock, taken));
     } else {
       const kind = ADDABLE.find((a) => a.value === adding)!;
       added = [{ id: newBlockId(taken), ...kind.make() }];
@@ -397,6 +439,7 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
             onClick={() => setSelected(b.id)}
           >
             {blockLabel(b)}
+            {hiddenWords(b) ? <small>{` (${hiddenWords(b)})`}</small> : null}
           </button>
           {b.children.length > 0 ? outline(b.children, depth + 1) : null}
         </li>
@@ -414,8 +457,16 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
       <style>{`
 .oks-site-editor-narrow{display:none}
 .oks-site-editor-grid{display:grid;grid-template-columns:minmax(14rem,18rem) minmax(0,1fr) minmax(15rem,20rem);gap:1rem;align-items:start}
-.oks-site-editor-preview iframe{inline-size:100%;block-size:calc(100vh - 16rem);min-block-size:28rem;border:1px solid currentColor;background:#fff}
+.oks-site-editor-compare iframe{inline-size:100%;block-size:calc(100vh - 16rem);min-block-size:28rem;border:1px solid currentColor;background:#fff}
+.oks-site-editor-holder{block-size:calc(100vh - 18rem);min-block-size:28rem;overflow:hidden;border:1px solid currentColor;background:#fff}
+.oks-site-editor-holder iframe{display:block;border:0;background:#fff;transform-origin:0 0}
+.oks-site-editor-sizes{display:flex;flex-wrap:wrap;gap:.75rem;border:0;padding:0;margin:0 0 .5rem}
 .oks-site-editor-compare{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.oks-library-groups{display:flex;flex-wrap:wrap;gap:.25rem .75rem;border:0;padding:0;margin:0 0 1rem}
+.oks-library-list{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:1rem}
+.oks-library-list li{border:1px solid currentColor;padding:.5rem;display:flex;flex-direction:column;gap:.5rem}
+.oks-library-picture{inline-size:100%;block-size:12rem;overflow:hidden;background:#fff;pointer-events:none}
+.oks-library-picture iframe{border:0;transform-origin:0 0}
 .oks-outline-item,.oks-layout-item{display:block;inline-size:100%;text-align:start;min-block-size:28px;padding:.2rem .4rem;background:none;border:1px solid transparent;color:inherit;font:inherit;cursor:pointer}
 .oks-outline-item[aria-pressed="true"],.oks-layout-item[aria-current="true"]{border-color:currentColor;font-weight:600}
 @media (max-width:1100px){.oks-site-editor-grid{grid-template-columns:minmax(13rem,16rem) minmax(0,1fr)}.oks-site-editor-tools{grid-column:1 / -1}}
@@ -573,12 +624,36 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
               </div>
             </div>
           ) : (
-            <iframe
-              ref={frame}
-              title="Preview of your site with your changes"
-              src={previewUrl("draft")}
-              onLoad={onFrameLoad}
-            />
+            <>
+              <fieldset className="oks-site-editor-sizes">
+                <legend>Preview size</legend>
+                {PREVIEW_SIZES.map((p) => (
+                  <label key={p.value}>
+                    <input
+                      type="radio"
+                      name="site-editor-size"
+                      value={p.value}
+                      checked={size === p.value}
+                      onChange={() => setSize(p.value)}
+                    />{" "}
+                    {`${p.label} (${p.width} px)`}
+                  </label>
+                ))}
+              </fieldset>
+              <div ref={holder} className="oks-site-editor-holder">
+                <iframe
+                  ref={frame}
+                  title="Preview of your site with your changes"
+                  src={previewUrl("draft")}
+                  onLoad={onFrameLoad}
+                  style={{
+                    inlineSize: `${previewWidth}px`,
+                    blockSize: `${Math.max(box.height, 300) / scale}px`,
+                    transform: scale < 1 ? `scale(${scale})` : undefined,
+                  }}
+                />
+              </div>
+            </>
           )}
         </section>
 
@@ -677,6 +752,35 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                   </select>
                 </p>
               ) : null}
+              <fieldset style={{ border: 0, padding: 0, margin: "0 0 1rem" }}>
+                <legend>Show this block on</legend>
+                {SCREEN_SIZES.map((screen) => {
+                  const hidden = hiddenScreens(chosen);
+                  return (
+                    <label key={screen} style={{ marginInlineEnd: "0.75rem" }}>
+                      <input
+                        type="checkbox"
+                        checked={!hidden.includes(screen)}
+                        onChange={(e) =>
+                          change(
+                            setHidden(
+                              blocks,
+                              chosen.id,
+                              e.target.checked
+                                ? hidden.filter((s) => s !== screen)
+                                : [...hidden, screen],
+                            ),
+                          )
+                        }
+                      />{" "}
+                      {SCREEN_LABELS[screen]}
+                    </label>
+                  );
+                })}
+                {hiddenScreens(chosen).length === 3 ? (
+                  <p>Visitors never see this block now. Tick a screen size to show it.</p>
+                ) : null}
+              </fieldset>
               {chosen.type === "part" && parts.length > 1 ? (
                 <p>
                   <label htmlFor="se-part">Which shared part</label>
@@ -729,18 +833,14 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
                     ))}
                   </optgroup>
                 ) : null}
-                {sections.length > 0 ? (
-                  <optgroup label="Ready-made sections from the theme">
-                    {sections.map((s) => (
-                      <option key={s.name} value={`section:${s.name}`}>
-                        {s.title}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
               </select>{" "}
               <Button onPress={addBlock}>Add</Button>
             </p>
+            {sections.length > 0 ? (
+              <p>
+                <Button onPress={() => setLibrary(true)}>Add a ready-made section</Button>
+              </p>
+            ) : null}
           </section>
 
           <section aria-label="This layout">
@@ -829,6 +929,65 @@ export function SiteEditor({ themeId, themeName, initialLayouts, pages, parts, s
           <p role="status">{note}</p>
         </aside>
       </div>
+
+      <Modal
+        isOpen={library}
+        onClose={() => setLibrary(false)}
+        title="Ready-made sections"
+        size="xl"
+      >
+        <p>
+          {`Sections of ${themeName}, drawn with your site's look. Adding one puts an editable copy ${chosen ? "after the selected block" : "at the end"}.`}
+        </p>
+        <fieldset className="oks-library-groups">
+          <legend>Group</legend>
+          {[
+            ["all", `All (${sections.length})`],
+            ...[...new Set(sections.map((s) => s.group))].map((g) => [
+              g,
+              `${g} (${sections.filter((s) => s.group === g).length})`,
+            ]),
+          ].map(([value, label]) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="library-group"
+                value={value}
+                checked={libraryGroup === value}
+                onChange={() => setLibraryGroup(value!)}
+              />{" "}
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        <ul className="oks-library-list" aria-label="Sections">
+          {sections
+            .filter((s) => libraryGroup === "all" || s.group === libraryGroup)
+            .map((s) => (
+              <li key={s.name}>
+                <h3 style={{ fontSize: "1rem", margin: 0 }}>{s.title}</h3>
+                <small>{s.group}</small>
+                <div className="oks-library-picture">
+                  <iframe
+                    title={`Picture of ${s.title}`}
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    loading="lazy"
+                    src={`/admin/site-editor/preview?theme=${encodeURIComponent(themeId)}&section=${encodeURIComponent(s.name)}`}
+                    style={{
+                      inlineSize: `${PICTURE_WIDTH}px`,
+                      blockSize: `${(12 * 16) / PICTURE_SCALE}px`,
+                      transform: `scale(${PICTURE_SCALE})`,
+                    }}
+                  />
+                </div>
+                <Button onPress={() => addSection(s.name)} aria-label={`Add ${s.title}`}>
+                  Add
+                </Button>
+              </li>
+            ))}
+        </ul>
+      </Modal>
 
       <Modal
         isOpen={editingText !== null}

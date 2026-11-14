@@ -6036,5 +6036,177 @@ describe.skipIf(!findBrowser())(
 
       await call(page, "POST", "/api/admin/themes/default", { action: "use" });
     });
+
+    test("the site editor: the section library (groups, pictures, a copy) and hiding a block on phone, tablet or desktop", async () => {
+      const page = await signedIn(owner);
+      const block = (
+        type: string,
+        props: Record<string, unknown> = {},
+        children: unknown[] = [],
+        content: unknown = null,
+      ) => ({
+        id: `${type}-${Math.random().toString(36).slice(2, 8)}`,
+        type,
+        props,
+        content,
+        children,
+      });
+      const words = (t: string) => [{ type: "text", text: t }];
+      const json = (value: unknown) => JSON.stringify(value);
+      const birch = tgz({
+        "theme.json": json({ key: "birch", name: "Birch", version: "1.0.0" }),
+        "templates/index.json": json({
+          blocks: [
+            block("site-title"),
+            block("section", { tag: "main" }, [block("post-title"), block("post-content")]),
+          ],
+        }),
+        "patterns/welcome.json": json({
+          title: "Big welcome",
+          group: "hero",
+          blocks: [
+            block("section", { tag: "section", name: "welcome" }, [
+              block("heading", { level: 2 }, [], words("Welcome to Birch")),
+              block("paragraph", {}, [], words("Plants for every window")),
+            ]),
+          ],
+        }),
+        "patterns/visit.json": json({
+          title: "Visit us",
+          group: "contact",
+          blocks: [block("paragraph", {}, [], words("Find us at the market"))],
+        }),
+      });
+      await page.goto(site.base + "/admin/settings/themes");
+      await page
+        .getByLabel("Theme file (.tgz)")
+        .setInputFiles({ name: "birch.tgz", mimeType: "application/gzip", buffer: birch });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Birch 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page.getByRole("button", { name: "Use Birch" }).click();
+      await page.getByText("Your site uses Birch now.").waitFor();
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(site.base + "/admin/settings/site-editor");
+      const tools = page.getByRole("complementary", { name: "Tools" });
+      await page.getByText(/You are changing the Default .* layout/).waitFor();
+
+      // The library: groups, a picture of each section drawn with the site's look, nothing in a picture to tab to.
+      await tools.getByRole("button", { name: "Add a ready-made section" }).click();
+      const library = page.getByRole("dialog", { name: "Ready-made sections" });
+      await library.waitFor();
+      const cards = library.getByRole("list", { name: "Sections" }).getByRole("listitem");
+      await expect.poll(() => cards.count()).toBe(2);
+      // In library order: Hero before Contact.
+      expect(await cards.getByRole("heading").allTextContents()).toEqual([
+        "Big welcome",
+        "Visit us",
+      ]);
+      const picture = page.frameLocator('iframe[title="Picture of Big welcome"]');
+      await picture.getByText("Welcome to Birch").waitFor();
+      expect(await picture.locator("[inert]").count()).toBe(1);
+      expect(await axeViolations(page)).toEqual([]);
+      await library.getByLabel("Contact (1)").check();
+      await expect.poll(() => cards.count()).toBe(1);
+      await library.getByLabel("All (2)").check();
+      await expect.poll(() => cards.count()).toBe(2);
+
+      // Adding makes an editable copy at the end, selected, kept as a draft.
+      await library.getByRole("button", { name: "Add Big welcome" }).click();
+      await library.waitFor({ state: "hidden" });
+      await tools.getByRole("heading", { name: 'Selected: Group "welcome"' }).waitFor();
+      await page.getByText("Draft kept").waitFor();
+      const preview = page.frameLocator('iframe[title="Preview of your site with your changes"]');
+      await preview.getByText("Welcome to Birch").waitFor();
+
+      // Hide it on phones: the outline says so, and the phone-size preview shows it faded (still there to select).
+      const selected = tools.getByRole("group", { name: "Show this block on" });
+      await selected.getByLabel("Phone").uncheck();
+      await page
+        .getByRole("region", { name: /^Outline of/ })
+        .getByRole("button", { name: 'Group "welcome" (hidden on phone)' })
+        .waitFor();
+      await page.getByText("Draft kept").waitFor();
+      await page.getByLabel("Phone (390 px)").check();
+      await expect
+        .poll(() =>
+          preview
+            .locator(".oks-editor-hidden-phone")
+            .evaluate((el) => getComputedStyle(el).opacity),
+        )
+        .toBe("0.35");
+      expect(
+        await page
+          .locator('iframe[title="Preview of your site with your changes"]')
+          .evaluate((el) => (el as HTMLIFrameElement).contentWindow!.innerWidth),
+      ).toBe(390);
+      await page.getByLabel("Desktop (1280 px)").check();
+      await expect
+        .poll(() =>
+          preview
+            .locator(".oks-editor-hidden-phone")
+            .evaluate((el) => getComputedStyle(el).opacity),
+        )
+        .toBe("1");
+
+      // Publish: visitors on a phone do not see it; on a tablet and a desktop they do.
+      await page.getByRole("button", { name: "Publish changes (1)" }).click();
+      await page.getByText("Published 1 layout. Your site shows the changes now.").waitFor();
+      const home = await (await fetch(site.base + "/")).text();
+      expect(home).toContain("Welcome to Birch");
+      expect(home).toContain('class="oks-hide oks-hide-phone"');
+      const visitor = await browser.newPage();
+      await visitor.goto(site.base + "/");
+      for (const [width, shown] of [
+        [390, false],
+        [767, false],
+        [768, true],
+        [1024, true],
+        [1025, true],
+        [1440, true],
+      ] as const) {
+        await visitor.setViewportSize({ width, height: 800 });
+        expect(await visitor.getByText("Welcome to Birch").isVisible(), `${width} px`).toBe(shown);
+        expect(await visitor.getByText("Plants for every window").isVisible(), `${width} px`).toBe(
+          shown,
+        );
+      }
+      expect(await axeViolations(visitor)).toEqual([]);
+
+      // Every mix of screens, with the CSS the site writes, at the edges of each size.
+      const css = /<style>(\.oks-hide\{[^<]*)<\/style>/.exec(home)?.[1];
+      expect(css).toBeTruthy();
+      const mixes = [
+        ["phone"],
+        ["tablet"],
+        ["desktop"],
+        ["phone", "tablet"],
+        ["phone", "desktop"],
+        ["tablet", "desktop"],
+        ["phone", "tablet", "desktop"],
+      ];
+      await visitor.setContent(
+        `<style>${css}</style>` +
+          mixes
+            .map(
+              (m) =>
+                `<div class="oks-hide ${m.map((x) => `oks-hide-${x}`).join(" ")}"><p id="${m.join("-")}">${m.join(" ")}</p></div>`,
+            )
+            .join(""),
+      );
+      const screenOf = (width: number) =>
+        width < 768 ? "phone" : width < 1025 ? "tablet" : "desktop";
+      for (const width of [320, 767, 768, 1024, 1025, 2400]) {
+        await visitor.setViewportSize({ width, height: 600 });
+        for (const m of mixes)
+          expect(
+            await visitor.locator(`#${m.join("-")}`).isVisible(),
+            `${m.join("+")} at ${width} px`,
+          ).toBe(!m.includes(screenOf(width)));
+      }
+      await visitor.close();
+
+      await call(page, "POST", "/api/admin/themes/default", { action: "use" });
+    });
   },
 );

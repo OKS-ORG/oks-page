@@ -1,6 +1,13 @@
 // Settings > Site editor (spec 05, section 17.5): change the layouts of the theme in use on a live preview of the real
 // site. For people who may change the site design. The editor itself is a client screen; this page loads what it needs.
-import { isSetupDone, listLayouts, loadThemeVersion } from "@oks-page/core";
+import {
+  isSetupDone,
+  listLayouts,
+  loadThemeVersion,
+  SECTION_GROUP_LABELS,
+  SECTION_GROUPS,
+  sectionGroup,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -76,11 +83,15 @@ export default async function SiteEditorPage() {
           initialLayouts={layouts.layouts}
           pages={pages}
           parts={found.version.parts.map((p) => p.name)}
-          sections={found.version.patterns.map((p) => ({
-            name: p.name,
-            title: p.title,
-            blocks: p.blocks,
-          }))}
+          sections={found.version.patterns
+            .map((p) => ({
+              name: p.name,
+              title: p.title,
+              blocks: p.blocks,
+              group: SECTION_GROUP_LABELS[sectionGroup(p.group)],
+              order: SECTION_GROUPS.indexOf(sectionGroup(p.group)),
+            }))
+            .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))}
         />
       ) : (
         <p>

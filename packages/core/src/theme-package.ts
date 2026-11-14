@@ -32,6 +32,45 @@ export const SITE_BLOCKS = [
   "section",
 ] as const;
 
+/**
+ * The groups of the section library (spec 05, section 17.5), in the order the library shows them. A theme names the
+ * group of each section with `"group"` in its file; a section without one, or with an unknown one, is under "other".
+ */
+export const SECTION_GROUPS = [
+  "hero",
+  "text",
+  "pictures",
+  "gallery",
+  "prices",
+  "reviews",
+  "team",
+  "contact",
+  "map",
+  "call-to-action",
+  "blog-posts",
+  "other",
+] as const;
+export type SectionGroup = (typeof SECTION_GROUPS)[number];
+/** The group names the owner sees. */
+export const SECTION_GROUP_LABELS: Record<SectionGroup, string> = {
+  hero: "Hero",
+  text: "Text",
+  pictures: "Pictures",
+  gallery: "Gallery",
+  prices: "Prices",
+  reviews: "Reviews",
+  team: "Team",
+  contact: "Contact",
+  map: "Map",
+  "call-to-action": "Call to action",
+  "blog-posts": "Blog posts",
+  other: "Other",
+};
+const GROUPS = new Set<string>(SECTION_GROUPS);
+/** The group of a stored section, "other" when it has none (themes installed before groups existed). */
+export const sectionGroup = (value: unknown): SectionGroup =>
+  typeof value === "string" && GROUPS.has(value) ? (value as SectionGroup) : "other";
+
 const ALLOWED_EXTENSIONS = new Set([
   "json",
   "css",
@@ -77,6 +116,8 @@ export interface ThemeLayout {
   name: string;
   title: string;
   blocks: Block[];
+  /** For a ready-made section (a pattern): its group in the section library. */
+  group?: SectionGroup;
 }
 
 export interface CheckedTheme {
@@ -395,7 +436,16 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
           `${path}: ${checked.repairs.length} thing${checked.repairs.length === 1 ? " was" : "s were"} repaired by the block checks (unsafe links, bad names or sizes).`,
         );
       const title = typeof raw["title"] === "string" ? raw["title"].slice(0, 100) : layoutName;
-      out.push({ name: layoutName, title, blocks: checked.body.blocks });
+      if (folder !== "patterns") {
+        out.push({ name: layoutName, title, blocks: checked.body.blocks });
+        continue;
+      }
+      const group = sectionGroup(raw["group"]);
+      if (raw["group"] !== undefined && group !== raw["group"])
+        warn(
+          `${path}: the group "${String(raw["group"]).slice(0, 40)}" is not one the library knows; the section is shown under "Other".`,
+        );
+      out.push({ name: layoutName, title, blocks: checked.body.blocks, group });
     }
     return out;
   };

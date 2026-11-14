@@ -4,12 +4,15 @@ import {
   blockLabel,
   duplicateBlock,
   findBlock,
+  hiddenScreens,
+  hiddenWords,
   insertBlocks,
   isContentBlock,
   layoutTitle,
   moveBlock,
   removeBlock,
   replaceBlock,
+  setHidden,
   setProps,
   type LayoutBlock,
 } from "./layout-tree";
@@ -88,5 +91,20 @@ describe("changing a layout in the site editor", () => {
     expect(layoutTitle("parts/footer", "Bottom")).toBe("Footer");
     expect(layoutTitle("templates/single-recipe", "")).toBe("Recipe (one entry)");
     expect(layoutTitle("templates/landing", "Landing page")).toBe("Landing page");
+  });
+
+  test("hide a block on some screens, and show it again", () => {
+    const hidden = setHidden(layout(), "t", ["desktop", "phone"]);
+    const t = findBlock(hidden, "t")!;
+    expect(t.props["hide"]).toEqual(["phone", "desktop"]);
+    expect(hiddenScreens(t)).toEqual(["phone", "desktop"]);
+    expect(hiddenWords(t)).toBe("hidden on phone and desktop");
+    expect(
+      hiddenWords(findBlock(setHidden(hidden, "t", ["phone", "tablet", "desktop"]), "t")!),
+    ).toBe("hidden on every screen");
+    const shown = findBlock(setHidden(hidden, "t", []), "t")!;
+    expect("hide" in shown.props).toBe(false);
+    expect(hiddenWords(shown)).toBe("");
+    expect(findBlock(layout(), "t")!.props).toEqual({});
   });
 });

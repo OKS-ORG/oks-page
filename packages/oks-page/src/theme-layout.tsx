@@ -28,6 +28,22 @@ export interface ThemedPageInfo {
 }
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/**
+ * Hiding a block on some screens (spec 06, PB-97), with the default breakpoints: phone up to 767 px, tablet 768 to
+ * 1024 px, desktop from 1025 px. Mobile-first with min-width only (spec 06, section 4): a later rule wins, so a block
+ * hidden on phone and tablet shows again from 1025 px. The wrapper takes no room of its own (display: contents).
+ */
+export const HIDE_CSS =
+  ".oks-hide{display:contents}.oks-hide-phone{display:none}" +
+  "@media (min-width:768px){.oks-hide-phone{display:contents}.oks-hide-tablet{display:none}}" +
+  "@media (min-width:1025px){.oks-hide-tablet{display:contents}.oks-hide-desktop{display:none}}";
+const SCREEN_WORDS: Record<string, string> = {
+  phone: "phone",
+  tablet: "tablet",
+  desktop: "desktop",
+};
+const hiddenWords = (hide: string[]): string =>
+  `Hidden on ${hide.map((s) => SCREEN_WORDS[s] ?? s).join(" and ")}`;
 const SECTION_TAGS = new Set(["section", "header", "footer", "main", "aside", "nav", "div"]);
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const text = (value: unknown, most: number): string | null =>
@@ -99,16 +115,32 @@ export async function ThemedPage({
 
   let left = MAX_EXPANDED_BLOCKS;
   let searchForms = 0;
+  let hiding = false;
   const draw = (nodes: DrawNode[], depth: number, stack: string[]): ReactNode[] =>
     nodes.map((node, i) => {
       let drawn = drawNode(node, i, depth, stack);
-      if (!editor || !node.id) return drawn;
+      const hide = node.hide ?? [];
+      if (!editor || !node.id) {
+        if (hide.length === 0 || drawn === null) return drawn;
+        hiding = true;
+        return (
+          <div key={i} className={["oks-hide", ...hide.map((s) => `oks-hide-${s}`)].join(" ")}>
+            {drawn}
+          </div>
+        );
+      }
       if (drawn === null && node.kind === "site")
         drawn = (
           <p className="oks-editor-empty">{`${EMPTY_LABELS[node.type] ?? node.type} (nothing to show here)`}</p>
         );
+      // In the editor a hidden block stays in place, faded at the sizes it is hidden on, so it can still be selected.
       return (
-        <div key={i} data-oks-block={node.id} className="oks-editor-block">
+        <div
+          key={i}
+          data-oks-block={node.id}
+          className={["oks-editor-block", ...hide.map((s) => `oks-editor-hidden-${s}`)].join(" ")}
+          {...(hide.length > 0 ? { title: hiddenWords(hide) } : {})}
+        >
           {drawn}
         </div>
       );
@@ -246,11 +278,13 @@ export async function ThemedPage({
     }
   };
 
+  const drawn = draw(layout, 0, []);
   return (
     <>
       <LookStyles look={look} />
+      {hiding ? <style dangerouslySetInnerHTML={{ __html: HIDE_CSS }} /> : null}
       {before}
-      {draw(layout, 0, [])}
+      {drawn}
     </>
   );
 }

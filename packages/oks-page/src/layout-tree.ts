@@ -240,3 +240,36 @@ export function layoutTitle(key: string, themeTitle: string): string {
   if (name.startsWith("single-")) return `${capital(name.slice(7))} (one entry)`;
   return themeTitle || name;
 }
+
+/** The screen sizes a block can be hidden on (spec 05, section 17.5), in order. */
+export const SCREEN_SIZES = ["phone", "tablet", "desktop"] as const;
+export type ScreenSize = (typeof SCREEN_SIZES)[number];
+
+/** The screens the block is hidden on. */
+export function hiddenScreens(block: LayoutBlock): ScreenSize[] {
+  const raw = block.props["hide"];
+  return Array.isArray(raw) ? SCREEN_SIZES.filter((s) => raw.includes(s)) : [];
+}
+
+/** Hides the block on the given screens; with none, the setting is removed. */
+export function setHidden(blocks: LayoutBlock[], id: string, hide: ScreenSize[]): LayoutBlock[] {
+  const ordered = SCREEN_SIZES.filter((s) => hide.includes(s));
+  return inList(blocks, id, (list, index) =>
+    list.map((b, i) => {
+      if (i !== index) return b;
+      const rest = { ...b.props };
+      delete rest["hide"];
+      return { ...b, props: ordered.length > 0 ? { ...rest, hide: ordered } : rest };
+    }),
+  );
+}
+
+/** "hidden on phone and tablet", or "" when the block shows everywhere. */
+export function hiddenWords(block: LayoutBlock): string {
+  const hide = hiddenScreens(block);
+  return hide.length === 0
+    ? ""
+    : hide.length === 3
+      ? "hidden on every screen"
+      : `hidden on ${hide.join(" and ")}`;
+}

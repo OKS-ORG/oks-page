@@ -5,7 +5,14 @@
 //   &layout=templates/index  the layout being edited (a page layout is used for the page, whatever page is shown)
 //   &page=entry:<address> | archive:<category/x> | search   the page that fills the preview
 //   &use=draft|published|theme   for the edited layout: the draft (default), the published change, or the theme's own
-import { layoutCandidates, loadThemeLayouts, pickLayout } from "@oks-page/core";
+//   &section=<name>          only one ready-made section of the theme, for its picture in the section library
+import {
+  checkedDrawNodes,
+  layoutCandidates,
+  loadThemeLayouts,
+  loadThemeVersion,
+  pickLayout,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -22,7 +29,13 @@ export const metadata: Metadata = {
 };
 
 type Props = {
-  searchParams: Promise<{ theme?: string; layout?: string; page?: string; use?: string }>;
+  searchParams: Promise<{
+    theme?: string;
+    layout?: string;
+    page?: string;
+    use?: string;
+    section?: string;
+  }>;
 };
 
 const KEY = /^(templates|parts)\/([a-z0-9][a-z0-9-]{0,63})$/;
@@ -34,7 +47,11 @@ const EDITOR_CSS = `
 .oks-editor-block:hover{outline:1px dashed #6b7280;outline-offset:2px;cursor:pointer}
 .oks-editor-block[data-selected]{outline:2px solid #2563eb;outline-offset:2px}
 .oks-editor-empty{opacity:.7;font-style:italic}
+@media (max-width:767px){.oks-editor-hidden-phone{opacity:.35;outline:1px dashed #6b7280}}
+@media (min-width:768px) and (max-width:1024px){.oks-editor-hidden-tablet{opacity:.35;outline:1px dashed #6b7280}}
+@media (min-width:1025px){.oks-editor-hidden-desktop{opacity:.35;outline:1px dashed #6b7280}}
 `;
+const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export default async function SiteEditorPreview({ searchParams }: Props) {
   await connection();
@@ -42,6 +59,25 @@ export default async function SiteEditorPreview({ searchParams }: Props) {
   if (!member || !(await actorOf(member)).can("themes.manage")) notFound();
   const params = await searchParams;
   const themeId = one(params.theme);
+
+  // One ready-made section, drawn with the site's look; nothing in it can be focused or clicked (it is a picture).
+  const sectionName = one(params.section);
+  if (sectionName) {
+    if (!NAME.test(sectionName)) notFound();
+    const found = await loadThemeVersion(getRunner(), member.siteId, themeId);
+    const ready = found?.version.patterns.find((p) => p.name === sectionName);
+    if (!ready) notFound();
+    const nodes = checkedDrawNodes(ready.blocks);
+    return (
+      <div inert>
+        <ThemedPage
+          layout={nodes}
+          parts={{}}
+          page={{ title: ready.title, content: null, meta: null, isFront: false }}
+        />
+      </div>
+    );
+  }
   const key = one(params.layout);
   const use = params.use === "theme" || params.use === "published" ? params.use : "draft";
   const layouts = await loadThemeLayouts(getRunner(), member.siteId, {

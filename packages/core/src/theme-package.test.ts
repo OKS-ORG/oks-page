@@ -1,6 +1,13 @@
 import { gzipSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
-import { MAX_EXPANDED_BLOCKS, checkThemePackage, type PackageCheck } from "./theme-package.js";
+import {
+  MAX_EXPANDED_BLOCKS,
+  SECTION_GROUP_LABELS,
+  SECTION_GROUPS,
+  checkThemePackage,
+  sectionGroup,
+  type PackageCheck,
+} from "./theme-package.js";
 
 // ----- a tiny tar writer, so the tests can build good and hostile packages
 
@@ -519,5 +526,49 @@ describe("templates, parts and patterns (TH-33 to TH-37)", () => {
     expect(result.report.warnings.join(" ")).toMatch(
       /1 block in the layouts is of a kind this site does not draw|1 block in the layouts is of kinds/,
     );
+  });
+
+  test("each ready-made section has a group of the library; an unknown or missing one is Other", () => {
+    const result = check(
+      {
+        path: "patterns/hero.json",
+        data: JSON.stringify({ title: "Big welcome", group: "hero", blocks: [block("heading")] }),
+      },
+      {
+        path: "patterns/prices.json",
+        data: JSON.stringify({
+          title: "Prices",
+          group: "pricing-tables",
+          blocks: [block("heading")],
+        }),
+      },
+      { path: "patterns/plain.json", data: layout([block("heading")]) },
+    );
+    expect(result.ok, JSON.stringify(result.report)).toBe(true);
+    if (!result.ok) return;
+    expect(result.theme.patterns.map((p) => [p.name, p.title, p.group])).toEqual([
+      ["hero", "Big welcome", "hero"],
+      ["plain", "plain", "other"],
+      ["prices", "Prices", "other"],
+    ]);
+    expect(result.report.warnings.join(" ")).toContain(
+      'patterns/prices.json: the group "pricing-tables" is not one the library knows',
+    );
+    expect(sectionGroup("call-to-action")).toBe("call-to-action");
+    expect(sectionGroup(undefined)).toBe("other");
+    expect(SECTION_GROUPS.map((g) => SECTION_GROUP_LABELS[g])).toEqual([
+      "Hero",
+      "Text",
+      "Pictures",
+      "Gallery",
+      "Prices",
+      "Reviews",
+      "Team",
+      "Contact",
+      "Map",
+      "Call to action",
+      "Blog posts",
+      "Other",
+    ]);
   });
 });
