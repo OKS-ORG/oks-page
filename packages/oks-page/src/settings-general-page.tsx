@@ -1,5 +1,8 @@
 // Settings > General, for a signed-in member who may manage the settings.
-import { isSetupDone, loadGeneralSettings, timeZoneNames } from "@oks-page/core";
+import { isSetupDone, loadGeneralSettings, loadSiteIcon, timeZoneNames } from "@oks-page/core";
+import { headers } from "next/headers";
+import { SiteIconScreen } from "./site-icon-screen";
+import { mediaContext } from "./uploads";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -21,6 +24,11 @@ export default async function GeneralSettingsPage() {
   const actor = await actorOf(member);
   if (!actor.can("settings.manage")) redirect("/admin");
   const settings = await loadGeneralSettings(getRunner(), member.siteId);
+  const icon = await loadSiteIcon(getRunner(), member.siteId);
+  const head = await headers();
+  const address =
+    process.env["OKS_SITE_URL"] ??
+    `${head.get("x-forwarded-proto") ?? "http"}://${head.get("host") ?? "localhost"}`;
   return (
     <AdminFrame
       nav={navFor((c) => actor.can(c))}
@@ -33,6 +41,21 @@ export default async function GeneralSettingsPage() {
     >
       <SettingsLinks current="general" />
       <GeneralSettingsFormScreen initial={settings} zones={timeZoneNames()} />
+      <SiteIconScreen
+        initial={
+          icon ? { url: mediaContext().storage.publicUrl(icon.key), width: icon.width } : null
+        }
+      />
+      <section aria-labelledby="general-address">
+        <h2 id="general-address">Site address</h2>
+        <p>
+          <code>{address}</code>
+        </p>
+        <p>
+          The address of your site. Connecting your own domain comes with the Domains settings in a
+          later release.
+        </p>
+      </section>
     </AdminFrame>
   );
 }

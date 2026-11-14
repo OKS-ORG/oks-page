@@ -191,6 +191,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-languages-page")};\n`,
     },
     {
+      path: "app/admin/settings/writing/page.tsx",
+      content: `export { default, metadata } from ${from("settings-writing-page")};\n`,
+    },
+    {
+      path: "app/admin/settings/advanced/page.tsx",
+      content: `export { default, metadata } from ${from("settings-advanced-page")};\n`,
+    },
+    {
       path: "app/admin/settings/maintenance/page.tsx",
       content: `export { default, metadata } from ${from("settings-maintenance-page")};\n`,
     },
@@ -325,6 +333,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/language/route.ts",
       content: `export { GET, PUT } from ${from("api-settings-language")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/site-icon/route.ts",
+      content: `export { PUT } from ${from("api-settings-site-icon")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/writing/route.ts",
+      content: `export { GET, PUT } from ${from("api-settings-writing")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/advanced/route.ts",
+      content: `export { POST } from ${from("api-settings-advanced")};\n`,
     },
     {
       path: "app/api/admin/settings/maintenance/route.ts",

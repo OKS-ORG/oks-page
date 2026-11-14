@@ -21,16 +21,35 @@ export function titleOf(title: string, site: SiteInfo, isFront = false): string 
   return `${title} – ${site.siteName}`;
 }
 
+/** The site icon for every public page (Settings > General). */
+export const iconsOf = (site: SiteInfo): Metadata =>
+  site.icon ? { icons: { icon: [{ url: site.icon.url, type: site.icon.type }] } } : {};
+
+/** The list of newest posts at "/" or at the posts page's address (Settings > Reading). */
+export function postsMetadata(
+  title: string,
+  slug: string,
+  site: SiteInfo,
+  isFront: boolean,
+): Metadata {
+  return {
+    title: titleOf(title, site, isFront),
+    alternates: { canonical: isFront ? canonicalFor("home") : canonicalFor(slug), types: FEEDS },
+    ...iconsOf(site),
+  };
+}
+
 export function entryMetadata(
   entry: EntryView,
   site: SiteInfo,
-  options: { feeds: boolean },
+  options: { feeds: boolean; front?: boolean },
 ): Metadata {
-  const isFront = entry.slug === "home";
+  const isFront = options.front ?? entry.slug === "home";
   const title = titleOf(entry.title, site, isFront);
-  const url = canonicalFor(entry.slug);
+  const url = canonicalFor(isFront ? "home" : entry.slug);
   const image = entry.image ? absolute(entry.image) : null;
   return {
+    ...iconsOf(site),
     title,
     description: entry.description,
     alternates: {
@@ -76,6 +95,7 @@ export function archiveMetadata(
       `${archive.kind === "category" ? "Posts in the category" : "Posts tagged"} ${archive.name} on ${site.siteName}.`,
     );
   return {
+    ...iconsOf(site),
     title,
     description,
     alternates: {

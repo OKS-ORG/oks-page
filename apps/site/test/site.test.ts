@@ -7142,3 +7142,163 @@ describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_
     expect((await visible("/")).html).toContain('lang="ar" dir="ltr"');
   });
 });
+
+describe.skipIf(!findBrowser())(
+  "writing, general and advanced settings",
+  { timeout: 150_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    const owner = { email: "anna@example.com", password: "a-long-password" };
+
+    beforeAll(async () => {
+      db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-writing-")), "site.sqlite"));
+      site = await startSite("sqlite", db, { OKS_SECRET: "w".repeat(40) });
+      const made = await fetch(site.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          siteName: "Anna's Garden",
+          starterContent: true,
+          admin: { name: "Anna", ...owner },
+        }),
+      });
+      expect(made.status).toBe(200);
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+    }, 300_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+    });
+
+    const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      return result.violations.map(
+        (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+      );
+    };
+
+    test("writing defaults for new posts, the site icon on public pages, and clearing the saved copies", async () => {
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const call = (method: string, url: string, body?: unknown) =>
+        page.evaluate(
+          async ([m, u, b]) => {
+            const r = await fetch(u as string, {
+              method: m as string,
+              headers: { "content-type": "application/json" },
+              ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+            });
+            return {
+              status: r.status,
+              json: (await r.json().catch(() => null)) as Record<string, unknown> | null,
+            };
+          },
+          [method, url, body] as const,
+        );
+
+      // Writing: the default category for new posts.
+      expect((await call("POST", "/api/admin/taxonomies/category", { name: "News" })).status).toBe(
+        201,
+      );
+      await page.goto(site.base + "/admin/settings/writing");
+      await page.getByRole("heading", { name: "Writing settings", level: 1 }).waitFor();
+      expect(await page.getByRole("button", { name: "Save changes" }).isDisabled()).toBe(true);
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByLabel("Default category").selectOption({ label: "News" });
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await page.getByText("Writing settings saved. New posts start with them.").waitFor();
+      const made = await call("POST", "/api/admin/entries", {
+        type: "post",
+        title: "Spring planting",
+      });
+      const terms = await db.run(
+        "select t.name from entry_terms et join terms t on t.id = et.term_id where et.entry_id = ?",
+        [String(made.json!["id"])],
+      );
+      expect(terms).toEqual([{ name: "News" }]);
+
+      // General: the site icon from the library (a 512 × 512 picture); public pages link it; the address is shown.
+      const png = await sharp({
+        create: { width: 512, height: 512, channels: 3, background: { r: 30, g: 120, b: 80 } },
+      })
+        .png()
+        .toBuffer();
+      const upload = await page.request.post(site.base + "/api/admin/media", {
+        headers: { origin: site.base },
+        multipart: { file: { name: "icon.png", mimeType: "image/png", buffer: png } },
+      });
+      expect(upload.status()).toBeLessThan(300);
+      const mediaId = String(((await upload.json()) as { id: string }).id);
+      await expect
+        .poll(async () =>
+          String((await db.run("select status from media where id = ?", [mediaId]))[0]!["status"]),
+        )
+        .toBe("ready");
+      await page.goto(site.base + "/admin/settings/general");
+      await page.getByRole("heading", { name: "Site icon" }).waitFor();
+      await page.getByRole("heading", { name: "Site address" }).waitFor();
+      expect(
+        await page.getByText(site.base.replace(/^http:\/\//, ""), { exact: false }).count(),
+      ).toBeGreaterThan(0);
+      // A picture that is not square is refused with a plain message.
+      const wide = await page.request.post(site.base + "/api/admin/media", {
+        headers: { origin: site.base },
+        multipart: {
+          file: {
+            name: "wide.png",
+            mimeType: "image/png",
+            buffer: await sharp({
+              create: { width: 800, height: 400, channels: 3, background: "#fff" },
+            })
+              .png()
+              .toBuffer(),
+          },
+        },
+      });
+      const wideId = String(((await wide.json()) as { id: string }).id);
+      const refused = await call("PUT", "/api/admin/settings/site-icon", { mediaId: wideId });
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(refused.json)).toContain("must be a square picture");
+      expect((await call("PUT", "/api/admin/settings/site-icon", { mediaId })).status).toBe(200);
+      await page.reload();
+      await page.getByRole("img", { name: "Your site icon" }).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      const home = await (await fetch(site.base + "/")).text();
+      expect(home).toMatch(/<link rel="icon" href="[^"]+" type="image\/png"/);
+      expect(await (await fetch(site.base + "/about")).text()).toMatch(/<link rel="icon"/);
+
+      // Advanced: maintenance lives here, and the saved copies can be cleared.
+      await page.goto(site.base + "/admin/settings/general");
+      await page
+        .getByRole("navigation", { name: "Settings groups" })
+        .getByRole("link", { name: "Advanced" })
+        .click();
+      await page.getByRole("heading", { name: "Advanced settings", level: 1 }).waitFor();
+      await page.getByRole("heading", { name: "Maintenance mode" }).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByText("Not cleared by hand yet.").waitFor();
+      await page.getByRole("button", { name: "Clear saved copies" }).click();
+      await page
+        .getByText("The saved copies are cleared. Each page is made fresh at its next visit.")
+        .waitFor();
+      await page.getByText(/^Last cleared by hand .* by Anna\.$/).waitFor();
+      expect(
+        await db.run("select action from audit_log where action = 'cache.clear'"),
+      ).toHaveLength(1);
+      expect((await fetch(site.base + "/about")).status).toBe(200);
+    });
+  },
+);

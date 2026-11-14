@@ -27,6 +27,8 @@ export interface SiteInfo {
   /** The language of the site's content ("en", "ar"…), Settings > Languages. */
   lang: string;
   dir: "ltr" | "rtl";
+  /** The site icon (Settings > General), or null. */
+  icon: { url: string; type: string } | null;
 }
 
 /** A post in a list of the newest posts. */

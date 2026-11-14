@@ -1,6 +1,7 @@
 // Entries as the admin works with them (spec 03, sections 4 and 6; spec 02, sections 6 and 7): make a draft, load it, save it,
 // list them. Every save checks who may do it, repairs the blocks, writes the HTML and the plain text with our own writer,
 // and uses the revision rule, so two people editing the same entry cannot overwrite each other.
+import { newPostDefaults } from "./site-settings.js";
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
 import { writeBlocks } from "@oks-page/renderer";
@@ -201,9 +202,14 @@ export async function createDraft(
     part = `${base}-${n}`;
   const at = new Date(now());
   const id = newId();
+  // A new post starts in the default category, with the default layout (Settings > Writing).
+  const defaults =
+    input.type === "post"
+      ? await newPostDefaults(runner, siteId)
+      : { categoryId: null, layout: "" };
   await runner.all(
     `insert into "entries" ("id", "site_id", "type_key", "status", "title", "slug", "author_id", "fields", "body", "plain_text", "html", "seo", "meta", "created_at", "updated_at")
-     values (?, ?, ?, 'draft', ?, ?, ?, '{}', ?, '', '', '{}', '{}', ?, ?)`,
+     values (?, ?, ?, 'draft', ?, ?, ?, '{}', ?, '', '', '{}', ?, ?, ?)`,
     [
       id,
       siteId,
@@ -212,10 +218,16 @@ export async function createDraft(
       prefix + part,
       actor.userId,
       JSON.stringify({ version: 1, blocks: [] }),
+      JSON.stringify(defaults.layout ? { layout: defaults.layout } : {}),
       at,
       at,
     ],
   );
+  if (defaults.categoryId)
+    await runner.all(
+      `insert into "entry_terms" ("entry_id", "term_id", "position") values (?, ?, 0)`,
+      [id, defaults.categoryId],
+    );
   return { ok: true, id, slug: prefix + part, revision: 1 };
 }
 

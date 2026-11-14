@@ -7,6 +7,6 @@ import { getRunner, getSiteId } from "./db";
 /** The whole blog (null) or one category by its address ("news"); null when the category does not exist. */
 export async function getFeedPosts(categorySlug: string | null): Promise<FeedPosts | null> {
   "use cache";
-  cacheTag("feed");
+  cacheTag("site", "feed");
   return loadFeedPosts(getRunner(), await getSiteId(), categorySlug);
 }

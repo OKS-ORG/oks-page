@@ -2,6 +2,7 @@
 const GROUPS = [
   { key: "general", label: "General", href: "/admin/settings/general" },
   { key: "reading", label: "Reading", href: "/admin/settings/reading" },
+  { key: "writing", label: "Writing", href: "/admin/settings/writing" },
   { key: "languages", label: "Languages", href: "/admin/settings/languages" },
   { key: "email", label: "Email", href: "/admin/settings/email" },
   { key: "look", label: "Look", href: "/admin/settings/look" },
@@ -9,7 +10,7 @@ const GROUPS = [
   { key: "site-editor", label: "Site editor", href: "/admin/settings/site-editor" },
   { key: "media", label: "Media", href: "/admin/settings/media" },
   { key: "security", label: "Security", href: "/admin/settings/security" },
-  { key: "maintenance", label: "Maintenance", href: "/admin/settings/maintenance" },
+  { key: "advanced", label: "Advanced", href: "/admin/settings/advanced" },
   { key: "redirects", label: "Redirects", href: "/admin/settings/redirects" },
   { key: "seo", label: "Search engines", href: "/admin/settings/search-engines" },
 ];

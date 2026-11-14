@@ -18,7 +18,7 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
 import { ArchiveContent, ArchiveView, archiveTitle } from "./archive-view";
-import { EntryJsonLd, archiveMetadata, entryMetadata } from "./page-meta";
+import { EntryJsonLd, archiveMetadata, entryMetadata, postsMetadata } from "./page-meta";
 import { PostsList } from "./posts-list";
 import { PublicFrame } from "./public-frame";
 import { ThemedPage, type ThemedPageInfo } from "./theme-layout";
@@ -32,10 +32,18 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const asked = slugOf((await params).slug);
   const route = await readingPage(asked);
-  if ("posts" in route || "redirect" in route) return {};
+  if ("redirect" in route) return {};
+  if ("posts" in route) {
+    const reading = await getReading();
+    const site = await getSiteInfo();
+    return asked === "home"
+      ? postsMetadata(site.siteName, "home", site, true)
+      : postsMetadata(reading.postsTitle, asked, site, false);
+  }
   const slug = route.entrySlug;
   const entry = await getPublishedEntry(slug);
-  if (entry) return entryMetadata(entry, await getSiteInfo(), { feeds: false });
+  if (entry)
+    return entryMetadata(entry, await getSiteInfo(), { feeds: false, front: asked === "home" });
   const archive = await getTermArchive(slug);
   return archive ? archiveMetadata(archive, slug, await getSiteInfo(), { feeds: false }) : {};
 }

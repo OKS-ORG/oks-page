@@ -7,6 +7,6 @@ import { getRunner, getSiteId } from "./db";
 
 export async function getSitemapUrls(): Promise<SitemapUrl[]> {
   "use cache";
-  cacheTag("sitemap");
+  cacheTag("site", "sitemap");
   return loadSitemapUrls(getRunner(), await getSiteId());
 }

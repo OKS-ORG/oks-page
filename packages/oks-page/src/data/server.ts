@@ -24,42 +24,42 @@ export type { EntryView, Look, PostSummary, ReadingRoutes, SiteInfo, TermArchive
 /** Where the home page and the posts page are. Tagged `settings` and `menus` (a page's address or status changes it). */
 export async function getReading(): Promise<ReadingRoutes> {
   "use cache";
-  cacheTag("settings", "menus");
+  cacheTag("site", "settings", "menus");
   return loadReading();
 }
 
 /** The newest posts for the home page or the posts page. Tagged "feed": every change to a post refreshes it. */
 export async function getPostSummaries(limit: number): Promise<PostSummary[]> {
   "use cache";
-  cacheTag("feed");
+  cacheTag("site", "feed");
   return loadPostSummaries(limit);
 }
 
 /** The site's name and tagline, for every page's title and tags. Tagged `settings`: refreshed when they are saved. */
 export async function getSiteInfo(): Promise<SiteInfo> {
   "use cache";
-  cacheTag("settings");
+  cacheTag("site", "settings");
   return loadSiteInfo();
 }
 
 /** The look (the theme in use, colors, fonts, logo). Tagged "theme": refreshed when the look or the theme changes. */
 export async function getLook(): Promise<Look> {
   "use cache";
-  cacheTag("theme", "settings");
+  cacheTag("site", "theme", "settings");
   return loadLook();
 }
 
 /** The layouts of the theme in use. Tagged "theme": refreshed when a theme is used, updated or rolled back. */
 export async function getThemeLayouts(): Promise<ThemeLayouts | null> {
   "use cache";
-  cacheTag("theme");
+  cacheTag("site", "theme");
   return loadThemeLayouts();
 }
 
 /** The newest posts, for a theme's list of latest posts. Tagged "feed": every change to a post refreshes it. */
 export async function getLatestPosts(): Promise<FeedItem[]> {
   "use cache";
-  cacheTag("feed");
+  cacheTag("site", "feed");
   return loadLatestPosts();
 }
 
@@ -72,7 +72,7 @@ const count = (key: string) => {
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {
   "use cache";
-  cacheTag(slugTag(slug));
+  cacheTag("site", slugTag(slug));
   count(`entry:${slug}`);
   const entry = await loadPublishedEntry(slug);
   if (entry) cacheTag(`entry:${entry.id}`);
@@ -85,7 +85,7 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
  */
 export async function getSiteMenu(place: string): Promise<PublicMenuItem[]> {
   "use cache";
-  cacheTag("menus", `menu:${place}`);
+  cacheTag("site", "menus", `menu:${place}`);
   count(`menu:${place}`);
   return loadSiteMenu(place);
 }
@@ -93,7 +93,7 @@ export async function getSiteMenu(place: string): Promise<PublicMenuItem[]> {
 /** A category or tag archive ("category/travel"). Refreshed whenever a post or a term changes (tag "archive:posts"). */
 export async function getTermArchive(slug: string): Promise<TermArchive | null> {
   "use cache";
-  cacheTag("archive:posts");
+  cacheTag("site", "archive:posts");
   count(`archive:${slug}`);
   const archive = await loadTermArchive(slug);
   if (archive) cacheTag(`term:${archive.id}`);

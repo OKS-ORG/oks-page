@@ -2,6 +2,7 @@
 import {
   directionOf,
   loadReadingRoutes,
+  loadSiteIcon,
   loadSiteLanguage,
   type ReadingRoutes,
   chosenLayout,
@@ -73,11 +74,13 @@ export async function loadSiteInfo(): Promise<SiteInfo> {
   const siteId = await getSiteId();
   const general = await loadGeneralSettings(getRunner(), siteId);
   const language = await loadSiteLanguage(getRunner(), siteId);
+  const icon = await loadSiteIcon(getRunner(), siteId);
   return {
     siteName: general.siteName,
     tagline: general.tagline,
     lang: language.tag,
     dir: directionOf(language),
+    icon: icon ? { url: mediaContext().storage.publicUrl(icon.key), type: icon.mime } : null,
   };
 }
 
