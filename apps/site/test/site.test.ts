@@ -7302,3 +7302,102 @@ describe.skipIf(!findBrowser())(
     });
   },
 );
+
+describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-privacy-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "p".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("PR-01: public pages set no cookie for visitors", async () => {
+    for (const path of ["/", "/about", "/feed.xml", "/sitemap.xml", "/no-such-page"]) {
+      const response = await fetch(site.base + path, { redirect: "manual" });
+      expect(response.headers.get("set-cookie"), path).toBeNull();
+    }
+  });
+
+  test("privacy: the cookies, no consent notice, and a draft privacy page; domains: the main address", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+
+    await page.goto(site.base + "/admin/settings/general");
+    await page
+      .getByRole("navigation", { name: "Settings groups" })
+      .getByRole("link", { name: "Privacy" })
+      .click();
+    await page.getByRole("heading", { name: "Privacy settings", level: 1 }).waitFor();
+    await page
+      .getByText("Your site sets no cookies for visitors, so it does not need a cookie banner.")
+      .waitFor();
+    await page.getByRole("rowheader", { name: "Sign-in cookie" }).waitFor();
+    await page.getByText("Your site has no privacy page yet.").waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+
+    await page.getByRole("button", { name: "Write a draft for me" }).click();
+    await page.waitForURL(/\/admin\/pages\/[0-9A-Z]{26}$/);
+    const id = page.url().split("/").pop()!;
+    const rows = await db.run("select status, title from entries where id = ?", [id]);
+    expect(rows).toEqual([{ status: "draft", title: "Privacy" }]);
+
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByText("(not published yet).", { exact: false }).waitFor();
+    expect(await page.getByLabel("Page", { exact: true }).inputValue()).toBe(id);
+    // Choosing none, then the page again.
+    await page.getByLabel("Page", { exact: true }).selectOption("");
+    await page.getByRole("button", { name: "Save privacy page" }).click();
+    await page.getByText("The site has no privacy page now.").waitFor();
+    await page.getByLabel("Page", { exact: true }).selectOption(id);
+    await page.getByRole("button", { name: "Save privacy page" }).click();
+    await page.getByText("Privacy page saved.").waitFor();
+
+    await page
+      .getByRole("navigation", { name: "Settings groups" })
+      .getByRole("link", { name: "Domains" })
+      .click();
+    await page.getByRole("heading", { name: "Domains", level: 1 }).waitFor();
+    await page
+      .getByText(site.base.replace(/^http:\/\//, ""), { exact: false })
+      .first()
+      .waitFor();
+    await page.getByText("This address is not secure (no https).", { exact: false }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+  });
+});

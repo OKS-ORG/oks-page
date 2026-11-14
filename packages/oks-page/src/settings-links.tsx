@@ -5,6 +5,8 @@ const GROUPS = [
   { key: "writing", label: "Writing", href: "/admin/settings/writing" },
   { key: "languages", label: "Languages", href: "/admin/settings/languages" },
   { key: "email", label: "Email", href: "/admin/settings/email" },
+  { key: "privacy", label: "Privacy", href: "/admin/settings/privacy" },
+  { key: "domains", label: "Domains", href: "/admin/settings/domains" },
   { key: "look", label: "Look", href: "/admin/settings/look" },
   { key: "themes", label: "Themes", href: "/admin/settings/themes" },
   { key: "site-editor", label: "Site editor", href: "/admin/settings/site-editor" },

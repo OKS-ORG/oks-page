@@ -52,8 +52,8 @@ export default async function GeneralSettingsPage() {
           <code>{address}</code>
         </p>
         <p>
-          The address of your site. Connecting your own domain comes with the Domains settings in a
-          later release.
+          The address of your site. <a href="/admin/settings/domains">Domains</a> says how it is
+          set.
         </p>
       </section>
     </AdminFrame>

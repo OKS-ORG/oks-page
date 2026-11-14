@@ -40,6 +40,7 @@ export * from "./email-texts.js";
 export * from "./email-domain.js";
 export * from "./reading-settings.js";
 export * from "./site-settings.js";
+export * from "./privacy-settings.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";
