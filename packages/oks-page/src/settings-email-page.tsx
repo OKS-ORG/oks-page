@@ -1,5 +1,12 @@
 // Settings > Email (spec 13, section 3), for a signed-in member who may manage the settings.
-import { isSetupDone, listEmailLog, loadEmailSettings, SMTP_PRESETS } from "@oks-page/core";
+import {
+  emailHealth,
+  isSetupDone,
+  listEmailLog,
+  loadDomainCheck,
+  loadEmailSettings,
+  SMTP_PRESETS,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -37,6 +44,8 @@ export default async function EmailSettingsPage() {
         initial={settings.ok ? settings.settings : null}
         presets={SMTP_PRESETS}
         initialLog={log.ok ? log.rows : []}
+        initialCheck={await loadDomainCheck(getRunner(), member.siteId)}
+        initialHealth={await emailHealth(getRunner(), member.siteId)}
         adminEmail={member.user.email}
       />
     </AdminFrame>

@@ -40,6 +40,12 @@ export function AdminDashboard({
           <a href="/admin/settings/email">Set up email</a>
         </p>
       ) : null}
+      {canManageSettings && data.emailProblem ? (
+        <p role="note">
+          <strong>Emails are not going out.</strong> {data.emailProblem}{" "}
+          <a href="/admin/settings/email">Open the email settings</a>
+        </p>
+      ) : null}
       <Card>
         <CardHeader>{data.siteName}</CardHeader>
         <CardBody>

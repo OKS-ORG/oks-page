@@ -2,7 +2,7 @@
 // The email settings (spec 13, section 3): choose a provider (or type every value), the sender, and send a test. The
 // settings are saved only when the test email was accepted, so email never seems to work when it does not. The
 // password is never shown again; leaving it empty keeps the saved one. Below: the email record of the last 30 days.
-import type { EmailLogRow, EmailSettingsView } from "@oks-page/core";
+import type { DomainCheck, EmailHealth, EmailLogRow, EmailSettingsView } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useState, type FormEvent } from "react";
 import { formatWhen } from "./time-format";
@@ -20,6 +20,12 @@ const FIELD: React.CSSProperties = {
   minBlockSize: "32px",
   inlineSize: "100%",
   maxInlineSize: "28rem",
+};
+const CHECK_NAMES: Record<DomainCheck["items"][number]["check"], string> = {
+  spf: "SPF (who may send for your domain)",
+  dkim: "DKIM (the signature on your emails)",
+  dmarc: "DMARC (what to do with emails that fail)",
+  "free-mail": "Sender address",
 };
 const STATUS_WORDS: Record<EmailLogRow["status"], string> = {
   queued: "Waiting to be sent",
@@ -39,14 +45,21 @@ export function EmailSettingsScreen({
   presets,
   initialLog,
   adminEmail,
+  initialCheck = null,
+  initialHealth = { problem: null, message: "" },
 }: {
   initial: EmailSettingsView | null;
   presets: Preset[];
   initialLog: EmailLogRow[];
   adminEmail: string;
+  initialCheck?: DomainCheck | null;
+  initialHealth?: EmailHealth;
 }) {
   const [settings, setSettings] = useState(initial);
   const [log, setLog] = useState(initialLog);
+  const [check, setCheck] = useState(initialCheck);
+  const [health, setHealth] = useState(initialHealth);
+  const [checking, setChecking] = useState(false);
   const [provider, setProvider] = useState(initial?.provider ?? presets[0]!.key);
   const [host, setHost] = useState(initial?.host ?? presets[0]!.host);
   const [port, setPort] = useState(String(initial?.port ?? presets[0]!.port));
@@ -77,10 +90,14 @@ export function EmailSettingsScreen({
     const body = (await response.json().catch(() => null)) as {
       settings?: EmailSettingsView | null;
       log?: EmailLogRow[];
+      domainCheck?: DomainCheck | null;
+      health?: EmailHealth;
     } | null;
     if (response.ok && body) {
       setSettings(body.settings ?? null);
       setLog(body.log ?? []);
+      setCheck(body.domainCheck ?? null);
+      if (body.health) setHealth(body.health);
     }
   };
 
@@ -120,6 +137,20 @@ export function EmailSettingsScreen({
     }
   }
 
+  async function checkAgain() {
+    setChecking(true);
+    setProblem(null);
+    const response = await fetch("/api/admin/settings/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "check" }),
+    });
+    const body = (await response.json().catch(() => null)) as { domainCheck?: DomainCheck } | null;
+    setChecking(false);
+    if (!response.ok || !body?.domainCheck) setProblem("The domain could not be checked just now.");
+    else setCheck(body.domainCheck);
+  }
+
   async function turnOff() {
     setProblem(null);
     const response = await fetch("/api/admin/settings/email", { method: "DELETE" });
@@ -133,6 +164,9 @@ export function EmailSettingsScreen({
 
   return (
     <div>
+      {health.problem ? (
+        <Alert color="danger" title="Emails are not going out" description={health.message} />
+      ) : null}
       {settings?.working ? (
         <p role="note">
           <strong>Email works.</strong>{" "}
@@ -282,6 +316,37 @@ export function EmailSettingsScreen({
         </p>
         <p role="status">{note}</p>
       </form>
+
+      {settings?.working ? (
+        <section aria-labelledby="email-domain-heading">
+          <h2 id="email-domain-heading">Will your emails reach the inbox?</h2>
+          {check ? (
+            <>
+              <p>
+                {`The public records of ${check.domain}, looked up ${formatWhen(new Date(check.checkedAt).toISOString(), null)}. They are checked again every day. A warning never stops sending.`}
+              </p>
+              <ul aria-label="Domain checks">
+                {check.items.map((item) => (
+                  <li key={item.check}>
+                    <strong>
+                      {`${CHECK_NAMES[item.check]}: ${item.status === "ok" ? "OK" : item.status === "warn" ? "Check this" : "Could not check"}`}
+                    </strong>{" "}
+                    {item.message}
+                    {item.steps ? <p>{`What to do: ${item.steps}`}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>The sender domain has not been checked yet.</p>
+          )}
+          <p>
+            <Button isDisabled={checking} onPress={() => void checkAgain()}>
+              {checking ? "Checking…" : "Check again"}
+            </Button>
+          </p>
+        </section>
+      ) : null}
 
       <p>
         <a href="/admin/settings/email/texts">Change the words of the emails</a>

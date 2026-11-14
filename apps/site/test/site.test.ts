@@ -6618,13 +6618,31 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await new Promise<void>((resolve) => (smtp ? smtp.close(() => resolve()) : resolve()));
   });
 
+  // One signed-in page per person, kept while it stays signed in: the site allows 5 sign-ins per address in 5 minutes.
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  const pages = new Map<string, Page>();
   const signedIn = async (who: { email: string; password: string }) => {
+    const kept = pages.get(who.email);
+    if (kept) {
+      // Still signed in? The session itself says so (a page can show an address just before it redirects).
+      const session = (await (
+        await kept.request.get(site.base + "/api/auth/get-session")
+      ).json()) as {
+        user?: unknown;
+      } | null;
+      if (session?.user) {
+        await kept.goto(site.base + "/admin");
+        await kept.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+        return kept;
+      }
+    }
     const page = await browser.newPage();
     await page.goto(site.base + "/admin/login");
     await page.getByLabel("Email").fill(who.email);
     await page.getByLabel(/^Password/).fill(who.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    pages.set(who.email, page);
     return page;
   };
   const axeViolations = async (page: Awaited<ReturnType<typeof signedIn>>) => {
@@ -6902,5 +6920,44 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await list
       .getByRole("button", { name: /^Password reset\s*Security email · original/ })
       .waitFor();
+  });
+
+  test("will the emails reach the inbox: the sender domain's records in plain steps, and a warning when emails keep failing (EM-09, EM-14)", async () => {
+    const page = await signedIn(owner);
+    await page.goto(site.base + "/admin/settings/email");
+    const section = page.getByRole("region", { name: "Will your emails reach the inbox?" });
+    await section.waitFor();
+    // The sender is on a .example domain, which has no records (or, offline, cannot be looked up): never an error.
+    await section.getByRole("button", { name: "Check again" }).click();
+    await section.getByRole("button", { name: "Check again" }).waitFor();
+    const checks = section.getByRole("list", { name: "Domain checks" }).getByRole("listitem");
+    await expect.poll(() => checks.count()).toBe(3);
+    const words = await checks.allTextContents();
+    expect(words[0]).toMatch(/^SPF \(who may send for your domain\): (Check this|Could not check)/);
+    expect(words[1]).toMatch(/^DKIM \(the signature on your emails\): Could not check/);
+    expect(words[2]).toMatch(
+      /^DMARC \(what to do with emails that fail\): (Check this|Could not check)/,
+    );
+    if (words[0]!.includes("Check this")) expect(words[0]).toContain("What to do:");
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Three emails that failed in a row: the email screen and the dashboard say so.
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    for (let i = 0; i < 3; i++)
+      await db.run(
+        `insert into email_log (id, site_id, email_key, to_address, subject, provider, status, error, attempts, created_at)
+          values (?, ?, 'invitation', 'x@example.com', 'Hello', 'other', 'failed', 'The mail server refused the address.', 1, ?)`,
+        [`01M7F${String(i).padStart(21, "0")}`, siteId, new Date(Date.now() + i * 1000)],
+      );
+    await page.reload();
+    await page.getByText("Emails are not going out").first().waitFor();
+    await page
+      .getByText("The last 3 emails could not be sent.", { exact: false })
+      .first()
+      .waitFor();
+    await page.goto(site.base + "/admin");
+    await page.getByText("Emails are not going out.", { exact: false }).waitFor();
+    await page.getByRole("link", { name: "Open the email settings" }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
   });
 });
