@@ -498,6 +498,11 @@ for (const { kind, skip } of openers) {
           new Date(),
         ],
       );
+      // The text font is one of the library, so the export has to carry its files.
+      await db.run(
+        "insert into settings (site_id, key, value, revision, updated_at) values (?, 'theme', ?, 1, ?)",
+        [s.site, JSON.stringify({ bodyFont: "inter" }), new Date()],
+      );
       site = await startSite(kind, db, { OKS_SITE_URL: SITE_URL });
       out = mkdtempSync(join(tmpdir(), "oks-exp-out-"));
       buildExport(kind, db, out, { OKS_SITE_URL: SITE_URL });
@@ -506,6 +511,27 @@ for (const { kind, skip } of openers) {
     afterAll(async () => {
       site?.server.kill();
       await db?.close();
+    });
+
+    test("the font files the pages use are written as plain files in the export (font library)", async () => {
+      const { readdirSync, readFileSync } = await import("node:fs");
+      const { createHash } = await import("node:crypto");
+      const home = readFileSync(join(out, "index.html"), "utf8");
+      const names = [
+        ...new Set(
+          [...home.matchAll(/\/fonts\/([a-z0-9-]+\.[0-9a-f]{16}\.woff2)/g)].map((m) => m[1]!),
+        ),
+      ].sort();
+      // Inter, Latin, regular and bold: nothing else, and nothing from another host.
+      expect(names).toHaveLength(2);
+      expect(readdirSync(join(out, "fonts")).sort()).toEqual(names);
+      for (const name of names) {
+        const bytes = readFileSync(join(out, "fonts", name));
+        expect(bytes.subarray(0, 4).toString()).toBe("wOF2");
+        expect(createHash("sha256").update(bytes).digest("hex").slice(0, 16)).toBe(
+          /\.([0-9a-f]{16})\.woff2$/.exec(name)![1],
+        );
+      }
     });
 
     test("ST-01 each published page has the same title, content and canonical address in both builds", async () => {
@@ -4793,6 +4819,49 @@ describe.skipIf(!findBrowser())(
       expect((await get("/")).body).not.toContain("evil.example");
       expect((await get("/")).body).toContain("letter-spacing");
       await page.getByLabel("CSS for the public pages").fill("");
+
+      // The font library: the fonts are kept on the site and served by it, never by another company.
+      await page.getByLabel("Font for text").selectOption("inter");
+      await page.getByLabel("Font for headings").selectOption("source-serif-4");
+      await page.getByText("Licences of the fonts you use").click();
+      await page.getByText("Inter 5.3.0: Copyright 2016 The Inter Project Authors").waitFor();
+      await page.addScriptTag({ content: axe.source });
+      const lookAxe = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        lookAxe.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+      ).toEqual([]);
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await expect.poll(async () => (await get("/")).body).toContain("/fonts/inter-latin-400.");
+      const withFonts = (await get("/")).body;
+      const faces = [...withFonts.matchAll(/url\((\/fonts\/[^)]+\.woff2)\)/g)].map((m) => m[1]!);
+      expect(new Set(faces).size).toBe(4);
+      expect(withFonts).toContain('"Inter", system-ui');
+      expect(withFonts).toContain('"Source Serif 4"');
+      expect(withFonts).not.toMatch(/fonts\.(googleapis|gstatic)\.com/);
+      const fontFile = await fetch(site.base + faces[0]!);
+      expect(fontFile.status).toBe(200);
+      expect(fontFile.headers.get("content-type")).toBe("font/woff2");
+      expect(fontFile.headers.get("cache-control")).toContain("immutable");
+      const fontBytes = Buffer.from(await fontFile.arrayBuffer());
+      const { createHash } = await import("node:crypto");
+      expect(createHash("sha256").update(fontBytes).digest("hex").slice(0, 16)).toBe(
+        /\.([0-9a-f]{16})\.woff2$/.exec(faces[0]!)![1],
+      );
+      expect(fontBytes.subarray(0, 4).toString()).toBe("wOF2");
+      // Only the library's own names are served.
+      for (const bad of [
+        faces[0]!.replace(/\.[0-9a-f]{16}\./, ".0000000000000000."),
+        "/fonts/inter-latin-400.woff2",
+        "/fonts/..%2Fpackage.json",
+      ])
+        expect((await fetch(site.base + bad)).status).toBe(404);
+
       await page.getByRole("button", { name: "Remove the logo" }).click();
       await page.getByRole("button", { name: "Use the built-in color" }).click();
       await page.getByLabel("Font for text").selectOption("system-sans");

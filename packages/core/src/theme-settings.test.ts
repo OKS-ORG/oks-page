@@ -131,6 +131,24 @@ for (const { kind, open, skip } of openers) {
       expect((await loadThemeStyles(db.runner, siteId)).mainColor).toBe("#2a6f4f");
     });
 
+    test("a font of the library is saved and written with its rules; a name that only looks like one is refused", async () => {
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, {
+          bodyFont: "inter",
+          headingFont: "source-serif-4",
+        }),
+      ).toMatchObject({ ok: true, styles: { bodyFont: "inter", headingFont: "source-serif-4" } });
+      const css = await loadThemeCss(db.runner, siteId);
+      expect(css).toContain("@font-face");
+      expect(css).toContain("/fonts/inter-latin-400.");
+      for (const bodyFont of ["Inter", "inter ", "nothing", "inter-latin-400"])
+        expect(
+          await saveThemeStyles(db.runner, admin, siteId, { bodyFont }),
+          bodyFont,
+        ).toMatchObject({ ok: false, code: "invalid" });
+      expect((await loadThemeStyles(db.runner, siteId)).bodyFont).toBe("inter");
+    });
+
     test("custom CSS is checked, kept without its comments, written after the look, and cleared with an empty text", async () => {
       const saved = await saveThemeStyles(db.runner, admin, siteId, {
         mainColor: "#2a6f4f",

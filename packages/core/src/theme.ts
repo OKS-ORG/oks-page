@@ -3,6 +3,9 @@
 // code. The owner's simple controls (one main color, two fonts) and, later, a theme package's `theme.json` both end here.
 // This file knows nothing about databases; it is pure.
 import { checkThemeCss } from "./css-check.js";
+import { fontByKey, fontFaceCss, libraryStack } from "./font-library.js";
+
+export * from "./font-library.js";
 
 /** The 11 steps of every color role in oks-ui (`--oks-color-<role>-<step>`). */
 export const COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
@@ -153,8 +156,11 @@ export function checkTokens(input: unknown): TokenCheck {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /** The CSS font-family value of a font token. */
-export const fontStack = (value: string): string =>
-  value in FONT_STACKS ? FONT_STACKS[value as FontChoice] : `"${value}", system-ui, sans-serif`;
+export const fontStack = (value: string): string => {
+  if (value in FONT_STACKS) return FONT_STACKS[value as FontChoice];
+  const library = fontByKey(value);
+  return library ? libraryStack(library) : `"${value}", system-ui, sans-serif`;
+};
 
 /** The CSS variable a color key becomes. */
 function colorVariable(key: string): string {
@@ -313,8 +319,9 @@ export interface ThemeStyles {
   logoMediaId: string | null;
   /** The developer's own CSS (already checked and without comments), or an empty text. Written after the look. */
   customCss: string;
-  bodyFont: FontChoice;
-  headingFont: FontChoice;
+  /** A system font ("system-sans") or a font of the built-in library ("inter"). */
+  bodyFont: string;
+  headingFont: string;
 }
 
 export const DEFAULT_THEME_STYLES: ThemeStyles = {
@@ -354,7 +361,10 @@ export function stylesToTokens(styles: ThemeStyles): ThemeTokens {
 /** The CSS for the owner's controls; empty when everything is still the built-in look. */
 export function stylesToCss(styles: ThemeStyles): string {
   const checked = checkTokens(stylesToTokens(styles));
-  const look = checked.ok ? tokensToCss(checked.tokens) : "";
+  // The `@font-face` rules of the library fonts in use come first; they are written from the list, never from text.
+  const faces = fontFaceCss([styles.bodyFont, styles.headingFont]);
+  const colors = checked.ok ? tokensToCss(checked.tokens) : "";
+  const look = faces ? (colors ? `${faces}\n${colors}` : faces) : colors;
   // The custom CSS is checked again here, so only checked text is ever written, whatever was stored.
   const custom = styles.customCss ? checkThemeCss(styles.customCss) : null;
   return custom?.ok && custom.css ? (look ? `${look}\n${custom.css}` : custom.css) : look;

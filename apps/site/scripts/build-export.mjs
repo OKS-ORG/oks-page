@@ -10,14 +10,49 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
+import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const site = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(process.argv[2] ?? join(site, "out"));
 const work = join(site, ".export-build");
+
+/**
+ * The font route is left out of the export, so the font files the pages use are written as plain files in `fonts/`: every
+ * address of the form /fonts/<name>.woff2 found in the exported pages that is exactly one of the library's.
+ */
+async function writeFontFiles(folder) {
+  const core = join(site, "..", "..", "packages", "core", "dist");
+  const load = (name) => import(pathToFileURL(join(core, name)).href);
+  const { fontFileByName } = await load("theme.js");
+  const { FONT_FILES } = await load("font-files.js");
+  const wanted = new Set();
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(html|css|txt)$/.test(entry.name))
+        for (const m of readFileSync(path, "utf8").matchAll(
+          /\/fonts\/([a-z0-9-]+\.[0-9a-f]{16}\.woff2)/g,
+        ))
+          wanted.add(m[1]);
+    }
+  };
+  walk(folder);
+  for (const name of wanted) {
+    const found = fontFileByName(name);
+    if (!found) continue;
+    mkdirSync(join(folder, "fonts"), { recursive: true });
+    writeFileSync(
+      join(folder, "fonts", name),
+      Buffer.from(FONT_FILES[found.file.sha256], "base64"),
+    );
+  }
+}
 
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
@@ -48,6 +83,7 @@ try {
   if (!existsSync(join(work, "out"))) throw new Error("The export build made no output folder");
   rmSync(out, { recursive: true, force: true });
   cpSync(join(work, "out"), out, { recursive: true });
+  await writeFontFiles(out);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

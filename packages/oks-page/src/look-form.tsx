@@ -4,8 +4,15 @@
 import {
   COLOR_STEPS,
   colorScale,
+  FONT_LIBRARY,
   FONT_STACKS,
-  type FontChoice,
+  fontByKey,
+  fontFaceCss,
+  fontStack,
+  LICENSE_NAME,
+  LICENSE_URL,
+  type FontKind,
+  type LibraryFont,
   type ThemeStyles,
 } from "@oks-page/core/theme";
 import { Alert, Button } from "oks-ui";
@@ -17,11 +24,18 @@ export interface LogoPreview {
   alt: string;
 }
 
-const FONT_LABELS: Record<FontChoice, string> = {
+const SYSTEM_LABELS = {
   "system-sans": "Clean sans-serif",
   "system-serif": "Classic serif",
   "system-mono": "Typewriter (monospace)",
+} as const;
+const KIND_LABELS: Record<FontKind, string> = {
+  sans: "Sans-serif fonts",
+  serif: "Serif fonts",
+  mono: "Monospace fonts",
 };
+const fontLabel = (font: LibraryFont): string =>
+  font.scripts.includes("devanagari") ? `${font.name} (also Hindi)` : font.name;
 const BUILT_IN_COLOR = "#2563eb";
 
 const failure = (body: unknown, fallback: string): string =>
@@ -29,8 +43,8 @@ const failure = (body: unknown, fallback: string): string =>
 
 export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPreview | null }) {
   const [color, setColor] = useState<string | null>(initial.mainColor);
-  const [bodyFont, setBodyFont] = useState<FontChoice>(initial.bodyFont);
-  const [headingFont, setHeadingFont] = useState<FontChoice>(initial.headingFont);
+  const [bodyFont, setBodyFont] = useState<string>(initial.bodyFont);
+  const [headingFont, setHeadingFont] = useState<string>(initial.headingFont);
   const [customCss, setCustomCss] = useState(initial.customCss);
   const [logoId, setLogoId] = useState<string | null>(initial.logoMediaId);
   const [logoShown, setLogoShown] = useState<LogoPreview | null>(logo);
@@ -66,15 +80,21 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
   // The sample uses the same scale the site will use, set on the sample only.
   const scale = colorScale(color ?? BUILT_IN_COLOR);
   const sample: CSSProperties = {
-    fontFamily: FONT_STACKS[bodyFont],
+    fontFamily: fontStack(bodyFont),
     border: "1px solid currentColor",
     padding: "1rem",
     maxInlineSize: "32rem",
   };
   const solid = scale ? scale[700] : "#1d4ed8";
+  // The fonts of the library in use: their notices, and the rules that let this page show them in the sample.
+  const usedFonts = [...new Set([bodyFont, headingFont])]
+    .map((key) => fontByKey(key))
+    .filter((font): font is LibraryFont => font !== undefined);
+  const fontFaces = fontFaceCss([bodyFont, headingFont]);
 
   return (
     <form className="oks-look" onSubmit={(event) => void save(event)}>
+      {fontFaces ? <style>{fontFaces}</style> : null}
       <fieldset style={{ border: 0, padding: 0 }}>
         <legend>Main color</legend>
         <p>
@@ -110,17 +130,50 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
               id={id}
               value={value}
               style={{ minBlockSize: "36px" }}
-              onChange={(event) => set(event.target.value as FontChoice)}
+              onChange={(event) => set(event.target.value)}
             >
-              {(Object.keys(FONT_STACKS) as FontChoice[]).map((key) => (
-                <option key={key} value={key}>
-                  {FONT_LABELS[key]}
-                </option>
+              <optgroup label="Fonts every device has">
+                {(Object.keys(FONT_STACKS) as (keyof typeof SYSTEM_LABELS)[]).map((key) => (
+                  <option key={key} value={key}>
+                    {SYSTEM_LABELS[key]}
+                  </option>
+                ))}
+              </optgroup>
+              {(Object.keys(KIND_LABELS) as FontKind[]).map((kind) => (
+                <optgroup key={kind} label={KIND_LABELS[kind]}>
+                  {FONT_LIBRARY.filter((font) => font.kind === kind).map((font) => (
+                    <option key={font.key} value={font.key}>
+                      {fontLabel(font)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </p>
         ))}
-        <p>These are fonts every device already has, so the site stays fast.</p>
+        <p>
+          The fonts of the library are kept on your own site and shown from there. Your visitors
+          never contact another company, and no cookie is set. A font every device has loads
+          fastest.
+        </p>
+        {usedFonts.length > 0 ? (
+          <details>
+            <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
+              Licences of the fonts you use
+            </summary>
+            <ul>
+              {usedFonts.map((font) => (
+                <li key={font.key}>
+                  {`${font.name} ${font.version}: ${font.copyright}. `}
+                  <a href={LICENSE_URL} style={{ display: "inline-block", minBlockSize: "24px" }}>
+                    {LICENSE_NAME}
+                  </a>
+                  .
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </fieldset>
 
       <fieldset style={{ border: 0, padding: 0 }}>
@@ -193,7 +246,7 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
       </details>
 
       <section aria-label="Sample" style={sample}>
-        <h2 style={{ fontFamily: FONT_STACKS[headingFont], marginBlockStart: 0 }}>
+        <h2 style={{ fontFamily: fontStack(headingFont), marginBlockStart: 0 }}>
           A heading in your style
         </h2>
         <p>

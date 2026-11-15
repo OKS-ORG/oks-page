@@ -33,6 +33,7 @@ const RESERVED = new Set([
   "feed.xml",
   "atom.xml",
   "test-form",
+  "fonts",
 ]);
 // A part of an address is made of letters, combining marks and numbers of any script, joined by single hyphens
 // (spec 08, section 3). The marks belong to the letters: without them Hindi "नमस्ते" falls apart.

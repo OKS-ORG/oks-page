@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|fonts|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -397,6 +397,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/admin/settings/look/page.tsx",
       content: `export { default, metadata } from ${from("settings-look-page")};\n`,
+    },
+    {
+      path: "app/fonts/[file]/route.ts",
+      content: `export { GET } from ${from("api-fonts")};\n`,
     },
     {
       path: "app/api/admin/settings/theme/route.ts",

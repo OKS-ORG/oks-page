@@ -13,7 +13,8 @@
     "app/category",
     "app/test-form",
     "app/admin",
-    "app/uploads"
+    "app/uploads",
+    "app/fonts"
   ],
   "replaced": {
     "app/[[...slug]]/page.tsx": "export/page.tsx"

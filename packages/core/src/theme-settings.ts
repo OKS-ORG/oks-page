@@ -6,9 +6,9 @@ import { checkThemeCss, describeCssProblems } from "./css-check.js";
 import {
   DEFAULT_THEME_STYLES,
   FONT_CHOICES,
+  isLibraryFont,
   parseHex,
   stylesToCss,
-  type FontChoice,
   type ThemeStyles,
 } from "./theme.js";
 
@@ -18,8 +18,9 @@ export type ThemeResult<T> =
   | ({ ok: true } & T)
   | { ok: false; code: "forbidden" | "invalid"; message: string; field?: string };
 
-const isFont = (value: unknown): value is FontChoice =>
-  typeof value === "string" && (FONT_CHOICES as string[]).includes(value);
+/** A system font or a font of the built-in library. */
+const isFont = (value: unknown): value is string =>
+  typeof value === "string" && ((FONT_CHOICES as string[]).includes(value) || isLibraryFont(value));
 const isMainColor = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) && parseHex(value) !== null;
 

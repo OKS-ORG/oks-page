@@ -15,6 +15,10 @@
       "types": "./dist/theme.d.ts",
       "default": "./dist/theme.js"
     },
+    "./font-files": {
+      "types": "./dist/font-files.d.ts",
+      "default": "./dist/font-files.js"
+    },
     "./timezone": {
       "types": "./dist/timezone.d.ts",
       "default": "./dist/timezone.js"
