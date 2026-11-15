@@ -3,8 +3,10 @@
 // code. The owner's simple controls (one main color, two fonts) and, later, a theme package's `theme.json` both end here.
 // This file knows nothing about databases; it is pure.
 import { checkThemeCss } from "./css-check.js";
+import { colorModeCss, type ColorMode } from "./color-mode.js";
 import { fontByKey, fontFaceCss, libraryStack } from "./font-library.js";
 
+export * from "./color-mode.js";
 export * from "./font-library.js";
 
 /** The 11 steps of every color role in oks-ui (`--oks-color-<role>-<step>`). */
@@ -322,6 +324,10 @@ export interface ThemeStyles {
   /** A system font ("system-sans") or a font of the built-in library ("inter"). */
   bodyFont: string;
   headingFont: string;
+  /** Light only (the default), dark only, or the visitor's device decides. */
+  colorMode: ColorMode;
+  /** Whether visitors see a switch to choose light or dark for themselves. */
+  modeSwitch: boolean;
 }
 
 export const DEFAULT_THEME_STYLES: ThemeStyles = {
@@ -330,6 +336,9 @@ export const DEFAULT_THEME_STYLES: ThemeStyles = {
   customCss: "",
   bodyFont: "system-sans",
   headingFont: "system-sans",
+  // The founder's decision (D68): follow the visitor's device, with a switch.
+  colorMode: "system",
+  modeSwitch: true,
 };
 
 /** The tokens the owner's controls mean. */
@@ -364,7 +373,8 @@ export function stylesToCss(styles: ThemeStyles): string {
   // The `@font-face` rules of the library fonts in use come first; they are written from the list, never from text.
   const faces = fontFaceCss([styles.bodyFont, styles.headingFont]);
   const colors = checked.ok ? tokensToCss(checked.tokens) : "";
-  const look = faces ? (colors ? `${faces}\n${colors}` : faces) : colors;
+  const mode = colorModeCss(styles.colorMode, styles.modeSwitch);
+  const look = [faces, colors, mode].filter(Boolean).join("\n");
   // The custom CSS is checked again here, so only checked text is ever written, whatever was stored.
   const custom = styles.customCss ? checkThemeCss(styles.customCss) : null;
   return custom?.ok && custom.css ? (look ? `${look}\n${custom.css}` : custom.css) : look;

@@ -2,6 +2,8 @@
 // nothing in it draws nothing. Used by the server build and the export build, so both write the same page.
 import { getLook, getSiteInfo } from "@data";
 import type { PublicMenuItem } from "@oks-page/core";
+import { COLOR_MODE_SCRIPT, needsColorMode } from "@oks-page/core/theme";
+import { ColorModeSwitch } from "./color-mode-switch";
 import type { Look } from "./data/types";
 import type { ReactNode } from "react";
 
@@ -36,6 +38,14 @@ export function LookStyles({ look }: { look: Look }) {
     <>
       {look.themeCssUrl ? <link rel="stylesheet" href={look.themeCssUrl} /> : null}
       {look.css ? <style dangerouslySetInnerHTML={{ __html: look.css }} /> : null}
+      {needsColorMode(look.colorMode, look.modeSwitch) ? (
+        <script
+          data-mode={look.colorMode}
+          data-switch={look.modeSwitch ? "1" : "0"}
+          dangerouslySetInnerHTML={{ __html: COLOR_MODE_SCRIPT }}
+        />
+      ) : null}
+      {look.modeSwitch ? <ColorModeSwitch /> : null}
     </>
   );
 }

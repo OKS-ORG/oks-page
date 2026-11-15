@@ -57,6 +57,8 @@ export async function loadLook(): Promise<Look> {
     themeCssUrl: themeCssKey ? mediaContext().storage.publicUrl(themeCssKey) : null,
     css: stylesToCss(styles),
     logo,
+    colorMode: styles.colorMode,
+    modeSwitch: styles.modeSwitch,
   };
 }
 

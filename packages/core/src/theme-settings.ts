@@ -6,6 +6,7 @@ import { checkThemeCss, describeCssProblems } from "./css-check.js";
 import {
   DEFAULT_THEME_STYLES,
   FONT_CHOICES,
+  isColorMode,
   isLibraryFont,
   parseHex,
   stylesToCss,
@@ -53,6 +54,13 @@ export function readThemeStyles(raw: unknown): ThemeStyles {
     headingFont: isFont(saved["headingFont"])
       ? saved["headingFont"]
       : DEFAULT_THEME_STYLES.headingFont,
+    colorMode: isColorMode(saved["colorMode"])
+      ? saved["colorMode"]
+      : DEFAULT_THEME_STYLES.colorMode,
+    modeSwitch:
+      typeof saved["modeSwitch"] === "boolean"
+        ? saved["modeSwitch"]
+        : DEFAULT_THEME_STYLES.modeSwitch,
   };
 }
 
@@ -80,6 +88,8 @@ export async function saveThemeStyles(
     customCss: string;
     bodyFont: string;
     headingFont: string;
+    colorMode: string;
+    modeSwitch: boolean;
   }>,
 ): Promise<ThemeResult<{ styles: ThemeStyles }>> {
   if (!actor.can("settings.manage"))
@@ -130,7 +140,28 @@ export async function saveThemeStyles(
     headingFont = input.headingFont;
   }
 
-  const styles: ThemeStyles = { mainColor, logoMediaId, customCss, bodyFont, headingFont };
+  let colorMode = current.colorMode;
+  if (input.colorMode !== undefined) {
+    if (!isColorMode(input.colorMode))
+      return bad("colorMode", "Choose light, dark or the visitor's device.");
+    colorMode = input.colorMode;
+  }
+  let modeSwitch = current.modeSwitch;
+  if (input.modeSwitch !== undefined) {
+    if (typeof input.modeSwitch !== "boolean")
+      return bad("modeSwitch", "Say whether visitors may switch.");
+    modeSwitch = input.modeSwitch;
+  }
+
+  const styles: ThemeStyles = {
+    mainColor,
+    logoMediaId,
+    customCss,
+    bodyFont,
+    headingFont,
+    colorMode,
+    modeSwitch,
+  };
   await runner.all(
     `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
      on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,

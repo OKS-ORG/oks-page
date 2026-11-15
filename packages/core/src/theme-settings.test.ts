@@ -11,6 +11,10 @@ import {
   readThemeStyles,
   saveThemeStyles,
 } from "./theme-settings.js";
+import { colorModeCss } from "./color-mode.js";
+
+/** What a new site writes: only the rules for dark mode, as the default follows the visitor's device (D68). */
+const NEW_SITE_CSS = colorModeCss("system", true);
 
 const T = new Date(1_700_000_000_000);
 const actorOf = (userId: string, role: string): Actor => {
@@ -35,6 +39,8 @@ describe("reading a stored look", () => {
       customCss: "",
       bodyFont: "system-serif",
       headingFont: "system-sans",
+      colorMode: "system",
+      modeSwitch: true,
     });
   });
 });
@@ -74,7 +80,7 @@ for (const { kind, open, skip } of openers) {
 
     test("a new site has the built-in look and writes no CSS", async () => {
       expect(await loadThemeStyles(db.runner, siteId)).toEqual(DEFAULT_THEME_STYLES);
-      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+      expect(await loadThemeCss(db.runner, siteId)).toBe(NEW_SITE_CSS);
     });
 
     test("saving a color and fonts changes the CSS; the parts not given stay", async () => {
@@ -91,6 +97,8 @@ for (const { kind, open, skip } of openers) {
           customCss: "",
           bodyFont: "system-serif",
           headingFont: "system-sans",
+          colorMode: "system",
+          modeSwitch: true,
         },
       });
       await saveThemeStyles(db.runner, admin, siteId, { headingFont: "system-mono" });
@@ -100,6 +108,8 @@ for (const { kind, open, skip } of openers) {
         customCss: "",
         bodyFont: "system-serif",
         headingFont: "system-mono",
+        colorMode: "system",
+        modeSwitch: true,
       });
       const css = await loadThemeCss(db.runner, siteId);
       expect(css).toContain("--oks-color-primary-700:");
@@ -109,7 +119,7 @@ for (const { kind, open, skip } of openers) {
     test("clearing the color brings the built-in look back", async () => {
       await saveThemeStyles(db.runner, admin, siteId, { mainColor: "#2a6f4f" });
       await saveThemeStyles(db.runner, admin, siteId, { mainColor: null });
-      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+      expect(await loadThemeCss(db.runner, siteId)).toBe(NEW_SITE_CSS);
     });
 
     test("refuses what is not a six-digit color or a listed font, and keeps what was saved", async () => {
@@ -147,6 +157,30 @@ for (const { kind, open, skip } of openers) {
           bodyFont,
         ).toMatchObject({ ok: false, code: "invalid" });
       expect((await loadThemeStyles(db.runner, siteId)).bodyFont).toBe("inter");
+    });
+
+    test("light and dark: the mode and the visitors' switch are saved, written as CSS, and checked", async () => {
+      expect((await loadThemeStyles(db.runner, siteId)).colorMode).toBe("system");
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, { colorMode: "system", modeSwitch: true }),
+      ).toMatchObject({ ok: true, styles: { colorMode: "system", modeSwitch: true } });
+      expect(await loadThemeCss(db.runner, siteId)).toContain(':root[data-theme="dark"]');
+      for (const input of [
+        { colorMode: "auto" },
+        { colorMode: 1 as unknown as string },
+        { modeSwitch: "yes" as unknown as boolean },
+      ])
+        expect(await saveThemeStyles(db.runner, admin, siteId, input)).toMatchObject({
+          ok: false,
+          code: "invalid",
+        });
+      expect(await loadThemeStyles(db.runner, siteId)).toMatchObject({
+        colorMode: "system",
+        modeSwitch: true,
+      });
+      // Back to the built-in look: no CSS at all.
+      await saveThemeStyles(db.runner, admin, siteId, { colorMode: "light", modeSwitch: false });
+      expect(await loadThemeCss(db.runner, siteId)).toBe("");
     });
 
     test("custom CSS is checked, kept without its comments, written after the look, and cleared with an empty text", async () => {
@@ -195,7 +229,7 @@ for (const { kind, open, skip } of openers) {
         [siteId, bad, new Date()],
       );
       expect((await loadThemeStyles(db.runner, siteId)).customCss).toBe("");
-      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+      expect(await loadThemeCss(db.runner, siteId)).toBe(NEW_SITE_CSS);
     });
 
     test("only people who manage the settings may change it", async () => {
@@ -205,7 +239,7 @@ for (const { kind, open, skip } of openers) {
         ok: false,
         code: "forbidden",
       });
-      expect(await loadThemeCss(db.runner, siteId)).toBe("");
+      expect(await loadThemeCss(db.runner, siteId)).toBe(NEW_SITE_CSS);
     });
   });
 }

@@ -4,6 +4,7 @@
 import {
   COLOR_STEPS,
   colorScale,
+  COLOR_MODES,
   FONT_LIBRARY,
   FONT_STACKS,
   fontByKey,
@@ -11,6 +12,7 @@ import {
   fontStack,
   LICENSE_NAME,
   LICENSE_URL,
+  type ColorMode,
   type FontKind,
   type LibraryFont,
   type ThemeStyles,
@@ -29,6 +31,11 @@ const SYSTEM_LABELS = {
   "system-serif": "Classic serif",
   "system-mono": "Typewriter (monospace)",
 } as const;
+const MODE_LABELS: Record<ColorMode, string> = {
+  light: "Always light",
+  dark: "Always dark",
+  system: "Like the visitor's device (light or dark)",
+};
 const KIND_LABELS: Record<FontKind, string> = {
   sans: "Sans-serif fonts",
   serif: "Serif fonts",
@@ -45,6 +52,8 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
   const [color, setColor] = useState<string | null>(initial.mainColor);
   const [bodyFont, setBodyFont] = useState<string>(initial.bodyFont);
   const [headingFont, setHeadingFont] = useState<string>(initial.headingFont);
+  const [colorMode, setColorMode] = useState<ColorMode>(initial.colorMode);
+  const [modeSwitch, setModeSwitch] = useState(initial.modeSwitch);
   const [customCss, setCustomCss] = useState(initial.customCss);
   const [logoId, setLogoId] = useState<string | null>(initial.logoMediaId);
   const [logoShown, setLogoShown] = useState<LogoPreview | null>(logo);
@@ -66,6 +75,8 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
           customCss,
           bodyFont,
           headingFont,
+          colorMode,
+          modeSwitch,
         }),
       });
       const body: unknown = await response.json().catch(() => null);
@@ -174,6 +185,38 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
             </ul>
           </details>
         ) : null}
+      </fieldset>
+
+      <fieldset style={{ border: 0, padding: 0 }}>
+        <legend>Light and dark</legend>
+        {COLOR_MODES.map((mode) => (
+          <p key={mode} style={{ margin: "0.25rem 0" }}>
+            <label style={{ display: "inline-block", minBlockSize: "24px" }}>
+              <input
+                type="radio"
+                name="look-color-mode"
+                value={mode}
+                checked={colorMode === mode}
+                onChange={() => setColorMode(mode)}
+              />{" "}
+              {MODE_LABELS[mode]}
+            </label>
+          </p>
+        ))}
+        <p>
+          <label style={{ display: "inline-block", minBlockSize: "24px" }}>
+            <input
+              type="checkbox"
+              checked={modeSwitch}
+              onChange={(event) => setModeSwitch(event.target.checked)}
+            />{" "}
+            Show visitors a switch to choose light or dark for themselves
+          </label>
+        </p>
+        <p>
+          A visitor's choice is kept only in their own browser and is never sent to anyone. No
+          cookie is set.
+        </p>
       </fieldset>
 
       <fieldset style={{ border: 0, padding: 0 }}>

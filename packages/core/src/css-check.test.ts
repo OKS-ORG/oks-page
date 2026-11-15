@@ -163,7 +163,7 @@ describe("CSS that is refused", () => {
 
 describe("custom CSS in the written look", () => {
   test("comes after the look, and only when it passes the check", () => {
-    const base = { ...DEFAULT_THEME_STYLES };
+    const base = { ...DEFAULT_THEME_STYLES, colorMode: "light" as const, modeSwitch: false };
     expect(stylesToCss({ ...base, customCss: "h1{letter-spacing:.1em}" })).toBe(
       "h1{letter-spacing:.1em}",
     );

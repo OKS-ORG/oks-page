@@ -56,6 +56,9 @@ export interface Look {
   themeCssUrl: string | null;
   css: string;
   logo: { url: string; width: number | null; height: number | null; alt: string } | null;
+  /** Light only, dark only, or the visitor's device decides; and whether visitors get a switch. */
+  colorMode: "light" | "dark" | "system";
+  modeSwitch: boolean;
 }
 
 /** A category or tag archive: the posts that carry the term (for a category, also those in the categories under it). */

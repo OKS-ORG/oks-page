@@ -4862,6 +4862,67 @@ describe.skipIf(!findBrowser())(
       ])
         expect((await fetch(site.base + bad)).status).toBe(404);
 
+      // Dark mode: the owner chooses the mode and may give visitors a switch; the page is drawn dark before it is shown.
+      await page.getByLabel("Like the visitor's device (light or dark)").check();
+      await page
+        .getByLabel("Show visitors a switch to choose light or dark for themselves")
+        .check();
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await expect.poll(async () => (await get("/")).body).toContain('data-mode="system"');
+      const night = await (await browser.newContext({ colorScheme: "dark" })).newPage();
+      await night.goto(site.base + "/");
+      const themeOf = (who: Page) => who.evaluate(() => document.documentElement.dataset["theme"]);
+      expect(await themeOf(night)).toBe("dark");
+      expect(await night.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(
+        "rgb(10, 10, 10)",
+      );
+      for (const width of [1280, 390]) {
+        await night.setViewportSize({ width, height: 900 });
+        await night.addScriptTag({ content: axe.source });
+        const dark = await night.evaluate(() =>
+          (window as unknown as { axe: typeof axe }).axe.run(document, {
+            runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+          }),
+        );
+        expect(
+          dark.violations.map(
+            (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+          ),
+          `dark ${width}px`,
+        ).toEqual([]);
+      }
+      // The visitor's own choice wins and is kept in the browser.
+      const toggle = night.getByRole("button", { name: "Dark mode" });
+      expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+      await toggle.click();
+      expect(await themeOf(night)).toBe("light");
+      expect(await toggle.getAttribute("aria-pressed")).toBe("false");
+      await night.reload();
+      expect(await themeOf(night)).toBe("light");
+      expect(await night.evaluate(() => document.cookie)).toBe("");
+      await night.context().close();
+      // A light device starts light; the switch makes it dark.
+      const day = await (await browser.newContext({ colorScheme: "light" })).newPage();
+      await day.goto(site.base + "/");
+      expect(await themeOf(day)).toBe("light");
+      await day.getByRole("button", { name: "Dark mode" }).click();
+      await day.reload();
+      expect(await themeOf(day)).toBe("dark");
+      await day.context().close();
+      // Always dark, no switch: a light device sees dark, and there is no button.
+      await page.getByLabel("Always dark").check();
+      await page
+        .getByLabel("Show visitors a switch to choose light or dark for themselves")
+        .uncheck();
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await expect.poll(async () => (await get("/")).body).toContain('data-mode="dark"');
+      const always = await (await browser.newContext({ colorScheme: "light" })).newPage();
+      await always.goto(site.base + "/");
+      expect(await themeOf(always)).toBe("dark");
+      expect(await always.getByRole("button", { name: "Dark mode" }).count()).toBe(0);
+      await always.context().close();
+      await page.getByLabel("Always light").check();
+
       await page.getByRole("button", { name: "Remove the logo" }).click();
       await page.getByRole("button", { name: "Use the built-in color" }).click();
       await page.getByLabel("Font for text").selectOption("system-sans");
@@ -4872,6 +4933,9 @@ describe.skipIf(!findBrowser())(
       expect(plain).not.toContain("--oks-color-primary-700");
       expect(plain).not.toContain("Maple-logo");
       expect(plain).not.toContain("letter-spacing");
+      // Always light and no switch: no script, no switch, as before.
+      expect(plain).not.toContain("data-mode");
+      expect(plain).not.toContain("data-theme");
     });
 
     /** A request made from inside the signed-in page, so it carries the owner's session. */
@@ -5441,7 +5505,7 @@ describe.skipIf(!findBrowser())(
       );
     const publicStyle = async () => {
       const html = await (await fetch(site.base + "/")).text();
-      return /<style>([^<]*oks-color[^<]*)<\/style>/.exec(html)?.[1] ?? null;
+      return /<style>([^<]*--oks-color-primary-700:[^<]*)<\/style>/.exec(html)?.[1] ?? null;
     };
 
     test("a new site has the built-in look; the owner sets a color and fonts and every public page shows them at once; bad values, editors and signed-out visitors are refused", async () => {
@@ -5454,6 +5518,8 @@ describe.skipIf(!findBrowser())(
           customCss: "",
           bodyFont: "system-sans",
           headingFont: "system-sans",
+          colorMode: "system",
+          modeSwitch: true,
         },
       });
 

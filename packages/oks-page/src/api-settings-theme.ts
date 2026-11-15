@@ -32,12 +32,16 @@ export async function PUT(request: Request) {
     customCss?: string;
     bodyFont?: string;
     headingFont?: string;
+    colorMode?: string;
+    modeSwitch?: boolean;
   } = {};
   if ("mainColor" in input) patch.mainColor = input["mainColor"] as string | null;
   if ("logoMediaId" in input) patch.logoMediaId = input["logoMediaId"] as string | null;
   if ("customCss" in input) patch.customCss = input["customCss"] as string;
   if ("bodyFont" in input) patch.bodyFont = input["bodyFont"] as string;
   if ("headingFont" in input) patch.headingFont = input["headingFont"] as string;
+  if ("colorMode" in input) patch.colorMode = input["colorMode"] as string;
+  if ("modeSwitch" in input) patch.modeSwitch = input["modeSwitch"] as boolean;
   const result = await saveThemeStyles(getRunner(), await actorOf(member), member.siteId, patch);
   if (!result.ok) return reply(result, result.code === "forbidden" ? 403 : 400);
   // Every public page carries the look, so all of them are written again at the next request.

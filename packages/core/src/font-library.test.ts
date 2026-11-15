@@ -87,7 +87,9 @@ describe("the font library (ADR 0028)", () => {
     expect(css).toContain("@font-face");
     expect(css).toContain('--oks-site-font-body:"Inter", system-ui');
     expect(css).toContain('--oks-site-font-heading:"Source Serif 4"');
-    expect(stylesToCss(DEFAULT_THEME_STYLES)).toBe("");
+    expect(stylesToCss({ ...DEFAULT_THEME_STYLES, colorMode: "light", modeSwitch: false })).toBe(
+      "",
+    );
     expect(readThemeStyles({ bodyFont: "inter", headingFont: "system-mono" })).toMatchObject({
       bodyFont: "inter",
       headingFont: "system-mono",

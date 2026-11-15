@@ -15,6 +15,9 @@ const styles = (over: Partial<ThemeStyles> = {}): ThemeStyles => ({
   logoMediaId: null,
   bodyFont: "system-sans",
   headingFont: "system-sans",
+  customCss: "",
+  colorMode: "light",
+  modeSwitch: false,
   ...over,
 });
 
