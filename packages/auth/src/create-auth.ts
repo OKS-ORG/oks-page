@@ -5,7 +5,7 @@ import { newId, pgSchema, sqliteSchema, type SqlRunner } from "@oks-page/db";
 import { timingSafeEqual } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
-import { twoFactor } from "better-auth/plugins";
+import { magicLink, twoFactor } from "better-auth/plugins";
 import {
   accountKey,
   createAccountLimiter,
@@ -13,6 +13,7 @@ import {
   type AccountLimitConfig,
 } from "./account-limit.js";
 import { clientAddress, UNKNOWN_CLIENT, type TrustedProxies } from "./client-ip.js";
+import { checkDevice, DEVICE_COOKIE, DEVICE_DAYS } from "./devices.js";
 
 export interface CreateAuthOptions {
   /** A Drizzle client for the database. */
@@ -54,7 +55,22 @@ export interface CreateAuthOptions {
   ) => Promise<void>;
   /** Whether email works now (EM-02). Confirming and changing an address are refused while it does not. */
   emailReady?: () => Promise<boolean>;
+  /**
+   * Sends a sign-in link (spec 13, section 5), or the reason there is none: it works only for a confirmed address
+   * without two-factor (the library would skip two-factor, and for an unconfirmed address it deletes the password).
+   * Without it, sign-in links are off.
+   */
+  sendSignInLink?: (
+    data: AccountPerson & ({ url: string } | { refused: "two-factor" | "not-confirmed" }),
+  ) => Promise<void>;
+  /** Told when someone signs in from a browser the site does not know for them (after the first one). */
+  onNewDevice?: (
+    data: AccountPerson & { when: number; browser: string; address: string },
+  ) => Promise<void>;
 }
+
+/** How long a sign-in link works. */
+export const SIGN_IN_LINK_SECONDS = 15 * 60;
 
 export type AddressLinkKind = "confirm-email" | "change-email-old" | "change-email-new";
 
@@ -243,7 +259,40 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
       max: 100,
       customRules: { "/sign-in/email": { window: address.window, max: address.max } },
     },
-    plugins: [twoFactor(), ...(options.passkey ? [passkey(options.passkey)] : [])],
+    plugins: [
+      twoFactor(),
+      ...(options.passkey ? [passkey(options.passkey)] : []),
+      ...(options.sendSignInLink
+        ? [
+            magicLink({
+              expiresIn: SIGN_IN_LINK_SECONDS,
+              // A link never makes an account; the token is kept only as a hash.
+              disableSignUp: true,
+              storeToken: "hashed",
+              sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+                const rows = await options.runner.all(
+                  `select "id", "email", "name", "email_verified", "two_factor_enabled" from "users" where lower("email") = ?`,
+                  [email.trim().toLowerCase()],
+                );
+                const row = rows[0];
+                // No account: nothing is sent, and the page answers the same.
+                if (!row) return;
+                const person = {
+                  userId: String(row["id"]),
+                  email: String(row["email"]),
+                  name: String(row["name"] ?? ""),
+                };
+                const on = (v: unknown) => v === true || Number(v) === 1;
+                if (on(row["two_factor_enabled"]))
+                  return options.sendSignInLink!({ ...person, refused: "two-factor" });
+                if (!on(row["email_verified"]))
+                  return options.sendSignInLink!({ ...person, refused: "not-confirmed" });
+                return options.sendSignInLink!({ ...person, url });
+              },
+            }),
+          ]
+        : []),
+    ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === "/sign-in/email") {
@@ -255,6 +304,39 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
               message: "Too many tries for this account. Wait a little and try again.",
               retryAfterSeconds: Math.ceil(result.retryAfterMs / 1000),
             });
+          }
+        }
+        // A sign-in link needs email, and always leads to the dashboard (or back to the sign-in page when it failed).
+        if (ctx.path === "/sign-in/magic-link") {
+          if (await emailOff())
+            throw new APIError("BAD_REQUEST", {
+              message: "Email is not set up on this site yet, so no link can be sent.",
+            });
+          const body = (ctx.body ?? {}) as Record<string, unknown>;
+          body["callbackURL"] = "/admin";
+          body["errorCallbackURL"] = "/admin/login?link=failed";
+          delete body["newUserCallbackURL"];
+        }
+        // Changing the address asks for the current password again (spec 02, rule 7).
+        if (ctx.path === "/change-email") {
+          const body = (ctx.body ?? {}) as Record<string, unknown>;
+          const password = body["password"];
+          delete body["password"];
+          const session = await getSessionFromCtx(ctx);
+          if (session) {
+            const account = (
+              await options.runner.all(
+                `select "password" from "auth_accounts" where "user_id" = ? and "provider_id" = 'credential'`,
+                [session.user.id],
+              )
+            )[0];
+            const hash = account?.["password"];
+            const right =
+              typeof password === "string" &&
+              typeof hash === "string" &&
+              (await ctx.context.password.verify({ hash, password }));
+            if (!right)
+              throw new APIError("BAD_REQUEST", { message: "Your current password is not right." });
           }
         }
         // Confirming or changing an address needs email (EM-02), and always comes back to the account page.
@@ -309,6 +391,45 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // A sign-in from a browser the site does not know for this person: remember it, and send the alert. Every
+        // way of signing in counts once its session exists (password, the code after it, passkey, sign-in link).
+        const fresh = ctx.context.newSession as
+          | { user?: Person; session?: { userAgent?: string | null; ipAddress?: string | null } }
+          | null
+          | undefined;
+        const answer = ctx.context.returned as { twoFactorRedirect?: unknown } | undefined;
+        if (
+          fresh?.user &&
+          ctx.path !== "/sign-up/email" &&
+          ctx.path !== "/verify-email" &&
+          !(answer && typeof answer === "object" && "twoFactorRedirect" in answer)
+        ) {
+          try {
+            const device = await checkDevice(
+              options.runner,
+              fresh.user.id,
+              ctx.getCookie(DEVICE_COOKIE),
+              fresh.session?.userAgent ?? ctx.headers?.get("user-agent"),
+              options.clock,
+            );
+            ctx.setCookie(DEVICE_COOKIE, device.value, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: options.baseUrl.startsWith("https://"),
+              path: "/",
+              maxAge: DEVICE_DAYS * 24 * 60 * 60,
+            });
+            if (device.alert)
+              await options.onNewDevice?.({
+                ...personOf(fresh.user),
+                when: (options.clock ?? Date.now)(),
+                browser: device.description,
+                address: fresh.session?.ipAddress ?? ctx.headers?.get(CLIENT_HEADER) ?? "",
+              });
+          } catch {
+            // The sign-in is done; the alert is only a notice.
+          }
+        }
         // An email change is done when the person now has the new address (the library answers with a redirect
         // either way, so the database decides). The notice goes to the old address and to the new one.
         if (ctx.path === "/verify-email") {

@@ -71,6 +71,13 @@
       "when": 1794677369244,
       "tag": "0009_search_index",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794720687059,
+      "tag": "0010_known_devices",
+      "breakpoints": true
     }
   ]
 }

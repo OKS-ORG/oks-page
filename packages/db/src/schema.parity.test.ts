@@ -127,7 +127,7 @@ describe("DM-16 schema parity", () => {
   test("both schemas define the same 45 tables", () => {
     const a = pgTables.map((t) => getPg(t).name).sort();
     const b = sqliteTables.map((t) => getSqlite(t).name).sort();
-    expect(a).toHaveLength(46);
+    expect(a).toHaveLength(47);
     expect(a).toEqual(b);
   });
 

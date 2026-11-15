@@ -139,12 +139,12 @@ const service: Omit<S3AdapterOptions, "bucket"> | null =
 describe.skipIf(!service)(
   "the S3 adapter on a real service (MD-33: the same tests as the local disk)",
   () => {
-    const bucket = `oks-test-${randomBytes(6).toString("hex")}`;
+    const bucket = "oks-test-adapter";
     let store: StorageAdapter;
 
     beforeAll(async () => {
       const made = await s3Client({ ...service!, bucket }).request("PUT", "");
-      expect(made.status).toBe(200);
+      expect([200, 409]).toContain(made.status);
       store = s3Adapter({ ...service!, bucket, prefix: "site-1" });
     });
     afterAll(async () => {
@@ -156,7 +156,6 @@ describe.skipIf(!service)(
         "site-1/2026/11/big.bin",
       ])
         await client.request("DELETE", key);
-      await client.request("DELETE", "");
     });
 
     test("store then read gives the same bytes", async () => {
@@ -218,11 +217,14 @@ describe.skipIf(!service)(
       expect(error.message).not.toContain(service!.accessKeyId);
     });
 
-    test("a bucket that does not exist says so", async () => {
+    test("a bucket that does not exist says so (asked for a file: nothing is created)", async () => {
+      // Writing is not used here: some services (SeaweedFS) make a missing bucket on a write, which then stays behind.
       const none = s3Adapter({ ...service!, bucket: `${bucket}-none` });
-      await expect(none.put("a.png", new Uint8Array([1]))).rejects.toThrow(
-        /bucket does not exist|could not be stored/,
+      const error = (await none.get("a.png").catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(
+        /^The file could not be read: (the bucket does not exist|the storage answered 404)/,
       );
+      expect(await none.exists("a.png")).toBe(false);
     });
   },
 );

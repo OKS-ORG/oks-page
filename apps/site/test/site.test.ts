@@ -6992,7 +6992,7 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     expect(await page.getByLabel("New email address").count()).toBe(0);
     const early = await page.request.post(site.base + "/api/auth/change-email", {
       headers: { origin: site.base, "content-type": "application/json" },
-      data: { newEmail: "cara.new@example.com" },
+      data: { newEmail: "cara.new@example.com", password: cara.password },
     });
     expect(early.status()).toBe(400);
     expect(JSON.stringify(await early.json())).toContain(
@@ -7015,6 +7015,11 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
 
     // Change it: the old address says yes first, then the new one.
     await page.getByLabel("New email address").fill("cara.new@example.com");
+    // A wrong password is refused (spec 02, rule 7); nothing is sent.
+    await page.getByLabel("Your current password").fill("not-the-password");
+    await page.getByRole("button", { name: "Change my email address" }).click();
+    await page.getByText("Your current password is not right.").waitFor();
+    await page.getByLabel("Your current password").fill(cara.password);
     await page.getByRole("button", { name: "Change my email address" }).click();
     await page
       .getByText(`We sent a link to your current address, ${cara.email}.`, { exact: false })
@@ -7055,6 +7060,77 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await fresh.getByRole("button", { name: "Sign in" }).click();
     await fresh.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     await fresh.close();
+  });
+
+  test("a sign-in link by email for a confirmed address, and the alert about a sign-in from a new device (spec 13, section 5)", async () => {
+    // Cara's address was confirmed and changed in the test before.
+    const address = "cara.new@example.com";
+    const mailTo = (to: string) =>
+      received
+        .filter((m) => m.to.includes(to))
+        .map((m) => m.data.replace(/=\r?\n/g, "").replace(/=3D/g, "="));
+    const withSubject = (to: string, subject: string) =>
+      mailTo(to).filter((m) => m.includes(`Subject: ${subject}`));
+    const waitFor = async (to: string, subject: string, count = 1) => {
+      await expect
+        .poll(() => withSubject(to, subject).length, { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(count);
+      return withSubject(to, subject).at(-1)!;
+    };
+
+    // A new browser asks for a link on the sign-in page.
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+    await page.getByLabel("Email for the link").fill(address);
+    await page.getByRole("button", { name: "Send the link" }).click();
+    await page
+      .getByText(`If ${address} has an account here, an email is on its way.`, { exact: false })
+      .waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+    const mail = await waitFor(address, "Your sign-in link for Anna's Garden");
+    const link =
+      /https?:\/\/[^\s"<>()\]]+\/api\/auth\/magic-link\/verify\?token=[^\s"<>()\]&]+[^\s"<>()\]]*/
+        .exec(mail)![0]
+        .replace(/&amp;/g, "&");
+    await page.goto(link);
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    // That browser was new for Cara: the alert.
+    const alert = await waitFor(address, "A sign-in from a new device: Anna's Garden");
+    expect(alert).toMatch(/Chrome on Linux|a browser/);
+    // The same link a second time does not work.
+    const other = await browser.newPage();
+    await other.goto(link);
+    await other.getByText("That sign-in link did not work").waitFor();
+    await other.close();
+
+    // Signing in again from the same browser is quiet.
+    const alerts = withSubject(address, "A sign-in from a new device: Anna's Garden").length;
+    const out = await page.request.post(site.base + "/api/auth/sign-out", {
+      headers: { origin: site.base, "content-type": "application/json" },
+      data: {},
+    });
+    expect(out.status()).toBe(200);
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel(/^Email\s*\*?$/).fill(address);
+    await page.getByLabel(/^Password/).fill(cara.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(withSubject(address, "A sign-in from a new device: Anna's Garden").length).toBe(alerts);
+    await context.close();
+
+    // The owner has two-factor off but an unconfirmed address: no link, the reason instead.
+    const ownerPage = await browser.newPage();
+    await ownerPage.goto(site.base + "/admin/login");
+    await ownerPage.getByRole("button", { name: "Email me a sign-in link" }).click();
+    await ownerPage.getByLabel("Email for the link").fill(owner.email);
+    await ownerPage.getByRole("button", { name: "Send the link" }).click();
+    const refused = await waitFor(owner.email, "About signing in to Anna's Garden");
+    expect(refused).toContain("Sign-in links work only for a confirmed email address.");
+    expect(refused).not.toContain("magic-link/verify");
+    await ownerPage.close();
   });
 });
 
@@ -7661,7 +7737,7 @@ const s3Test =
         region: process.env["S3_TEST_REGION"] ?? "us-east-1",
         accessKeyId: process.env["S3_TEST_ACCESS_KEY"],
         secretAccessKey: process.env["S3_TEST_SECRET_KEY"],
-        bucket: `oks-site-${Date.now().toString(36)}`,
+        bucket: "oks-test-site",
       }
     : null;
 
@@ -7677,7 +7753,7 @@ describe.skipIf(!findBrowser() || !s3Test)(
 
     beforeAll(async () => {
       const { s3Client } = await import("@oks-page/media");
-      expect((await s3Client(s3Test!).request("PUT", "")).status).toBe(200);
+      expect([200, 409]).toContain((await s3Client(s3Test!).request("PUT", "")).status);
       const root = mkdtempSync(join(tmpdir(), "oks-s3-site-"));
       uploads = join(root, "uploads");
       db = await openSqlite(join(root, "site.sqlite"));
@@ -7710,10 +7786,9 @@ describe.skipIf(!findBrowser() || !s3Test)(
       site?.server.kill();
       await db?.close();
       if (s3Test) {
-        const { s3Adapter, s3Client } = await import("@oks-page/media");
+        const { s3Adapter } = await import("@oks-page/media");
         const store = s3Adapter({ ...s3Test, prefix: "anna" });
         for await (const key of store.list()) await store.delete(key);
-        await s3Client(s3Test).request("DELETE", "");
       }
     });
 

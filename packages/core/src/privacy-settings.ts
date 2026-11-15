@@ -27,6 +27,13 @@ export const SITE_COOKIES: SiteCookie[] = [
     who: "people who sign in",
     needed: true,
   },
+  {
+    name: "Device cookie",
+    purpose:
+      "Lets the site recognise a browser you signed in from before, so it can warn you by email about a sign-in from a new one. It is needed for that security warning, so no consent is asked.",
+    who: "people who sign in",
+    needed: true,
+  },
 ];
 
 /** Whether a consent notice is needed: only when something sets a cookie that needs consent, or loads outside content. */
@@ -149,7 +156,7 @@ export function privacyDraftBlocks(facts: PrivacyFacts): unknown[] {
     heading("cookies-h", "Cookies"),
     paragraph(
       "cookies",
-      "Visitors get no cookies. People who sign in to work on the site get one cookie that keeps them signed in; it is needed for signing in.",
+      "Visitors get no cookies. People who sign in to work on the site get two: one keeps them signed in, and one lets the site recognise their browser, so it can warn them about a sign-in from a new one. Both are needed for signing in safely.",
     ),
     heading("outside-h", "Content from other companies"),
     paragraph(

@@ -24,7 +24,7 @@ const words = (blocks: unknown[]) => JSON.stringify(blocks);
 
 describe("privacy facts", () => {
   test("PR-01: a new site sets no cookie for visitors and needs no consent notice", () => {
-    expect(SITE_COOKIES.map((c) => c.name)).toEqual(["Sign-in cookie"]);
+    expect(SITE_COOKIES.map((c) => c.name)).toEqual(["Sign-in cookie", "Device cookie"]);
     expect(noVisitorCookies()).toBe(true);
     expect(consentNeeded()).toBe(false);
     const tracker = {

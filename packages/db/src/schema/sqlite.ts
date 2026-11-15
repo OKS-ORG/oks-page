@@ -989,6 +989,25 @@ export const emailTexts = sqliteTable(
   ],
 );
 
+// The browsers a person signed in from (spec 13, section 5: the alert for a sign-in from a new device). Only a hash of
+// the random value in the device cookie is kept, with a short description of the browser.
+export const knownDevices = sqliteTable(
+  "known_devices",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceHash: text("device_hash").notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    check("ck_known_devices_user_id_ulid", sql`length(${t.userId}) = 26`),
+    primaryKey({ columns: [t.userId, t.deviceHash] }),
+  ],
+);
+
 // Site search statistics (spec 08, section 16.3): only the word, the day and the counts; nothing that points to a person.
 export const searchTerms = sqliteTable(
   "search_terms",
@@ -1099,6 +1118,7 @@ export const tableNames = [
   "audit_log",
   "email_log",
   "email_texts",
+  "known_devices",
   "search_terms",
   "api_keys",
   "cache_tags",

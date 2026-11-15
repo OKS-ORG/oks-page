@@ -87,9 +87,9 @@ const service =
 
 describe.skipIf(!service)("moving files to a real S3 service and back", () => {
   test("folder to bucket (with a prefix) and back to a new folder; the bucket lists more than one page", async () => {
-    const bucket = `oks-migrate-${randomBytes(6).toString("hex")}`;
+    const bucket = "oks-test-migrate";
     const client = s3Client({ ...service!, bucket });
-    expect((await client.request("PUT", "")).status).toBe(200);
+    expect([200, 409]).toContain((await client.request("PUT", "")).status);
     // 1,050 small files: more than one page of the bucket list (1,000 keys).
     for (let i = 0; i < 1047; i++)
       await from.put(`2026/10/f${String(i).padStart(4, "0")}.txt`, new Uint8Array([i % 256]));
@@ -110,7 +110,6 @@ describe.skipIf(!service)("moving files to a real S3 service and back", () => {
       ).toBe(true);
     } finally {
       for await (const key of store.list()) await store.delete(key);
-      await client.request("DELETE", "");
     }
   }, 120_000);
 });

@@ -108,7 +108,7 @@ for (const { kind, open, skip } of openers) {
       const early = await post(
         a,
         "/change-email",
-        { newEmail: "anna.new@example.com" },
+        { newEmail: "anna.new@example.com", password: PASSWORD },
         { cookie },
       );
       expect(early.status).toBe(400);
@@ -125,10 +125,20 @@ for (const { kind, open, skip } of openers) {
       });
       cookie = cookieOf(fresh);
 
+      // The current password is asked again (spec 02, rule 7).
+      const wrong = await post(
+        a,
+        "/change-email",
+        { newEmail: "anna.new@example.com", password: "not the password" },
+        { cookie },
+      );
+      expect(wrong.status).toBe(400);
+      expect(JSON.stringify(await wrong.json())).toContain("Your current password is not right.");
+      expect(links).toHaveLength(1);
       const change = await post(
         a,
         "/change-email",
-        { newEmail: "anna.new@example.com" },
+        { newEmail: "anna.new@example.com", password: PASSWORD },
         { cookie },
       );
       expect(change.status).toBe(200);

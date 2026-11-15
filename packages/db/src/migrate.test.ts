@@ -216,6 +216,7 @@ describe("sqlite migrations", () => {
       "0007_email_texts",
       "0008_search_terms",
       "0009_search_index",
+      "0010_known_devices",
     ]);
   });
 });
@@ -356,6 +357,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0007_email_texts",
       "0008_search_terms",
       "0009_search_index",
+      "0010_known_devices",
     ]);
   });
 });

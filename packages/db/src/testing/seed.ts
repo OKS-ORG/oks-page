@@ -325,6 +325,13 @@ export async function seedEverything(db: TestDb): Promise<void> {
     updated_by: user,
     updated_at: T,
   });
+  await ins(db, "known_devices", {
+    user_id: user,
+    device_hash: "a".repeat(64),
+    description: "Firefox on Linux",
+    created_at: T,
+    last_seen_at: T,
+  });
   await ins(db, "search_terms", {
     site_id: site,
     term: "sourdough",

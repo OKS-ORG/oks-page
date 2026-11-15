@@ -163,6 +163,89 @@ export async function sendAddressLinkEmail(
   );
 }
 
+/** How long a sign-in link works. */
+export const SIGN_IN_LINK_MINUTES = 15;
+
+const REFUSED_REASON = {
+  "two-factor":
+    "Your account uses two-factor sign-in, so sign-in links are off for it: sign in with your password and your code.",
+  "not-confirmed":
+    "Sign-in links work only for a confirmed email address. Sign in with your password, then confirm your address under Your account; after that you can use sign-in links.",
+} as const;
+
+/**
+ * A sign-in link, or the reason there is none (security emails, spec 13, section 5). At most 3 to one address in an
+ * hour; the link works for 15 minutes and is never sent late.
+ */
+export async function sendSignInLinkEmail(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: { to: string; name: string; siteName: string; loginLink: string } & (
+    { link: string } | { refused: keyof typeof REFUSED_REASON }
+  ),
+  now: () => number = Date.now,
+): Promise<Sent> {
+  const key = "link" in input ? "sign-in-link" : "sign-in-link-refused";
+  if (await overLimit(runner, siteId, key, input.to, now))
+    return { sent: false, reason: "Too many sign-in links for this address in the last hour." };
+  const common = { name: input.name || input.to, site: input.siteName };
+  return "link" in input
+    ? sendText(
+        runner,
+        siteId,
+        secrets,
+        key,
+        input.to,
+        { ...common, link: input.link },
+        now,
+        now() + SIGN_IN_LINK_MINUTES * 60_000,
+      )
+    : sendText(
+        runner,
+        siteId,
+        secrets,
+        key,
+        input.to,
+        { ...common, reason: REFUSED_REASON[input.refused], link: input.loginLink },
+        now,
+      );
+}
+
+/** "A sign-in from a new device" (a security email, spec 13, section 5). */
+export async function sendNewDeviceEmail(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: {
+    to: string;
+    name: string;
+    siteName: string;
+    when: number;
+    browser: string;
+    address: string;
+    accountLink: string;
+  },
+  now: () => number = Date.now,
+): Promise<Sent> {
+  return sendText(
+    runner,
+    siteId,
+    secrets,
+    "new-device",
+    input.to,
+    {
+      name: input.name || input.to,
+      site: input.siteName,
+      when: new Date(input.when).toUTCString(),
+      browser: input.browser,
+      address: input.address || "unknown",
+      link: input.accountLink,
+    },
+    now,
+  );
+}
+
 /** What changed in an account, for the security notice. */
 export type AccountChange = "password" | "two-factor-on" | "two-factor-off" | "email";
 

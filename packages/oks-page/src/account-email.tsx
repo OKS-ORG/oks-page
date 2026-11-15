@@ -46,6 +46,7 @@ export function AccountEmail({
   error: string | null;
 }) {
   const [newEmail, setNewEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,7 +80,7 @@ export function AccountEmail({
     }
     void send(
       "change-email",
-      { newEmail: next },
+      { newEmail: next, password },
       `We sent a link to your current address, ${email}. Open it to say yes; a second link then goes to ${next}.`,
     );
   };
@@ -147,11 +148,24 @@ export function AccountEmail({
             />
           </p>
           <p>
+            <label htmlFor="account-email-password">Your current password</label>
+            <br />
+            <input
+              id="account-email-password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={FIELD}
+            />
+          </p>
+          <p>
             We first ask your current address to say yes, then the new one. Until both links are
             opened, nothing changes.
           </p>
           <p>
-            <Button type="submit" isDisabled={busy || !newEmail.trim()}>
+            <Button type="submit" isDisabled={busy || !newEmail.trim() || !password}>
               Change my email address
             </Button>
           </p>

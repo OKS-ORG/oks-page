@@ -5,7 +5,9 @@ import {
   loadGeneralSettings,
   sendAccountChangeEmail,
   sendAddressLinkEmail,
+  sendNewDeviceEmail,
   sendPasswordResetEmail,
+  sendSignInLinkEmail,
 } from "@oks-page/core";
 import { getDrizzle, getRunner, getSiteId } from "./db";
 import { kickEmailJobs, siteSecrets } from "./mail";
@@ -82,6 +84,36 @@ export function getAuth(origin: string): OksAuth {
       if (sent.sent) kickEmailJobs();
     },
     emailReady: async () => emailWorks(getRunner(), await getSiteId()),
+    // Sign-in links (spec 13, section 5): only for a confirmed address without two-factor; otherwise the reason.
+    sendSignInLink: async (data) => {
+      const siteId = await getSiteId();
+      const common = {
+        to: data.email,
+        name: data.name,
+        siteName: await siteName(siteId),
+        loginLink: `${site}/admin/login`,
+      };
+      const sent = await sendSignInLinkEmail(
+        getRunner(),
+        siteId,
+        siteSecrets(),
+        "url" in data ? { ...common, link: data.url } : { ...common, refused: data.refused },
+      );
+      if (sent.sent) kickEmailJobs();
+    },
+    onNewDevice: async ({ email, name, when, browser, address }) => {
+      const siteId = await getSiteId();
+      const sent = await sendNewDeviceEmail(getRunner(), siteId, siteSecrets(), {
+        to: email,
+        name,
+        siteName: await siteName(siteId),
+        when,
+        browser,
+        address,
+        accountLink: `${site}/admin/account`,
+      });
+      if (sent.sent) kickEmailJobs();
+    },
   });
   return shared.__oksAuth;
 }
