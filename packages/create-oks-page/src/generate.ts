@@ -420,7 +420,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     },
     {
       path: "app/api/admin/themes/[id]/route.ts",
-      content: `export { DELETE, POST } from ${from("api-theme")};\n`,
+      content: `export { DELETE, GET, POST } from ${from("api-theme")};\n`,
     },
     {
       path: "app/api/admin/themes/[id]/layouts/route.ts",

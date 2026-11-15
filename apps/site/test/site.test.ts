@@ -5605,6 +5605,17 @@ describe.skipIf(!findBrowser())(
 
       // Use it: every public page loads the theme's CSS file, served from the site with its fingerprint in the name.
       await page.getByRole("button", { name: "Use Maple" }).click();
+      await page.getByRole("heading", { name: "Before you switch" }).waitFor();
+      await page.getByRole("heading", { name: "Kept", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "Stays with the built-in design" }).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      // "Not now" closes the list and changes nothing.
+      await page.getByRole("button", { name: "Not now" }).click();
+      await page.getByRole("heading", { name: "Before you switch" }).waitFor({ state: "detached" });
+      expect(await themeLink()).toBeNull();
+      await page.getByRole("button", { name: "Use Maple" }).click();
+      await page.getByRole("heading", { name: "Before you switch" }).waitFor();
+      await page.getByRole("button", { name: "Yes, switch to Maple" }).click();
       await page.getByText("Your site uses Maple now.").waitFor();
       const first = await themeLink();
       expect(first).not.toBeNull();
@@ -5662,6 +5673,7 @@ describe.skipIf(!findBrowser())(
 
       // The built-in design again, then Maple is removed (in two steps).
       await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
       await page.getByText("Your site uses the built-in design now.").waitFor();
       expect(await themeLink()).toBeNull();
       await visitor.goto(site.base + "/");
@@ -5769,6 +5781,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Upload and check" }).click();
       await page.getByText("Willow 1.0.0 is installed. It is not in use yet.").waitFor();
       await page.getByRole("button", { name: "Use Willow" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Willow" }).click();
       await page.getByText("Your site uses Willow now.").waitFor();
 
       const html = async (path: string) => {
@@ -5828,6 +5841,7 @@ describe.skipIf(!findBrowser())(
 
       // Back to the built-in design: the built-in pages, at once.
       await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
       await page.getByText("Your site uses the built-in design now.").waitFor();
       const after = await html("/");
       expect(after).not.toContain("oks-site-title");
@@ -6134,6 +6148,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Upload and check" }).click();
       await page.getByText("Birch 1.0.0 is installed. It is not in use yet.").waitFor();
       await page.getByRole("button", { name: "Use Birch" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Birch" }).click();
       await page.getByText("Your site uses Birch now.").waitFor();
 
       await page.setViewportSize({ width: 1440, height: 900 });
@@ -6557,6 +6572,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Upload and check" }).click();
       await page.getByText("Birch for Anna 1.0.0 is installed. It is not in use yet.").waitFor();
       await page.getByRole("button", { name: "Use Birch for Anna" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Birch for Anna" }).click();
       await page.getByText("Your site uses Birch for Anna now.").waitFor();
       expect(await visible("/")).toBe(before);
 

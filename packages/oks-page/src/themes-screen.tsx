@@ -1,9 +1,10 @@
 "use client";
 // The Themes screen: upload a theme file and read the report in plain words, then use the theme, go back to the version
 // before, or remove it. Every step is checked again on the server.
-import type { InstalledTheme, PackageReport } from "@oks-page/core";
+import type { InstalledTheme, PackageReport, ThemeSwitchPlan } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useRef, useState, type FormEvent } from "react";
+import { SwitchPlan } from "./theme-switch-plan";
 
 const MAX_BYTES = 24 * 1024 * 1024;
 
@@ -58,6 +59,8 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  // The list of what a switch keeps and leaves behind, shown before the owner confirms.
+  const [review, setReview] = useState<{ id: string; plan: ThemeSwitchPlan } | null>(null);
   const active = themes.find((t) => t.isActive) ?? null;
 
   async function refresh() {
@@ -113,6 +116,18 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
     });
   }
 
+  async function looksAt(id: string) {
+    setProblem(null);
+    setNote("");
+    const response = await fetch(`/api/admin/themes/${encodeURIComponent(id)}`);
+    const body = (await response.json().catch(() => null)) as { plan?: ThemeSwitchPlan } | null;
+    if (!response.ok || !body?.plan) {
+      setProblem(failure(body, "The list could not be made."));
+      return;
+    }
+    setReview({ id, plan: body.plan });
+  }
+
   const post = async (id: string, action: "use" | "roll-back", fallback: string) => {
     const response = await fetch(`/api/admin/themes/${encodeURIComponent(id)}`, {
       method: "POST",
@@ -134,16 +149,7 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
         </p>
         {active ? (
           <p>
-            <Button
-              onPress={() =>
-                void run(async () => {
-                  await post("default", "use", "The built-in design could not be used.");
-                  return "Your site uses the built-in design now.";
-                })
-              }
-            >
-              Use the built-in design
-            </Button>
+            <Button onPress={() => void looksAt("default")}>Use the built-in design</Button>
           </p>
         ) : null}
       </section>
@@ -180,6 +186,33 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
       <p role="status">{note}</p>
 
+      {review ? (
+        <section aria-labelledby="themes-switch">
+          <h2 id="themes-switch">Before you switch</h2>
+          <SwitchPlan plan={review.plan} />
+          <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            <Button
+              color="primary"
+              onPress={() =>
+                void run(async () => {
+                  const { id, plan } = review;
+                  await post(id, "use", "The theme could not be used.");
+                  setReview(null);
+                  return id === "default"
+                    ? "Your site uses the built-in design now."
+                    : `Your site uses ${plan.to.name} now.`;
+                })
+              }
+            >
+              {review.id === "default"
+                ? "Yes, switch to the built-in design"
+                : `Yes, switch to ${review.plan.to.name}`}
+            </Button>
+            <Button onPress={() => setReview(null)}>Not now</Button>
+          </p>
+        </section>
+      ) : null}
+
       <section aria-labelledby="themes-installed">
         <h2 id="themes-installed">Installed themes</h2>
         {themes.length === 0 ? <p>No themes are installed yet.</p> : null}
@@ -204,15 +237,7 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
               <p>{whatIsInside(theme)}.</p>
               <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 {theme.isActive ? null : (
-                  <Button
-                    color="primary"
-                    onPress={() =>
-                      void run(async () => {
-                        await post(theme.id, "use", "The theme could not be used.");
-                        return `Your site uses ${theme.name} now.`;
-                      })
-                    }
-                  >
+                  <Button color="primary" onPress={() => void looksAt(theme.id)}>
                     {`Use ${theme.name}`}
                   </Button>
                 )}

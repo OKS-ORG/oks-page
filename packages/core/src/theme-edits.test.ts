@@ -46,6 +46,7 @@ import {
 } from "./owner-layouts.js";
 import { exportTheme } from "./theme-export.js";
 import { installTheme, useTheme } from "./theme-install.js";
+import { planThemeSwitch } from "./theme-switch.js";
 import { checkThemePackage } from "./theme-package.js";
 import { saveThemeStyles } from "./theme-settings.js";
 import {
@@ -630,6 +631,70 @@ for (const { kind, open, skip } of openers) {
         section: { hasDraft: true },
       });
       expect(words(await getSavedSection(db.runner, admin, siteId, id))).toContain('"v3"');
+    });
+
+    // ----- the switch screen (spec 05, 17.7; TH-74)
+    test("the switch list: what is kept, what stays with the old theme, which pages move, and what comes back (TH-74)", async () => {
+      const birch = await install(
+        tgz({
+          "theme.json": JSON.stringify({ key: "birch", name: "Birch", version: "1.0.0" }),
+          "templates/index.json": layout(text("birch index")),
+        }),
+      );
+      // A layout of Maple changed and published, a layout made for Maple, and a page that chose it.
+      await saveLayoutDraft(db.runner, admin, siteId, themeId, "templates/single-post", [
+        text("my post layout"),
+      ]);
+      await createOwnerLayout(db.runner, admin, siteId, themeId, {
+        for: "pages",
+        name: "Landing page",
+        from: "templates/index",
+      });
+      await publishLayouts(db.runner, admin, siteId, themeId);
+      const about = String(
+        (await db.run("select id from entries where slug = ?", ["about"]))[0]!["id"],
+      );
+      await setEntryLayout(db.runner, admin, siteId, about, "custom-landing-page");
+
+      expect(await planThemeSwitch(db.runner, editor, siteId, birch.id)).toMatchObject({
+        code: "forbidden",
+      });
+      expect(await planThemeSwitch(db.runner, admin, siteId, newId())).toMatchObject({
+        code: "not_found",
+      });
+      const result = await planThemeSwitch(db.runner, admin, siteId, birch.id);
+      if (!result.ok) throw new Error(result.message);
+      expect(result.plan).toMatchObject({
+        from: { name: "Maple" },
+        to: { name: "Birch" },
+        same: false,
+        stays: { changedLayouts: ["Single post"], ownerLayouts: ["Landing page"] },
+        pagesMoved: { total: 1, pages: [{ id: about }] },
+        comesBack: { changedLayouts: 0, ownerLayouts: 0 },
+      });
+      expect(result.plan.kept.pages).toBeGreaterThan(0);
+
+      // Using the theme already in use changes nothing; the built-in design is a side too.
+      const same = await planThemeSwitch(db.runner, admin, siteId, themeId);
+      expect(same).toMatchObject({ ok: true, plan: { same: true, stays: { changedLayouts: [] } } });
+      expect(await planThemeSwitch(db.runner, admin, siteId, null)).toMatchObject({
+        ok: true,
+        plan: { to: { id: null }, stays: { ownerLayouts: ["Landing page"] } },
+      });
+
+      // After the switch the list looks back the other way: the owner's work comes back with Maple.
+      await useTheme(db.runner, admin, siteId, birch.id);
+      const back = await planThemeSwitch(db.runner, admin, siteId, themeId);
+      expect(back).toMatchObject({
+        ok: true,
+        plan: {
+          from: { name: "Birch" },
+          to: { name: "Maple" },
+          stays: { changedLayouts: [], ownerLayouts: [] },
+          pagesMoved: { total: 0 },
+          comesBack: { changedLayouts: 1, ownerLayouts: 1 },
+        },
+      });
     });
 
     // ----- layouts the owner makes (spec 05, 17.6; TH-72)

@@ -1,7 +1,8 @@
-// /api/admin/themes/<id>: POST { action: "use" } uses the theme ("default" as the id goes back to the built-in design),
+// /api/admin/themes/<id>: GET says what using the theme would keep, move and leave behind (nothing changes),
+// POST { action: "use" } uses the theme ("default" as the id goes back to the built-in design),
 // POST { action: "roll-back" } goes back to the version before, DELETE removes a theme that is not in use.
 // Only people who may change the design (`themes.manage`).
-import { removeTheme, rollBackTheme, useTheme } from "@oks-page/core";
+import { planThemeSwitch, removeTheme, rollBackTheme, useTheme } from "@oks-page/core";
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
@@ -12,6 +13,20 @@ import { mediaContext } from "./uploads";
 
 type Context = { params: Promise<{ id: string }> };
 const STATUS = { forbidden: 403, invalid: 400, not_found: 404 } as const;
+
+export async function GET(_request: Request, context: Context) {
+  const member = await signedInMember();
+  if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
+  const { id } = await context.params;
+  const result = await planThemeSwitch(
+    getRunner(),
+    await actorOf(member),
+    member.siteId,
+    id === "default" ? null : id,
+  );
+  if (!result.ok) return reply(result, STATUS[result.code]);
+  return NextResponse.json({ plan: result.plan });
+}
 
 export async function POST(request: Request, context: Context) {
   if (!isSameOrigin(request))
