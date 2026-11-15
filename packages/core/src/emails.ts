@@ -82,6 +82,22 @@ export async function sendInvitationEmail(
   );
 }
 
+/** True when this email already went to this address 3 times in the last hour (EM-13). */
+async function overLimit(
+  runner: SqlRunner,
+  siteId: string,
+  key: string,
+  to: string,
+  now: () => number,
+) {
+  const recent = await runner.all(
+    `select count(*) as n from "email_log" where "site_id" = ? and "email_key" = ?
+      and lower("to_address") = ? and "created_at" >= ?`,
+    [siteId, key, to.trim().toLowerCase(), new Date(now() - 60 * 60 * 1000)],
+  );
+  return Number(recent[0]?.["n"] ?? 0) >= RESET_LIMIT_PER_HOUR;
+}
+
 /**
  * The password reset link (a security email). At most 3 to one address in an hour (EM-13); past that nothing is sent,
  * and the page still gives the same answer, so nobody can learn which addresses have an account.
@@ -93,12 +109,7 @@ export async function sendPasswordResetEmail(
   input: { to: string; name: string; siteName: string; link: string },
   now: () => number = Date.now,
 ): Promise<Sent> {
-  const recent = await runner.all(
-    `select count(*) as n from "email_log" where "site_id" = ? and "email_key" = 'password-reset'
-      and lower("to_address") = ? and "created_at" >= ?`,
-    [siteId, input.to.trim().toLowerCase(), new Date(now() - 60 * 60 * 1000)],
-  );
-  if (Number(recent[0]?.["n"] ?? 0) >= RESET_LIMIT_PER_HOUR)
+  if (await overLimit(runner, siteId, "password-reset", input.to, now))
     return { sent: false, reason: "Too many password resets for this address in the last hour." };
   return sendText(
     runner,
@@ -112,15 +123,64 @@ export async function sendPasswordResetEmail(
   );
 }
 
+/** Which link about an address: confirm it, confirm a change from the old address, or confirm the new address. */
+export type AddressLink = "confirm-email" | "change-email-old" | "change-email-new";
+
+/**
+ * A link about an email address (security emails, spec 13, section 5). At most 3 of each kind to one address in an
+ * hour; the link works for 1 hour, and an expired one is never sent late.
+ */
+export async function sendAddressLinkEmail(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: {
+    kind: AddressLink;
+    to: string;
+    name: string;
+    siteName: string;
+    link: string;
+    address?: string;
+  },
+  now: () => number = Date.now,
+): Promise<Sent> {
+  if (await overLimit(runner, siteId, input.kind, input.to, now))
+    return { sent: false, reason: "Too many of these emails to this address in the last hour." };
+  return sendText(
+    runner,
+    siteId,
+    secrets,
+    input.kind,
+    input.to,
+    {
+      name: input.name || input.to,
+      site: input.siteName,
+      link: input.link,
+      ...(input.address ? { address: input.address } : {}),
+    },
+    now,
+    now() + RESET_LINK_SECONDS * 1000,
+  );
+}
+
 /** What changed in an account, for the security notice. */
-export type AccountChange = "password" | "two-factor-on" | "two-factor-off";
+export type AccountChange = "password" | "two-factor-on" | "two-factor-off" | "email";
 
 /** "Your password (or two-factor) was changed" (a security email, spec 13, section 5). */
 export async function sendAccountChangeEmail(
   runner: SqlRunner,
   siteId: string,
   secrets: SiteSecrets,
-  input: { to: string; name: string; siteName: string; change: AccountChange; accountLink: string },
+  input: {
+    to: string;
+    name: string;
+    siteName: string;
+    change: AccountChange;
+    accountLink: string;
+    /** For an email change: the old and the new address. */
+    previous?: string;
+    address?: string;
+  },
   now: () => number = Date.now,
 ): Promise<Sent> {
   return sendText(
@@ -134,6 +194,8 @@ export async function sendAccountChangeEmail(
       site: input.siteName,
       when: new Date(now()).toUTCString(),
       link: input.accountLink,
+      ...(input.previous ? { previous: input.previous } : {}),
+      ...(input.address ? { address: input.address } : {}),
     },
     now,
   );

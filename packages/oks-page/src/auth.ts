@@ -1,8 +1,10 @@
 // The site's one Better Auth instance, made on first use from the same database as the pages (spec 02).
 import { createAuth, type OksAuth } from "@oks-page/auth";
 import {
+  emailWorks,
   loadGeneralSettings,
   sendAccountChangeEmail,
+  sendAddressLinkEmail,
   sendPasswordResetEmail,
 } from "@oks-page/core";
 import { getDrizzle, getRunner, getSiteId } from "./db";
@@ -53,7 +55,7 @@ export function getAuth(origin: string): OksAuth {
       });
       if (sent.sent) kickEmailJobs();
     },
-    onAccountChange: async ({ email, name, change }) => {
+    onAccountChange: async ({ email, name, change, previous, address }) => {
       const siteId = await getSiteId();
       const sent = await sendAccountChangeEmail(getRunner(), siteId, siteSecrets(), {
         to: email,
@@ -61,9 +63,25 @@ export function getAuth(origin: string): OksAuth {
         siteName: await siteName(siteId),
         change,
         accountLink: `${site}/admin/account`,
+        ...(previous ? { previous } : {}),
+        ...(address ? { address } : {}),
       });
       if (sent.sent) kickEmailJobs();
     },
+    // Confirming and changing an email address (spec 13, section 5); only while email works (EM-02).
+    sendAddressLink: async ({ email, name, kind, url, address }) => {
+      const siteId = await getSiteId();
+      const sent = await sendAddressLinkEmail(getRunner(), siteId, siteSecrets(), {
+        kind,
+        to: email,
+        name,
+        siteName: await siteName(siteId),
+        link: url,
+        ...(address ? { address } : {}),
+      });
+      if (sent.sent) kickEmailJobs();
+    },
+    emailReady: async () => emailWorks(getRunner(), await getSiteId()),
   });
   return shared.__oksAuth;
 }

@@ -6960,6 +6960,102 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await page.getByRole("link", { name: "Open the email settings" }).waitFor();
     expect(await axeViolations(page)).toEqual([]);
   });
+
+  test("your email address: confirm it, then change it with a yes from the old address and the new one; notices to both (spec 13, section 5)", async () => {
+    const page = await signedIn(cara);
+    const mailTo = (address: string) =>
+      received
+        .filter((m) => m.to.includes(address))
+        .map((m) => m.data.replace(/=\r?\n/g, "").replace(/=3D/g, "="));
+    const linkIn = (mail: string) => {
+      const found = /https?:\/\/[^\s"<>()\]]+\/api\/auth\/verify-email\?token=[^\s"<>()\]&]+/.exec(
+        mail,
+      );
+      expect(found, "a link in the email").not.toBeNull();
+      return found![0];
+    };
+    const waitFor = async (address: string, subject: string) => {
+      await expect
+        .poll(() => mailTo(address).filter((m) => m.includes(`Subject: ${subject}`)).length, {
+          timeout: 15_000,
+        })
+        .toBeGreaterThan(0);
+      return mailTo(address)
+        .filter((m) => m.includes(`Subject: ${subject}`))
+        .at(-1)!;
+    };
+
+    await page.goto(site.base + "/admin/account");
+    const section = page.getByRole("region", { name: "Email address" });
+    await section.getByText("Not confirmed yet", { exact: false }).waitFor();
+    // Changing needs a confirmed address first (the form is not there, and the server refuses it too).
+    expect(await page.getByLabel("New email address").count()).toBe(0);
+    const early = await page.request.post(site.base + "/api/auth/change-email", {
+      headers: { origin: site.base, "content-type": "application/json" },
+      data: { newEmail: "cara.new@example.com" },
+    });
+    expect(early.status()).toBe(400);
+    expect(JSON.stringify(await early.json())).toContain(
+      "Confirm your current email address first",
+    );
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Confirm the address.
+    await section.getByRole("button", { name: "Send me a confirmation link" }).click();
+    await page.getByText(`We sent a link to ${cara.email}. Open it within an hour.`).waitFor();
+    const confirm = await waitFor(cara.email, "Confirm your email address for Anna's Garden");
+    await page.goto(linkIn(confirm));
+    await page.getByText("Thank you: your email address is confirmed.").waitFor();
+    await section.getByText("Confirmed", { exact: false }).first().waitFor();
+    expect(
+      (await db.run("select email_verified from users where email = ?", [cara.email]))[0]![
+        "email_verified"
+      ],
+    ).toBeTruthy();
+
+    // Change it: the old address says yes first, then the new one.
+    await page.getByLabel("New email address").fill("cara.new@example.com");
+    await page.getByRole("button", { name: "Change my email address" }).click();
+    await page
+      .getByText(`We sent a link to your current address, ${cara.email}.`, { exact: false })
+      .waitFor();
+    const ask = await waitFor(
+      cara.email,
+      "Change the email address of your account on Anna's Garden?",
+    );
+    expect(ask).toContain("cara.new@example.com");
+    expect((await db.run("select email from users where email = ?", [cara.email])).length).toBe(1);
+    await page.goto(linkIn(ask));
+    await page.getByText("Your old address said yes.", { exact: false }).waitFor();
+    expect((await db.run("select email from users where email = ?", [cara.email])).length).toBe(1);
+    const confirmNew = await waitFor(
+      "cara.new@example.com",
+      "Confirm your new email address for Anna's Garden",
+    );
+    await page.goto(linkIn(confirmNew));
+    await page
+      .getByText("Your account uses the new email address now.", { exact: false })
+      .waitFor();
+    expect(
+      (await db.run("select email from users where email = 'cara.new@example.com'")).length,
+    ).toBe(1);
+    // A notice to the old address and to the new one.
+    for (const address of [cara.email, "cara.new@example.com"]) {
+      const notice = await waitFor(address, "Your email address was changed: Anna's Garden");
+      expect(notice).toContain(`from ${cara.email} to cara.new@example.com`);
+    }
+    // An old link does not work again.
+    await page.goto(linkIn(confirmNew));
+    await page.getByText("That link did not work").waitFor();
+    // Signing in uses the new address.
+    const fresh = await browser.newPage();
+    await fresh.goto(site.base + "/admin/login");
+    await fresh.getByLabel("Email").fill("cara.new@example.com");
+    await fresh.getByLabel(/^Password/).fill(cara.password);
+    await fresh.getByRole("button", { name: "Sign in" }).click();
+    await fresh.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await fresh.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_000 }, () => {
