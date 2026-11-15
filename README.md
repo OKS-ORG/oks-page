@@ -8,4 +8,6 @@ The research, specifications and decisions live in the documentation repository:
 
 The name `oks-page` is final (decision D144, 11 November 2026).
 
+Security: please report a problem in private, as `SECURITY.md` says.
+
 Licence: MIT (see `LICENSE`).
