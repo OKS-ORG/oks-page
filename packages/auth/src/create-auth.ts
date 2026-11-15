@@ -63,6 +63,10 @@ export interface CreateAuthOptions {
   sendSignInLink?: (
     data: AccountPerson & ({ url: string } | { refused: "two-factor" | "not-confirmed" }),
   ) => Promise<void>;
+  /** Told after a passkey was added or removed, for the audit log (spec 02, "always logged"). */
+  onPasskeyChange?: (
+    data: AccountPerson & { change: "added" | "removed"; name: string },
+  ) => Promise<void>;
   /** Told when someone signs in from a browser the site does not know for them (after the first one). */
   onNewDevice?: (
     data: AccountPerson & { when: number; browser: string; address: string },
@@ -166,6 +170,38 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
       return {};
     }
   };
+  /**
+   * The current password, asked again before something that gives access (spec 02, rule 7; AU-41). It is sent in the body
+   * as `password`, taken out before the library reads the body, and checked against the signed-in person's own password.
+   */
+  const askPasswordAgain = async (ctx: Parameters<typeof getSessionFromCtx>[0]) => {
+    const body = ((ctx as { body?: unknown }).body ?? {}) as Record<string, unknown>;
+    const password = body["password"];
+    delete body["password"];
+    const session = await getSessionFromCtx(ctx);
+    if (!session) return;
+    const account = (
+      await options.runner.all(
+        `select "password" from "auth_accounts" where "user_id" = ? and "provider_id" = 'credential'`,
+        [session.user.id],
+      )
+    )[0];
+    const hash = account?.["password"];
+    const right =
+      typeof password === "string" &&
+      typeof hash === "string" &&
+      (await (
+        ctx as unknown as {
+          context: {
+            password: { verify: (a: { hash: string; password: string }) => Promise<boolean> };
+          };
+        }
+      ).context.password.verify({ hash, password }));
+    if (!right)
+      throw new APIError("BAD_REQUEST", { message: "Your current password is not right." });
+  };
+  /** Names of passkeys about to be removed, by id, for the audit log. */
+  const removing = new Map<string, string>();
   /** Email changes waiting for their last link, by token: who it was and the old address. */
   const changing = new Map<string, { userId: string; previous: string; address: string }>();
 
@@ -318,25 +354,22 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
           delete body["newUserCallbackURL"];
         }
         // Changing the address asks for the current password again (spec 02, rule 7).
-        if (ctx.path === "/change-email") {
-          const body = (ctx.body ?? {}) as Record<string, unknown>;
-          const password = body["password"];
-          delete body["password"];
-          const session = await getSessionFromCtx(ctx);
-          if (session) {
-            const account = (
-              await options.runner.all(
-                `select "password" from "auth_accounts" where "user_id" = ? and "provider_id" = 'credential'`,
-                [session.user.id],
-              )
-            )[0];
-            const hash = account?.["password"];
-            const right =
-              typeof password === "string" &&
-              typeof hash === "string" &&
-              (await ctx.context.password.verify({ hash, password }));
-            if (!right)
-              throw new APIError("BAD_REQUEST", { message: "Your current password is not right." });
+        if (ctx.path === "/change-email") await askPasswordAgain(ctx);
+        // Adding or removing a passkey asks for it too (AU-41): a passkey is a way in, like a password.
+        if (ctx.path === "/passkey/verify-registration" || ctx.path === "/passkey/delete-passkey") {
+          await askPasswordAgain(ctx);
+          if (ctx.path === "/passkey/delete-passkey") {
+            const id = (ctx.body as { id?: unknown } | undefined)?.id;
+            const session = await getSessionFromCtx(ctx);
+            if (typeof id === "string" && session) {
+              const row = (
+                await options.runner.all(
+                  `select "name" from "passkeys" where "id" = ? and "user_id" = ?`,
+                  [id, session.user.id],
+                )
+              )[0];
+              removing.set(id, String(row?.["name"] ?? ""));
+            }
           }
         }
         // Confirming or changing an address needs email (EM-02), and always comes back to the account page.
@@ -466,6 +499,33 @@ export function createAuth(options: CreateAuthOptions): OksAuth {
         // The security emails: a changed password, two-factor turned off, or turned on (its first code checked).
         const user = (ctx.context.session as { user?: Person } | null | undefined)?.user;
         if (!user) return;
+        // A passkey added or removed: for the audit log. It never undoes the change.
+        if (ctx.path === "/passkey/verify-registration" || ctx.path === "/passkey/delete-passkey") {
+          try {
+            let name = "";
+            if (ctx.path === "/passkey/delete-passkey") {
+              const id = String((ctx.body as { id?: unknown } | undefined)?.id ?? "");
+              name = removing.get(id) ?? "";
+              removing.delete(id);
+            } else {
+              const row = (
+                await options.runner.all(
+                  `select "name" from "passkeys" where "user_id" = ? order by "created_at" desc limit 1`,
+                  [user.id],
+                )
+              )[0];
+              name = String(row?.["name"] ?? "");
+            }
+            await options.onPasskeyChange?.({
+              ...personOf(user),
+              change: ctx.path === "/passkey/delete-passkey" ? "removed" : "added",
+              name,
+            });
+          } catch {
+            // the change is done; the log entry is only a record
+          }
+          return;
+        }
         if (ctx.path === "/change-password") await notify(user, "password");
         else if (ctx.path === "/two-factor/disable") await notify(user, "two-factor-off");
         else if (ctx.path === "/two-factor/verify-totp" && !user.twoFactorEnabled) {

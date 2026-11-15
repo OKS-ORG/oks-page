@@ -94,14 +94,28 @@ for (const { kind, open, skip } of openers) {
         ).json();
         // @ts-expect-error the SDK is added to the page by the test
         const credential = await window.sw.startRegistration({ optionsJSON: options });
-        const r = await fetch("/api/auth/passkey/verify-registration", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ response: credential, name: "Test key" }),
-          credentials: "include",
-        });
-        return { status: r.status };
+        const send = async (password?: string) =>
+          (
+            await fetch("/api/auth/passkey/verify-registration", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                response: credential,
+                name: "Test key",
+                ...(password ? { password } : {}),
+              }),
+              credentials: "include",
+            })
+          ).status;
+        // Adding a passkey asks for the current password again (AU-41): without it, or with a wrong one, nothing is added.
+        return {
+          without: await send(),
+          wrong: await send("not the password"),
+          status: await send("passkey user password"),
+        };
       });
+      expect(registered.without).toBe(400);
+      expect(registered.wrong).toBe(400);
       expect(registered.status).toBe(200);
       const row = (
         await db.run("select credential_id, counter, device_type, name from passkeys")

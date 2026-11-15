@@ -10,17 +10,21 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./passkey-client": {
+      "types": "./dist/passkey-client.d.ts",
+      "default": "./dist/passkey-client.js"
     }
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.7.12",
     "@better-auth/passkey": "1.7.12",
+    "@simplewebauthn/browser": "^14.0.0",
     "better-auth": "1.7.12",
     "drizzle-orm": "0.45.4"
   },
   "devDependencies": {
     "@oks-page/db": "workspace:*",
-    "@simplewebauthn/browser": "^14.0.0",
     "esbuild": "^0.28.2",
     "otplib": "^13.5.0",
     "playwright-core": "^1.64.1",

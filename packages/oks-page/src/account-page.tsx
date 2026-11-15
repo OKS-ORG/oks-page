@@ -8,6 +8,9 @@ import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { AccountEmail } from "./account-email";
+import { AccountPasskeys } from "./account-passkeys";
+import { passkeyOptions } from "./passkey-options";
+import { siteBase } from "./site-base";
 import { AccountScreen } from "./account-screen";
 import { getRunner } from "./db";
 
@@ -48,6 +51,7 @@ export default async function AccountPage({ searchParams }: Props) {
         error={typeof params.error === "string" ? params.error : null}
       />
       <AccountScreen initialEnabled={enabled} required={member.mustSetUpTwoFactor} />
+      {passkeyOptions(await siteBase()) ? <AccountPasskeys /> : null}
     </AdminFrame>
   );
 }

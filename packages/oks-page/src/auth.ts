@@ -3,6 +3,7 @@ import { createAuth, type OksAuth } from "@oks-page/auth";
 import {
   emailWorks,
   loadGeneralSettings,
+  recordPasskeyChange,
   sendAccountChangeEmail,
   sendAddressLinkEmail,
   sendNewDeviceEmail,
@@ -11,6 +12,7 @@ import {
 } from "@oks-page/core";
 import { getDrizzle, getRunner, getSiteId } from "./db";
 import { kickEmailJobs, siteSecrets } from "./mail";
+import { passkeyOptions } from "./passkey-options";
 
 /** The header our auth wrapper reads for the client's address (the library's own forwarding headers are ignored). */
 export const CLIENT_HEADER = "x-oks-client-ip";
@@ -46,6 +48,10 @@ export function getAuth(origin: string): OksAuth {
     runner: getRunner(),
     secret,
     baseUrl,
+    ...(passkeyOptions(baseUrl) ? { passkey: passkeyOptions(baseUrl)! } : {}),
+    onPasskeyChange: async ({ userId, change, name }) => {
+      await recordPasskeyChange(getRunner(), await getSiteId(), userId, change, name);
+    },
     // Password reset and the security emails (spec 13). When email is not set up, nothing is queued.
     sendResetPassword: async ({ email, name, token }) => {
       const siteId = await getSiteId();

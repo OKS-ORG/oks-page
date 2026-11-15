@@ -6,6 +6,9 @@ import { connection } from "next/server";
 import { signedInMember } from "./admin-session";
 import { getRunner, getSiteId } from "./db";
 import { LoginForm } from "./login-form";
+import { PasskeySignIn } from "./passkey-sign-in";
+import { passkeyOptions } from "./passkey-options";
+import { siteBase } from "./site-base";
 import { SignInLinkForm } from "./sign-in-link-form";
 
 export const metadata: Metadata = { title: "Sign in", robots: { index: false } };
@@ -20,10 +23,12 @@ export default async function LoginPage({ searchParams }: Props) {
   if (member) redirect(member.mustSetUpTwoFactor ? "/admin/account" : "/admin");
   const email = await emailWorks(getRunner(), await getSiteId());
   const failed = (await searchParams).link === "failed";
+  const passkeys = passkeyOptions(await siteBase()) !== null;
   return (
     <main>
       <h1>Sign in</h1>
       <LoginForm />
+      {passkeys ? <PasskeySignIn /> : null}
       {email ? (
         <>
           <p>

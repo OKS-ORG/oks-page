@@ -35,7 +35,9 @@ export async function startSite(kind: string, db: TestDb, extra: Record<string, 
     OKS_TEST: "1",
     PORT: String(port),
     NODE_ENV: "production",
-    ...extra,
+    ...Object.fromEntries(
+      Object.entries(extra).map(([k, v]) => [k, v.replaceAll("{port}", String(port))]),
+    ),
   };
   if (kind === "sqlite") env["OKS_SQLITE_PATH"] = db.location;
   else {
@@ -53,7 +55,7 @@ export async function startSite(kind: string, db: TestDb, extra: Record<string, 
   for (let i = 0; i < 100; i++) {
     try {
       if ((await fetch(`${base}/not-found-handler`)).status === 404)
-        return { server, base, log: () => log };
+        return { server, base, port, log: () => log };
     } catch {
       /* not up yet */
     }

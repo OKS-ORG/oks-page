@@ -7862,3 +7862,163 @@ describe.skipIf(!findBrowser() || !s3Test)(
     });
   },
 );
+
+describe.skipIf(!findBrowser())("passkeys (spec 02, AU-09, AU-41)", { timeout: 120_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-passkeys-")), "site.sqlite"));
+    // A passkey belongs to a host name, so this site is reached as localhost, not as 127.0.0.1.
+    site = await startSite("sqlite", db, {
+      OKS_SECRET: "k".repeat(40),
+      OKS_SITE_URL: "http://localhost:{port}",
+    });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: false,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    browser = await chromium.launch({ executablePath: findBrowser()! });
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+
+  test("add a passkey (the password is asked again), sign in with it, remove it; each step is in the audit log", async () => {
+    const base = `http://localhost:${site.port}`;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    // A fake fingerprint reader in the browser.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("WebAuthn.enable");
+    await cdp.send("WebAuthn.addVirtualAuthenticator", {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
+    });
+
+    await page.goto(base + "/admin/login");
+    await page.getByRole("heading", { name: "Sign in with a passkey" }).waitFor();
+    await page.getByLabel(/^Email\s*\*?$/).fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+
+    await page.goto(base + "/admin/account");
+    const section = page.getByRole("region", { name: "Passkeys" });
+    await section.getByText("You have no passkeys yet.").waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+
+    // The server itself refuses to add or remove one without the password, whatever the screen does.
+    const bare = await page.request.post(base + "/api/auth/passkey/delete-passkey", {
+      headers: { origin: base, "content-type": "application/json" },
+      data: { id: "nothing" },
+    });
+    expect(bare.status()).toBe(400);
+    expect(JSON.stringify(await bare.json())).toContain("Your current password is not right.");
+
+    // A wrong password is found before the device is asked.
+    await section.getByLabel("Name for the new passkey", { exact: false }).fill("Laptop");
+    await section.getByLabel("Your current password").fill("not-the-password");
+    await section.getByRole("button", { name: "Add a passkey" }).click();
+    await page.getByText("Your current password is not right.").waitFor();
+    expect((await db.run("select id from passkeys")).length).toBe(0);
+
+    await section.getByLabel("Your current password").fill(owner.password);
+    await section.getByRole("button", { name: "Add a passkey" }).click();
+    await section.getByText("Passkey added: Laptop.", { exact: false }).waitFor();
+    await section.getByText("Laptop", { exact: true }).waitFor();
+    const stored = await db.run("select name, credential_id from passkeys");
+    expect(stored).toHaveLength(1);
+    expect(stored[0]!["name"]).toBe("Laptop");
+
+    // Sign out; the passkey signs in without a password, to the dashboard.
+    const out = await page.request.post(base + "/api/auth/sign-out", {
+      headers: { origin: base, "content-type": "application/json" },
+      data: {},
+    });
+    expect(out.status()).toBe(200);
+    await page.goto(base + "/admin/login");
+    await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const session = (await (await page.request.get(base + "/api/auth/get-session")).json()) as {
+      user?: { email: string };
+    };
+    expect(session.user?.email).toBe(owner.email);
+
+    // Remove it: the password is asked again here too.
+    await page.goto(base + "/admin/account");
+    await section.getByRole("button", { name: "Remove Laptop" }).click();
+    await page.getByText("Type your current password above", { exact: false }).waitFor();
+    await section.getByLabel("Your current password").fill("not-the-password");
+    await section.getByRole("button", { name: "Remove Laptop" }).click();
+    await page.getByText("Your current password is not right.").waitFor();
+    expect((await db.run("select id from passkeys")).length).toBe(1);
+    await section.getByLabel("Your current password").fill(owner.password);
+    await section.getByRole("button", { name: "Remove Laptop" }).click();
+    await section.getByText("Passkey removed: Laptop.").waitFor();
+    await section.getByText("You have no passkeys yet.").waitFor();
+    expect((await db.run("select id from passkeys")).length).toBe(0);
+
+    // The audit log has both, with the name.
+    const log = await db.run(
+      "select action, detail from audit_log where action like 'passkey.%' order by created_at, action",
+    );
+    expect(log.map((r) => r["action"])).toEqual(["passkey.add", "passkey.remove"]);
+    for (const r of log) expect(JSON.parse(String(r["detail"]))).toEqual({ name: "Laptop" });
+    await context.close();
+  });
+
+  test("a site reached by an IP address shows no passkey screens", async () => {
+    // The same site, asked by its 127.0.0.1 address, still has OKS_SITE_URL = localhost, so use a plain new site.
+    const plainDb = await openSqlite(
+      join(mkdtempSync(join(tmpdir(), "oks-nopasskeys-")), "site.sqlite"),
+    );
+    const plain = await startSite("sqlite", plainDb, { OKS_SECRET: "n".repeat(40) });
+    try {
+      await fetch(plain.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          siteName: "Plain",
+          starterContent: false,
+          admin: { name: "Anna", ...owner },
+        }),
+      });
+      const html = await (await fetch(plain.base + "/admin/login")).text();
+      expect(html).not.toContain("Sign in with a passkey");
+      expect(html).toContain("Sign in");
+    } finally {
+      plain.server.kill();
+      await plainDb.close();
+    }
+  });
+});
