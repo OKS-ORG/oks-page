@@ -7491,4 +7491,67 @@ describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, 
     expect((await fetch(site.base + "/about")).status).toBe(200);
     expect(await (await fetch(site.base + "/sitemap.xml")).text()).toContain("/about");
   });
+
+  test("word forms follow the site language: loaves finds loaf in English, Brote finds Brot in German (SEO-72)", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const call = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const r = await fetch(u as string, {
+            method: m as string,
+            headers: { "content-type": "application/json" },
+            ...(b === undefined ? {} : { body: JSON.stringify(b) }),
+          });
+          return {
+            status: r.status,
+            json: (await r.json().catch(() => null)) as Record<string, unknown> | null,
+          };
+        },
+        [method, url, body] as const,
+      );
+    const publish = async (title: string, text: string) => {
+      const made = await call("POST", "/api/admin/entries", { type: "post", title });
+      const saved = await call("PUT", `/api/admin/entries/${String(made.json!["id"])}`, {
+        title,
+        slugPart: String(made.json!["slug"]).replace(/^blog\//, ""),
+        status: "published",
+        blocks: [
+          {
+            id: "p1",
+            type: "paragraph",
+            props: {},
+            content: [{ type: "text", text, styles: {} }],
+            children: [],
+          },
+        ],
+        revision: made.json!["revision"],
+      });
+      expect(saved.status).toBe(200);
+      return String(made.json!["slug"]);
+    };
+    const rye = await publish("A loaf of rye", "One loaf, baked every morning.");
+    const brot = await publish("Unser Brot", "Ein Brot aus Roggen.");
+    // "Search as typed" (exact=1) turns typo help off, so only the word and its forms count.
+    const found = async (q: string) =>
+      await (await fetch(site.base + "/search?exact=1&q=" + encodeURIComponent(q))).text();
+    // English (the site's language): another form of the word, marked in the result.
+    const english = await found("loaves");
+    expect(english).toContain(`href="/${rye}"`);
+    expect(english).toContain("<mark>loaf</mark>");
+    expect(await found("Brote")).not.toContain(`href="/${brot}"`);
+    // German: the index is built again with German word forms.
+    expect(
+      (await call("PUT", "/api/admin/settings/language", { tag: "de", direction: "auto" })).status,
+    ).toBe(200);
+    await expect
+      .poll(async () => (await found("Brote")).includes(`href="/${brot}"`), { timeout: 15_000 })
+      .toBe(true);
+    expect(await found("loaves")).not.toContain(`href="/${rye}"`);
+    expect(await found("loaf")).toContain(`href="/${rye}"`);
+  });
 });

@@ -2,7 +2,7 @@
 // entry published, changed or removed, found by a cheap fingerprint of the database) and at least once a minute (so a
 // renamed category shows up). The process that saved a change forgets its index at once, so it shows in the very next
 // search there.
-import { loadSearchIndex, searchStamp, type SearchIndex } from "@oks-page/core";
+import { loadSearchIndex, loadSiteLanguage, searchStamp, type SearchIndex } from "@oks-page/core";
 import { getRunner, getSiteId } from "./db";
 
 const MAX_AGE_MS = 60_000;
@@ -25,10 +25,12 @@ export function forgetSearchIndex(): void {
 export async function getSearchIndex(): Promise<SearchIndex> {
   const runner = getRunner();
   const siteId = await getSiteId();
-  const stamp = await searchStamp(runner, siteId);
+  // The site language decides the word forms, so changing it builds the index again.
+  const language = (await loadSiteLanguage(runner, siteId)).tag;
+  const stamp = `${language}:${await searchStamp(runner, siteId)}`;
   const kept = shared.__oksSearch;
   if (kept && kept.stamp === stamp && Date.now() - kept.at < MAX_AGE_MS) return kept.index;
-  const index = loadSearchIndex(runner, siteId);
+  const index = loadSearchIndex(runner, siteId, language);
   // Test builds count how often the index is really built.
   if (process.env["OKS_TEST"]) shared.__oksSearchBuilds = (shared.__oksSearchBuilds ?? 0) + 1;
   shared.__oksSearch = { stamp, at: Date.now(), index };

@@ -42,6 +42,7 @@ export * from "./reading-settings.js";
 export * from "./site-settings.js";
 export * from "./privacy-settings.js";
 export * from "./search-stats.js";
+export * from "./word-forms.js";
 export * from "./trash.js";
 export * from "./revisions.js";
 export * from "./editing.js";

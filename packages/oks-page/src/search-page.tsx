@@ -33,7 +33,8 @@ export default async function SearchPage({ searchParams }: Props) {
   const exact = params.exact === "1";
   const asked = Number.parseInt(typeof params.page === "string" ? params.page : "1", 10);
   const searched = q.trim().length > 0;
-  const result = searched ? search(await getSearchIndex(), q, exact) : null;
+  const index = searched ? await getSearchIndex() : null;
+  const result = index ? search(index, q, exact) : null;
   const total = result?.hits.length ?? 0;
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const page = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), pages) : 1;
@@ -99,7 +100,12 @@ export default async function SearchPage({ searchParams }: Props) {
                   </small>
                 </p>
                 <p>
-                  {extractOf(texts.get(hit.row.id) ?? "", usedWords).map((segment, i) =>
+                  {extractOf(
+                    texts.get(hit.row.id) ?? "",
+                    usedWords,
+                    160,
+                    index?.language ?? "",
+                  ).map((segment, i) =>
                     segment.mark ? <mark key={i}>{segment.text}</mark> : segment.text,
                   )}
                 </p>

@@ -4,6 +4,7 @@
 // (equal ones: newest first), and helps with typos ("sourdogh" finds "sourdough"). The index keeps no texts; 10,000 entries
 // answer well under 200 ms (SEO-74).
 import type { SqlRunner } from "@oks-page/db";
+import { formKeysOf, formsOf } from "./word-forms.js";
 
 export interface SearchRow {
   id: string;
@@ -51,7 +52,14 @@ export interface SearchIndex {
   entries: SearchEntry[];
   words: string[];
   postings: Int32Array[];
+  /** The site language whose word forms count ("en", "de"); others match whole words and starts only. */
+  language: string;
 }
+
+// A word is also listed under each of its other forms, as "~form" ("loaves" under "~loaf"). "~" is never part of a typed
+// word, so these keys never mix with the words themselves or with the start of a word.
+const FORM = "~";
+const isForm = (key: string) => key.startsWith(FORM);
 
 const IN_TITLE = 4;
 const IN_TERMS = 2;
@@ -59,6 +67,8 @@ const IN_TEXT = 1;
 
 /** Builds an index entry by entry, so the texts never all sit in memory at once. */
 export class SearchIndexBuilder {
+  constructor(private readonly language = "") {}
+
   private entries: SearchEntry[] = [];
   private ids = new Map<string, number>();
   private lists: number[][] = [];
@@ -83,6 +93,9 @@ export class SearchIndexBuilder {
       IN_TERMS,
     );
     mark(wordsOf(row.text.slice(0, TEXT_LIMIT)), IN_TEXT);
+    for (const [word, bits] of [...where])
+      for (const form of formsOf(word, this.language))
+        if (form !== word) where.set(FORM + form, (where.get(FORM + form) ?? 0) | bits);
     for (const [word, bits] of where) {
       let id = this.ids.get(word);
       if (id === undefined) {
@@ -103,6 +116,7 @@ export class SearchIndexBuilder {
       entries: this.entries,
       words: order.map((i) => this.names[i]!),
       postings: order.map((i) => Int32Array.from(this.lists[i]!)),
+      language: this.language,
     };
     this.lists = [];
     this.ids.clear();
@@ -110,8 +124,8 @@ export class SearchIndexBuilder {
   }
 }
 
-export function buildIndex(rows: SearchRow[]): SearchIndex {
-  const builder = new SearchIndexBuilder();
+export function buildIndex(rows: SearchRow[], language = ""): SearchIndex {
+  const builder = new SearchIndexBuilder(language);
   for (const row of rows) builder.add(row);
   return builder.finish();
 }
@@ -153,7 +167,9 @@ function find(index: SearchIndex, words: string[]): Hit[] {
         if (s > best[doc]!) best[doc] = s;
       }
     };
-    // A whole word counts 1; the start of a longer word 0.6 (only the last word typed may be unfinished).
+    // A whole word counts 1; another form of it 0.8 ("loaf" for "loaves"); the start of a longer word 0.6 (only the last
+    // word typed may be unfinished).
+    for (const list of formLists(index, word)) apply(list, 0.8);
     let at = lowerBound(index.words, word);
     if (index.words[at] === word) apply(index.postings[at++]!, 1);
     if (i === words.length - 1)
@@ -174,6 +190,21 @@ function find(index: SearchIndex, words: string[]): Hit[] {
     (a, b) =>
       b.score - a.score || b.row.publishedAt - a.row.publishedAt || (a.row.id < b.row.id ? -1 : 1),
   );
+}
+
+/** The entries that have the word in another form: its forms as words, and the words that have it or its forms as a form. */
+function formLists(index: SearchIndex, word: string): Int32Array[] {
+  const lists: Int32Array[] = [];
+  const keys = formKeysOf(word, index.language);
+  const add = (key: string) => {
+    const at = lowerBound(index.words, key);
+    if (index.words[at] === key) lists.push(index.postings[at]!);
+  };
+  for (const key of keys) {
+    if (key !== word) add(key);
+    add(FORM + key);
+  }
+  return lists;
 }
 
 function distance(a: string, b: string, most: number): number {
@@ -206,7 +237,7 @@ function nearest(index: SearchIndex, word: string): string | null {
   let bestCount = 0;
   for (let i = 0; i < index.words.length; i++) {
     const candidate = index.words[i]!;
-    if (Math.abs(candidate.length - word.length) > most) continue;
+    if (isForm(candidate) || Math.abs(candidate.length - word.length) > most) continue;
     const d = distance(word, candidate, most);
     const count = index.postings[i]!.length;
     if (d < bestDistance || (d === bestDistance && count > bestCount)) {
@@ -239,7 +270,9 @@ export function search(index: SearchIndex, query: string, exact = false): Search
   const fixed = words.map((w, i) => {
     const at = lowerBound(index.words, w);
     const known =
-      index.words[at] === w || (i === words.length - 1 && (index.words[at] ?? "").startsWith(w));
+      index.words[at] === w ||
+      formLists(index, w).length > 0 ||
+      (i === words.length - 1 && (index.words[at] ?? "").startsWith(w));
     return known ? w : (nearest(index, w) ?? w);
   });
   if (fixed.every((w, i) => w === words[i])) return { words, hits: [], corrected: null };
@@ -255,13 +288,21 @@ export interface Segment {
 }
 
 /** A short piece of the text around the first match, with the matching words marked. */
-export function extractOf(text: string, queryWords: string[], width = 160): Segment[] {
+export function extractOf(
+  text: string,
+  queryWords: string[],
+  width = 160,
+  language = "",
+): Segment[] {
   const tokens = [...text.matchAll(WORD)].map((m) => ({
     start: m.index!,
     end: m.index! + m[0].length,
     word: normalize(m[0]),
   }));
-  const matches = (word: string) => queryWords.some((q) => word === q || word.startsWith(q));
+  const queryKeys = new Set(queryWords.flatMap((q) => formKeysOf(q, language)));
+  const matches = (word: string) =>
+    queryWords.some((q) => word === q || word.startsWith(q)) ||
+    formKeysOf(word, language).some((k) => queryKeys.has(k));
   const first = tokens.find((t) => matches(t.word));
   const from = first ? Math.max(0, first.start - 50) : 0;
   const to = Math.min(text.length, from + width);
@@ -338,8 +379,12 @@ export async function eachSearchRow(
 }
 
 /** Builds the site's index from the database, 500 entries at a time. */
-export async function loadSearchIndex(runner: SqlRunner, siteId: string): Promise<SearchIndex> {
-  const builder = new SearchIndexBuilder();
+export async function loadSearchIndex(
+  runner: SqlRunner,
+  siteId: string,
+  language = "",
+): Promise<SearchIndex> {
+  const builder = new SearchIndexBuilder(language);
   await eachSearchRow(runner, siteId, (row) => builder.add(row));
   return builder.finish();
 }
