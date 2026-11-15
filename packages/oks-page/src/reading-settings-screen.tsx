@@ -129,8 +129,13 @@ export function ReadingSettingsScreen({
           max={50}
           value={form.perPage}
           onChange={(e) => set("perPage", Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+          aria-describedby="reading-per-page-help"
           style={{ ...FIELD, maxInlineSize: "8rem" }}
         />
+        <p id="reading-per-page-help">
+          For the newest posts and for the category and tag lists. Older posts are on the next pages
+          (“Older posts”, at addresses such as /page/2).
+        </p>
       </div>
       <fieldset style={{ border: 0, padding: 0, margin: "1rem 0" }}>
         <legend>

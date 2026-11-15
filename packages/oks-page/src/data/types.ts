@@ -39,6 +39,17 @@ export interface PostSummary {
   excerpt: string;
 }
 
+/** One page of the list of the newest posts. */
+export interface PostsPage {
+  posts: PostSummary[];
+  /** The page asked for (from 1). */
+  page: number;
+  /** How many pages the whole list has (at least 1). */
+  pages: number;
+  /** How many posts the whole list has. */
+  total: number;
+}
+
 /** The look as the public pages use it: the theme's CSS file, the owner's CSS, and the logo if there is one. */
 export interface Look {
   /** The address of the CSS file of the theme in use (fonts, design values, the theme's CSS), or null. */
@@ -55,7 +66,12 @@ export interface TermArchive {
   name: string;
   slug: string;
   description: string;
+  /** The posts of the page asked for, newest first. */
   posts: { title: string; slug: string; publishedAt: number }[];
-  /** True when there are more posts than the list shows. */
-  more: boolean;
+  /** The page asked for (from 1). */
+  page: number;
+  /** How many pages the archive has (at least 1). */
+  pages: number;
+  /** How many posts the archive has. */
+  total: number;
 }

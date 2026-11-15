@@ -5,6 +5,7 @@
 import { excerptOf, jsonLd, postStructuredData, websiteStructuredData } from "@oks-page/core";
 import type { Metadata } from "next";
 import type { EntryView, SiteInfo, TermArchive } from "./data/types";
+import { pagePath } from "./paging";
 import { canonicalFor } from "./site-url";
 
 const FEEDS = {
@@ -31,7 +32,15 @@ export function postsMetadata(
   slug: string,
   site: SiteInfo,
   isFront: boolean,
+  page = 1,
 ): Metadata {
+  // A later page is its own page: its own title and its own canonical address (not the first page's).
+  if (page > 1)
+    return {
+      title: titleOf(`${title} – Page ${page}`, site, false),
+      alternates: { canonical: canonicalFor(pagePath(slug, page).slice(1)), types: FEEDS },
+      ...iconsOf(site),
+    };
   return {
     title: titleOf(title, site, isFront),
     alternates: { canonical: isFront ? canonicalFor("home") : canonicalFor(slug), types: FEEDS },
@@ -86,9 +95,11 @@ export function archiveMetadata(
   slug: string,
   site: SiteInfo,
   options: { feeds: boolean },
+  page = 1,
 ): Metadata {
   const label = `${archive.kind === "category" ? "Category" : "Tag"}: ${archive.name}`;
-  const title = `${label} – ${site.siteName}`;
+  const title = `${label}${page > 1 ? ` – Page ${page}` : ""} – ${site.siteName}`;
+  const address = page > 1 ? pagePath(slug, page).slice(1) : slug;
   const description =
     archive.description ||
     excerptOf(
@@ -99,7 +110,7 @@ export function archiveMetadata(
     title,
     description,
     alternates: {
-      canonical: canonicalFor(slug),
+      canonical: canonicalFor(address),
       ...(options.feeds && archive.kind === "category"
         ? {
             types: {
@@ -115,7 +126,7 @@ export function archiveMetadata(
       type: "website",
       title,
       description,
-      url: canonicalFor(slug),
+      url: canonicalFor(address),
       siteName: site.siteName,
     },
     twitter: { card: "summary", title, description },

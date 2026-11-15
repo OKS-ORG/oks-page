@@ -471,6 +471,20 @@ for (const { kind, skip } of openers) {
         post,
         term,
       ]);
+      // Eleven more, so the category has 12 posts: two pages of 10 (the first post is the newest, so it is on page 1).
+      for (let i = 2; i <= 12; i++) {
+        const more = await s.entry(`blog/extra-${i}`, `Extra post ${i}`, "published", "post");
+        await db.run("insert into entry_terms (entry_id, term_id, position) values (?, ?, 0)", [
+          more,
+          term,
+        ]);
+      }
+      await db.run("update entries set published_at = ? where type_key = 'post'", [
+        new Date(1_700_000_000_000),
+      ]);
+      await db.run("update entries set published_at = ? where slug = 'blog/first'", [
+        new Date(1_800_000_000_000),
+      ]);
       // A header menu with a page and a link, so both builds draw it.
       await db.run(
         "insert into menus (id, site_id, key, label, items, updated_at) values (?, ?, 'primary', 'Header menu', ?, ?)",
@@ -537,6 +551,32 @@ for (const { kind, skip } of openers) {
       expect(written).toContain('href="/blog/first"');
       expect(pick(written).heading).toBe(pick(served).heading);
       expect(pick(written).title).toBe(pick(served).title);
+    });
+
+    test("the export writes the later pages of a list, the same as the server build, and no page past the last", async () => {
+      const served = await fetch(site.base + "/category/news/page/2");
+      expect(served.status).toBe(200);
+      const servedHtml = await served.text();
+      const written = readFileSync(join(out, "category/news/page/2.html"), "utf8");
+      expect(pick(written)).toEqual({ ...pick(servedHtml), article: undefined });
+      expect(pick(written)).toMatchObject({
+        title: "Category: News – Page 2 – S",
+        canonical: `${SITE_URL}/category/news/page/2`,
+      });
+      for (const html of [written, servedHtml]) {
+        expect(html).toContain("Page 2 of 2");
+        expect(html).toContain('href="/category/news"');
+        expect(html).not.toContain("Older posts");
+        expect((html.match(/<a href="\/blog\/[^"]+">/g) ?? []).length).toBe(2);
+      }
+      // The first page has 10 posts and the link to the second; the first post is on it.
+      const firstPage = readFileSync(join(out, "category/news.html"), "utf8");
+      expect(firstPage).toContain("Page 1 of 2");
+      expect(firstPage).toContain('href="/category/news/page/2"');
+      expect(firstPage).toContain('href="/blog/first"');
+      expect((firstPage.match(/<a href="\/blog\/[^"]+">/g) ?? []).length).toBe(10);
+      expect(existsSync(join(out, "category/news/page/3.html"))).toBe(false);
+      expect((await fetch(site.base + "/category/news/page/3")).status).toBe(404);
     });
 
     test("ST-02 the export holds only published pages, and a 404 page", () => {
@@ -8022,3 +8062,242 @@ describe.skipIf(!findBrowser())("passkeys (spec 02, AU-09, AU-41)", { timeout: 1
     }
   });
 });
+
+describe.skipIf(!findBrowser())(
+  "pages of lists: the newest posts, the posts page and archives",
+  { timeout: 150_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    const owner = { email: "anna@example.com", password: "a-long-password" };
+
+    beforeAll(async () => {
+      db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-paging-")), "site.sqlite"));
+      site = await startSite("sqlite", db, { OKS_SECRET: "g".repeat(40) });
+      const made = await fetch(site.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          siteName: "Anna's Garden",
+          starterContent: false,
+          admin: { name: "Anna", ...owner },
+        }),
+      });
+      expect(made.status).toBe(200);
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+    }, 300_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+    });
+
+    const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      return result.violations.map(
+        (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+      );
+    };
+
+    test("25 posts are 3 pages of 10: the links, the 404s, what is left out, the canonical address, and a changed page size", async () => {
+      const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+      const userId = String((await db.run("select id from users"))[0]!["id"]);
+      const T = 1_700_000_000_000;
+      const add = async (n: number, slug: string, status: string, seo: object = {}) => {
+        const id = `PAG${String(n).padStart(23, "0")}`;
+        await db.run(
+          `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+         values (?, ?, 'post', ?, ?, ?, ?, '{}', '[]', ?, '<p>x</p>', ?, '{}', ?, ?, ?)`,
+          [
+            id,
+            siteId,
+            status,
+            `Post ${String(n).padStart(2, "0")}`,
+            slug,
+            userId,
+            `Text of post ${n}`,
+            JSON.stringify(seo),
+            new Date(T + n * 60_000),
+            new Date(T),
+            new Date(T),
+          ],
+        );
+        return id;
+      };
+      // 25 listed posts (1 is the oldest), plus a draft and a post set to stay out of lists.
+      for (let n = 1; n <= 25; n++) await add(n, `blog/post-${n}`, "published");
+      await add(26, "blog/draft-one", "draft");
+      await add(27, "blog/hidden-one", "published", { noindex: true });
+
+      // The home page shows the newest posts (Settings > Reading), 10 to a page.
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel(/^Email\s*\*?$/).fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const setReading = (data: object) =>
+        page.request.put(site.base + "/api/admin/settings/reading", {
+          headers: { origin: site.base, "content-type": "application/json" },
+          data,
+        });
+      expect((await setReading({ homeShows: "posts", perPage: 10 })).status()).toBe(200);
+
+      const get = (path: string) => fetch(site.base + path, { redirect: "manual" });
+      const post = (n: number) => `Post ${String(n).padStart(2, "0")}`;
+      const titles = (html: string) =>
+        [...html.matchAll(/<a href="\/blog\/post-\d+">([^<]+)<\/a>/g)].map((m) => m[1]);
+
+      // Page 1: the newest 10 (posts 25 down to 16), "Older posts" to /page/2, no "Newer posts".
+      const first = await (await get("/")).text();
+      expect(titles(first)).toEqual(Array.from({ length: 10 }, (_, i) => post(25 - i)));
+      expect(first).toContain("Page 1 of 3");
+      expect(first).toContain('href="/page/2"');
+      expect(first).not.toContain("Newer posts");
+      expect(first).not.toContain("Post 26");
+      expect(first).not.toContain("Post 27");
+      // Page 2: 15 down to 6; "Newer posts" goes back to "/", "Older posts" on to /page/3.
+      const second = await get("/page/2");
+      expect(second.status).toBe(200);
+      const secondHtml = await second.text();
+      expect(titles(secondHtml)).toEqual(Array.from({ length: 10 }, (_, i) => post(15 - i)));
+      expect(secondHtml).toContain("Page 2 of 3");
+      expect(secondHtml).toMatch(
+        /<a [^>]*href="\/"[^>]*rel="prev"|<a [^>]*rel="prev"[^>]*href="\/"/,
+      );
+      expect(secondHtml).toContain('href="/page/3"');
+      // It is a page of its own: its own title and canonical address, and it can be indexed.
+      expect(secondHtml).toMatch(/<title>[^<]*Page 2[^<]*<\/title>/);
+      expect(secondHtml).toContain(
+        `<link rel="canonical" href="${new URL("/page/2", (secondHtml.match(/<link rel="canonical" href="(https?:\/\/[^/"]+)/) ?? [])[1] ?? "http://x").href}"`,
+      );
+      expect(secondHtml).not.toMatch(/name="robots" content="[^"]*noindex/);
+      // Page 3: the last 5; no "Older posts".
+      const thirdHtml = await (await get("/page/3")).text();
+      expect(titles(thirdHtml)).toEqual(Array.from({ length: 5 }, (_, i) => post(5 - i)));
+      expect(thirdHtml).not.toContain("Older posts");
+      // Past the end, with a leading zero or sign, or page 0: real 404s. Page 1 is the list's own address.
+      for (const path of ["/page/4", "/page/0", "/page/02", "/page/-1", "/page/1000000"])
+        expect((await get(path)).status, path).toBe(404);
+      const one = await get("/page/1");
+      expect(one.status).toBe(308);
+      expect(new URL(one.headers.get("location")!, site.base).pathname).toBe("/");
+
+      // The pager is for everyone: accessibility check on a page of a list.
+      await page.goto(site.base + "/page/2");
+      await page.getByRole("navigation", { name: "Pages of posts" }).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+
+      // A page of 5: the owner changes "posts per page"; the pages are made again (25 posts, 5 pages).
+      expect((await setReading({ perPage: 5 })).status()).toBe(200);
+      await expect.poll(async () => (await get("/page/5")).status).toBe(200);
+      expect((await get("/page/6")).status).toBe(404);
+      expect(titles(await (await get("/page/5")).text())).toEqual([5, 4, 3, 2, 1].map(post));
+
+      // A category: 12 of the posts, 5 to a page, so 3 pages; the same links and 404s.
+      const category = await page.request.post(site.base + "/api/admin/taxonomies/category", {
+        headers: { origin: site.base, "content-type": "application/json" },
+        data: { name: "News" },
+      });
+      expect(category.status()).toBe(201);
+      const termId = String((await db.run("select id from terms where slug = 'news'"))[0]!["id"]);
+      for (let n = 1; n <= 12; n++)
+        await db.run("insert into entry_terms (entry_id, term_id, position) values (?, ?, 0)", [
+          `PAG${String(n).padStart(23, "0")}`,
+          termId,
+        ]);
+      // The saved copies of the archive know about the change through the post, so touch one post the way an edit does.
+      await page.request.post(site.base + "/api/admin/settings/advanced", {
+        headers: { origin: site.base, "content-type": "application/json" },
+        data: { action: "clear-copies" },
+      });
+      await expect
+        .poll(async () => (await (await get("/category/news")).text()).includes("Page 1 of 3"))
+        .toBe(true);
+      const catTitles = (html: string) =>
+        [...html.matchAll(/<a href="\/blog\/post-\d+">([^<]+)<\/a>/g)].map((m) => m[1]);
+      expect(catTitles(await (await get("/category/news")).text())).toEqual([
+        "Post 12",
+        "Post 11",
+        "Post 10",
+        "Post 09",
+        "Post 08",
+      ]);
+      const catThird = await (await get("/category/news/page/3")).text();
+      expect(catTitles(catThird)).toEqual(["Post 02", "Post 01"]);
+      expect(catThird).toMatch(/<title>[^<]*Category: News[^<]*Page 3[^<]*<\/title>/);
+      expect((await get("/category/news/page/4")).status).toBe(404);
+      expect((await get("/category/news/page/1")).status).toBe(308);
+      expect((await get("/category/nothing/page/2")).status).toBe(404);
+      expect((await get("/tag/nothing/page/2")).status).toBe(404);
+
+      // An entry at the address of a later page wins over the list.
+      await db.run(
+        `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+       values (?, ?, 'page', 'published', 'My page two', 'page/2', ?, '{}', '[]', 'x', '<p>mine</p>', '{}', '{}', ?, ?, ?)`,
+        [`PAG${"9".repeat(23)}`, siteId, userId, new Date(T), new Date(T), new Date(T)],
+      );
+      // (Put into the database directly, so the saved copies are cleared as an edit would.)
+      await page.request.post(site.base + "/api/admin/settings/advanced", {
+        headers: { origin: site.base, "content-type": "application/json" },
+        data: { action: "clear-copies" },
+      });
+      await expect
+        .poll(async () => (await (await get("/page/2")).text()).includes("My page two"))
+        .toBe(true);
+      expect(await (await get("/page/2")).text()).not.toContain("Newer posts");
+
+      // The posts page (Settings > Reading): the home page shows a chosen page, and "journal" lists the newest posts.
+      const pageRow = (n: number, slug: string, title: string) =>
+        db.run(
+          `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+         values (?, ?, 'page', 'published', ?, ?, ?, '{}', '[]', 'x', '<p>x</p>', '{}', '{}', ?, ?, ?)`,
+          [
+            `PGP${String(n).padStart(23, "0")}`,
+            siteId,
+            title,
+            slug,
+            userId,
+            new Date(T),
+            new Date(T),
+            new Date(T),
+          ],
+        );
+      await pageRow(1, "home", "Welcome");
+      await pageRow(2, "journal", "Journal");
+      expect(
+        (
+          await setReading({
+            homeShows: "page",
+            homePageId: `PGP${"0".repeat(22)}1`,
+            postsPageId: `PGP${"0".repeat(22)}2`,
+          })
+        ).status(),
+      ).toBe(200);
+      await expect
+        .poll(async () => (await (await get("/journal")).text()).includes("Page 1 of 5"))
+        .toBe(true);
+      expect(titles(await (await get("/journal")).text())).toEqual([25, 24, 23, 22, 21].map(post));
+      const journalTwo = await get("/journal/page/2");
+      expect(journalTwo.status).toBe(200);
+      const journalTwoHtml = await journalTwo.text();
+      expect(titles(journalTwoHtml)).toEqual([20, 19, 18, 17, 16].map(post));
+      expect(journalTwoHtml).toContain('href="/journal"');
+      expect(journalTwoHtml).toContain('href="/journal/page/3"');
+      expect(journalTwoHtml).toMatch(/<title>[^<]*Journal – Page 2[^<]*<\/title>/);
+      expect((await get("/journal/page/6")).status).toBe(404);
+      expect((await get("/journal/page/1")).status).toBe(308);
+      // The home page now shows a page, so "/page/3" is no list any more.
+      expect((await get("/page/3")).status).toBe(404);
+      expect(await (await get("/")).text()).toContain("Welcome");
+      await page.close();
+    });
+  },
+);

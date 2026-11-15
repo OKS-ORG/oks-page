@@ -23,7 +23,8 @@ import {
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
-import type { EntryView, Look, PostSummary, SiteInfo, TermArchive } from "./types";
+import { pageCount } from "../paging";
+import type { EntryView, Look, PostsPage, SiteInfo, TermArchive } from "./types";
 
 /**
  * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
@@ -89,19 +90,45 @@ export async function loadReading(): Promise<ReadingRoutes> {
   return loadReadingRoutes(getRunner(), await getSiteId());
 }
 
-/** The newest published posts that may be listed (not those set to stay out of lists), newest first. */
-export async function loadPostSummaries(limit: number): Promise<PostSummary[]> {
+/** The ids of published posts that ask to stay out of lists (a small set: the SEO box's "do not list this page"). */
+async function unlistedPostIds(siteId: string): Promise<string[]> {
+  // The value is JSON in both databases; casting it to text lets one query read it in either (PostgreSQL's jsonb writes
+  // `"noindex": true`, SQLite keeps what was saved).
   const rows = await getRunner().all(
-    `select "title", "slug", "plain_text", "seo", "published_at" from "entries"
+    `select "id", "seo" from "entries"
       where "site_id" = ? and "type_key" = 'post' and "status" = 'published' and "locale" = ''
-      order by "published_at" desc, "id" desc limit ?`,
-    [await getSiteId(), limit * 2],
+        and cast("seo" as text) like '%"noindex"%'`,
+    [siteId],
+  );
+  return rows.filter((r) => readEntrySeo(r["seo"]).noindex).map((r) => String(r["id"]));
+}
+
+/**
+ * One page of the published posts that may be listed (not those set to stay out of lists), newest first, with how many
+ * pages there are. Page 1 is the newest `perPage` posts.
+ */
+export async function loadPostsPage(perPage: number, page: number): Promise<PostsPage> {
+  const siteId = await getSiteId();
+  const runner = getRunner();
+  const hidden = await unlistedPostIds(siteId);
+  const where = `"site_id" = ? and "type_key" = 'post' and "status" = 'published' and "locale" = ''${
+    hidden.length > 0 ? ` and "id" not in (${hidden.map(() => "?").join(", ")})` : ""
+  }`;
+  const args = [siteId, ...hidden];
+  const total = Number(
+    (await runner.all(`select count(*) as "n" from "entries" where ${where}`, args))[0]?.["n"] ?? 0,
+  );
+  const rows = await runner.all(
+    `select "title", "slug", "plain_text", "seo", "published_at" from "entries"
+      where ${where} order by "published_at" desc, "id" desc limit ? offset ?`,
+    [...args, perPage, (Math.max(1, page) - 1) * perPage],
   );
   const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
-  return rows
-    .filter((r) => !readEntrySeo(r["seo"]).noindex)
-    .slice(0, limit)
-    .map((r) => {
+  return {
+    page,
+    pages: pageCount(total, perPage),
+    total,
+    posts: rows.map((r) => {
       const seo = readEntrySeo(r["seo"]);
       return {
         title: String(r["title"]),
@@ -109,7 +136,8 @@ export async function loadPostSummaries(limit: number): Promise<PostSummary[]> {
         publishedAt: ms(r["published_at"]),
         excerpt: seo.description || excerptOf(String(r["plain_text"])),
       };
-    });
+    }),
+  };
 }
 
 /**
@@ -230,10 +258,41 @@ export async function findTermArchive(slug: string): Promise<{ id: string } | nu
   return rows[0] ? { id: String(rows[0]["id"]) } : null;
 }
 
-const MOST_POSTS = 100;
+/** The ids of a term and, for a category, of the categories under it: an archive holds the posts of all of them. */
+async function termWithChildren(kind: "category" | "tag", id: string): Promise<string[]> {
+  const ids = [id];
+  if (kind === "category")
+    for (let from = [id]; from.length > 0;) {
+      const marks = from.map(() => "?").join(", ");
+      const kids = await getRunner().all(
+        `select "id" from "terms" where "parent_id" in (${marks})`,
+        from,
+      );
+      from = kids.map((k) => String(k["id"])).filter((k) => !ids.includes(k));
+      ids.push(...from);
+    }
+  return ids;
+}
 
-/** An archive with its newest published posts, or null when there is no such term. */
-export async function loadTermArchive(slug: string): Promise<TermArchive | null> {
+const POSTS_OF_TERMS = `from "entries" e join "entry_terms" et on et."entry_id" = e."id"
+      where e."site_id" = ? and e."status" = 'published' and e."locale" = '' and e."type_key" = 'post'`;
+
+/** How many published posts an archive holds. */
+async function countTermPosts(siteId: string, ids: string[]): Promise<number> {
+  const marks = ids.map(() => "?").join(", ");
+  const rows = await getRunner().all(
+    `select count(distinct e."id") as "n" ${POSTS_OF_TERMS} and et."term_id" in (${marks})`,
+    [siteId, ...ids],
+  );
+  return Number(rows[0]?.["n"] ?? 0);
+}
+
+/** One page of an archive with its posts (newest first), or null when there is no such term. */
+export async function loadTermArchive(
+  slug: string,
+  perPage = 10,
+  page = 1,
+): Promise<TermArchive | null> {
   const parts = archiveParts(slug);
   if (!parts) return null;
   const siteId = await getSiteId();
@@ -246,26 +305,14 @@ export async function loadTermArchive(slug: string): Promise<TermArchive | null>
   const term = found[0];
   if (!term) return null;
   const id = String(term["id"]);
-  // A category's archive also holds the posts of the categories under it.
-  const ids = [id];
-  if (parts.kind === "category")
-    for (let from = [id]; from.length > 0;) {
-      const marks = from.map(() => "?").join(", ");
-      const kids = await runner.all(
-        `select "id" from "terms" where "parent_id" in (${marks})`,
-        from,
-      );
-      from = kids.map((k) => String(k["id"])).filter((k) => !ids.includes(k));
-      ids.push(...from);
-    }
+  const ids = await termWithChildren(parts.kind, id);
   const marks = ids.map(() => "?").join(", ");
+  const total = await countTermPosts(siteId, ids);
   const rows = await runner.all(
-    `select distinct e."id", e."title", e."slug", e."published_at" from "entries" e
-       join "entry_terms" et on et."entry_id" = e."id"
-      where e."site_id" = ? and e."status" = 'published' and e."locale" = '' and e."type_key" = 'post'
+    `select distinct e."id", e."title", e."slug", e."published_at" ${POSTS_OF_TERMS}
         and et."term_id" in (${marks})
-      order by e."published_at" desc, e."id" limit ${MOST_POSTS + 1}`,
-    [siteId, ...ids],
+      order by e."published_at" desc, e."id" limit ? offset ?`,
+    [siteId, ...ids, perPage, (Math.max(1, page) - 1) * perPage],
   );
   const time = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
   return {
@@ -274,13 +321,48 @@ export async function loadTermArchive(slug: string): Promise<TermArchive | null>
     name: String(term["name"]),
     slug: String(term["slug"]),
     description: String(term["description"]),
-    posts: rows.slice(0, MOST_POSTS).map((r) => ({
+    posts: rows.map((r) => ({
       title: String(r["title"]),
       slug: String(r["slug"]),
       publishedAt: time(r["published_at"]),
     })),
-    more: rows.length > MOST_POSTS,
+    page,
+    pages: pageCount(total, perPage),
+    total,
   };
+}
+
+/**
+ * How many pages the list at an address has, or null when the address is not a list: the home page when it shows the newest
+ * posts, the posts page, or the archive of a category or tag. The request proxy asks this for "<list>/page/<n>", so an
+ * address past the last page is a real 404. `archiveId` is the term's id for an archive (for its cache tag).
+ */
+export async function listPages(
+  base: string,
+  perPage: number,
+  reading: ReadingRoutes,
+): Promise<{ pages: number; archiveId: string | null } | null> {
+  const siteId = await getSiteId();
+  if (
+    (base === "home" && reading.homeShows === "posts") ||
+    (reading.postsSlug && base === reading.postsSlug)
+  ) {
+    const hidden = await unlistedPostIds(siteId);
+    const marks = hidden.map(() => "?").join(", ");
+    const rows = await getRunner().all(
+      `select count(*) as "n" from "entries"
+        where "site_id" = ? and "type_key" = 'post' and "status" = 'published' and "locale" = ''${
+          hidden.length > 0 ? ` and "id" not in (${marks})` : ""
+        }`,
+      [siteId, ...hidden],
+    );
+    return { pages: pageCount(Number(rows[0]?.["n"] ?? 0), perPage), archiveId: null };
+  }
+  const parts = archiveParts(base);
+  const term = parts ? await findTermArchive(base) : null;
+  if (!parts || !term) return null;
+  const total = await countTermPosts(siteId, await termWithChildren(parts.kind, term.id));
+  return { pages: pageCount(total, perPage), archiveId: term.id };
 }
 
 /** The header ("primary") or footer ("footer") menu as visitors see it. */

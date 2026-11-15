@@ -1,6 +1,7 @@
 // A category or tag archive: its name, its description and the posts in it, newest first. Used by the server build
 // and the export build, so both write the same page.
 import type { TermArchive } from "./data/types";
+import { Pager } from "./pager";
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -33,7 +34,7 @@ export function ArchiveContent({ archive }: { archive: TermArchive }) {
           ))}
         </ul>
       )}
-      {archive.more ? <p>Only the newest posts are shown.</p> : null}
+      <Pager base={`${archive.kind}/${archive.slug}`} page={archive.page} pages={archive.pages} />
     </>
   );
 }

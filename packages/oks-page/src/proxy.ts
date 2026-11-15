@@ -5,7 +5,7 @@
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
 import { countRedirectHit } from "@oks-page/core";
 import { NextResponse, type NextRequest } from "next/server";
-import { findAddress, findTermArchive, slugOf } from "./data/entries";
+import { findAddress, findTermArchive, listPages, slugOf } from "./data/entries";
 import { getRunner, getSiteId, NO_SITE } from "./db";
 import {
   NOT_FOUND_CACHE_HEADER,
@@ -15,6 +15,7 @@ import {
   visitorOf,
 } from "./headers";
 import { mayPassMaintenance } from "./maintenance-gate";
+import { pagePath, pagingOf } from "./paging";
 import { mayPreview } from "./preview-gate";
 import { cdnEnabled, maintenanceSettings, readingRoutes, seoSettings } from "./settings";
 
@@ -36,6 +37,7 @@ export async function proxy(request: NextRequest) {
   let found: Awaited<ReturnType<typeof findAddress>>["entry"];
   let archive: Awaited<ReturnType<typeof findTermArchive>> = null;
   let moved: Awaited<ReturnType<typeof findAddress>>["redirect"] = null;
+  let paged: Awaited<ReturnType<typeof listPages>> = null;
   let address: Awaited<ReturnType<typeof findAddress>>;
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
@@ -55,6 +57,10 @@ export async function proxy(request: NextRequest) {
     if (!found) archive = await findTermArchive(slug);
     // Still nothing: it may be an old address that was redirected (a page that got a new address, or one set by hand).
     if (!found && !archive && path !== "") moved = address.redirect;
+    // Still nothing: it may be a later page of a list ("page/2", "category/news/page/2"). Only addresses ending in
+    // "page/<number>" cost a read, and a page past the last one is a 404 like any made-up address.
+    const paging = !found && !archive && !moved ? pagingOf(slug) : null;
+    if (paging) paged = await listPages(paging.base, reading.perPage, reading);
   } catch (error) {
     // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
     if (error instanceof Error && error.message === NO_SITE)
@@ -125,6 +131,20 @@ export async function proxy(request: NextRequest) {
   if (archive) {
     const tags = [`site:${await getSiteId()}`, `term:${archive.id}`, ...MENU_TAGS];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+  }
+  const paging = pagingOf(slug);
+  if (paging && paged) {
+    // Page 1 is the list's own address: one address per page.
+    if (paging.page === 1)
+      return apply(NextResponse.redirect(new URL(pagePath(paging.base, 1), request.url), 308), {});
+    if (paging.page <= paged.pages) {
+      const tags = [
+        `site:${await getSiteId()}`,
+        ...(paged.archiveId ? [`term:${paged.archiveId}`, "archive:posts"] : ["feed"]),
+        ...MENU_TAGS,
+      ];
+      return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+    }
   }
   if (moved) {
     // Go to the new address and keep the query string ("?utm_source=..."), then count the use (never slows the answer).
