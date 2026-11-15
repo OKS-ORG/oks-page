@@ -1,0 +1,1 @@
+CREATE INDEX `ix_entries_search` ON `entries` (`site_id`,`type_key`,`status`,`locale`,`updated_at`);

@@ -5,7 +5,9 @@ import {
   MOST_INDEXED,
   buildIndex,
   extractOf,
+  loadSearchIndex,
   loadSearchRows,
+  loadSearchTexts,
   normalize,
   search,
   searchStamp,
@@ -228,6 +230,49 @@ for (const { kind, open, skip } of openers) {
       expect(rows.map((r) => r.id)).toEqual([newer, older]);
       expect(rows.find((r) => r.id === older)!.terms).toEqual(["Travel notes"]);
       expect(search(buildIndex(rows), "travel").hits.map((h) => h.row.id)).toEqual([older]);
+    });
+
+    test("the index is read 500 entries at a time, newest first, with entries that have no publishing time", async () => {
+      // 1,203 entries: three batches; some share a time, a few have none (they count from when they were made).
+      for (let start = 0; start < 1203; start += 100) {
+        const values: unknown[] = [];
+        const marks: string[] = [];
+        for (let i = start; i < Math.min(start + 100, 1203); i++) {
+          marks.push(
+            `(?, ?, 'post', 'published', ?, ?, ?, '{}', '{"version":1,"blocks":[]}', ?, '', '{}', '{}', ?, ?, ?)`,
+          );
+          values.push(
+            `ENT${String(i).padStart(23, "0")}`,
+            siteId,
+            `Entry ${i}`,
+            `blog/e${i}`,
+            userId,
+            i === 1202 ? "sourdough at the end" : "plain words",
+            i % 400 === 7 ? null : new Date(1_000_000 + Math.floor(i / 2) * 1000),
+            new Date(500),
+            T,
+          );
+        }
+        await db.run(
+          `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+           values ${marks.join(", ")}`,
+          values,
+        );
+      }
+      const rows = await loadSearchRows(db.runner, siteId);
+      expect(rows).toHaveLength(1203);
+      expect(new Set(rows.map((r) => r.id)).size).toBe(1203);
+      for (let i = 1; i < rows.length; i++)
+        expect(rows[i - 1]!.publishedAt).toBeGreaterThanOrEqual(rows[i]!.publishedAt);
+      expect(rows.slice(-3).map((r) => r.publishedAt)).toEqual([500, 500, 500]);
+      const index = await loadSearchIndex(db.runner, siteId);
+      expect(index.entries).toHaveLength(1203);
+      expect(search(index, "sourdough").hits.map((h) => h.row.title)).toEqual(["Entry 1202"]);
+      const texts = await loadSearchTexts(db.runner, siteId, [
+        `ENT${String(1202).padStart(23, "0")}`,
+      ]);
+      expect([...texts.values()]).toEqual(["sourdough at the end"]);
+      expect(await loadSearchTexts(db.runner, siteId, [])).toEqual(new Map());
     });
 
     test("the stamp changes when an entry is published, changed, removed or given a term", async () => {

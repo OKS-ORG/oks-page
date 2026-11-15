@@ -322,6 +322,8 @@ export const entries = sqliteTable(
       .where(sql`${t.status} <> 'trash'`),
     index("ix_entries_list").on(t.siteId, t.typeKey, t.status, t.updatedAt),
     index("ix_entries_published").on(t.siteId, t.typeKey, t.publishedAt),
+    // What the site search reads to know whether its index is still fresh (spec 08, section 16).
+    index("ix_entries_search").on(t.siteId, t.typeKey, t.status, t.locale, t.updatedAt),
     index("ix_entries_parent").on(t.parentId),
     index("ix_entries_scheduled")
       .on(t.status, t.scheduledAt)

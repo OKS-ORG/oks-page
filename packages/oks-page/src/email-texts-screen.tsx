@@ -83,8 +83,9 @@ export function EmailTextsScreen({
       setProblem(failure(answer, fallback));
       return false;
     }
-    setNote(done);
+    // The message shows once the screen has the new words, so the two always agree.
     await reload();
+    setNote(done);
     return true;
   }
 

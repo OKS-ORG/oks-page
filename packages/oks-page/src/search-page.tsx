@@ -1,6 +1,13 @@
 // /search?q=...: the site's search page. Not indexed by search engines; results are never cached.
 import { getSiteMenu, getThemeLayouts } from "@data";
-import { extractOf, layoutCandidates, pickLayout, recordSearch, search } from "@oks-page/core";
+import {
+  extractOf,
+  layoutCandidates,
+  loadSearchTexts,
+  pickLayout,
+  recordSearch,
+  search,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import { after, connection } from "next/server";
 import { getRunner, getSiteId } from "./db";
@@ -32,6 +39,12 @@ export default async function SearchPage({ searchParams }: Props) {
   const page = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), pages) : 1;
   const shown = result?.hits.slice((page - 1) * PER_PAGE, page * PER_PAGE) ?? [];
   const usedWords = result?.corrected ?? result?.words ?? [];
+  // The index keeps no texts: the extracts of the results shown are read here.
+  const texts = await loadSearchTexts(
+    getRunner(),
+    await getSiteId(),
+    shown.map((hit) => hit.row.id),
+  );
   // The search statistics (spec 08, section 16.3): the words and whether anything was found, counted once per search
   // (not again for the next result pages or for "search as typed"), after the page is sent.
   if (searched && !(asked > 1) && !exact) {
@@ -86,7 +99,7 @@ export default async function SearchPage({ searchParams }: Props) {
                   </small>
                 </p>
                 <p>
-                  {extractOf(hit.row.text, usedWords).map((segment, i) =>
+                  {extractOf(texts.get(hit.row.id) ?? "", usedWords).map((segment, i) =>
                     segment.mark ? <mark key={i}>{segment.text}</mark> : segment.text,
                   )}
                 </p>
