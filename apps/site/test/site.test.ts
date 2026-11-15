@@ -7555,3 +7555,139 @@ describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, 
     expect(await found("loaf")).toContain(`href="/${rye}"`);
   });
 });
+
+const s3Test =
+  process.env["S3_TEST_ENDPOINT"] &&
+  process.env["S3_TEST_ACCESS_KEY"] &&
+  process.env["S3_TEST_SECRET_KEY"]
+    ? {
+        endpoint: process.env["S3_TEST_ENDPOINT"],
+        region: process.env["S3_TEST_REGION"] ?? "us-east-1",
+        accessKeyId: process.env["S3_TEST_ACCESS_KEY"],
+        secretAccessKey: process.env["S3_TEST_SECRET_KEY"],
+        bucket: `oks-site-${Date.now().toString(36)}`,
+      }
+    : null;
+
+describe.skipIf(!findBrowser() || !s3Test)(
+  "S3 storage (spec 09, section 7)",
+  { timeout: 150_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    let uploads = "";
+    const owner = { email: "anna@example.com", password: "a-long-password" };
+
+    beforeAll(async () => {
+      const { s3Client } = await import("@oks-page/media");
+      expect((await s3Client(s3Test!).request("PUT", "")).status).toBe(200);
+      const root = mkdtempSync(join(tmpdir(), "oks-s3-site-"));
+      uploads = join(root, "uploads");
+      db = await openSqlite(join(root, "site.sqlite"));
+      site = await startSite("sqlite", db, {
+        OKS_SECRET: "3".repeat(40),
+        OKS_UPLOADS_DIR: uploads,
+        OKS_STORAGE: "s3",
+        OKS_S3_ENDPOINT: s3Test!.endpoint,
+        OKS_S3_REGION: s3Test!.region,
+        OKS_S3_BUCKET: s3Test!.bucket,
+        OKS_S3_ACCESS_KEY_ID: s3Test!.accessKeyId,
+        OKS_S3_SECRET_ACCESS_KEY: s3Test!.secretAccessKey,
+        OKS_S3_PREFIX: "anna",
+      });
+      const made = await fetch(site.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          siteName: "Anna's Garden",
+          starterContent: false,
+          admin: { name: "Anna", ...owner },
+        }),
+      });
+      expect(made.status).toBe(200);
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+    }, 300_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+      if (s3Test) {
+        const { s3Adapter, s3Client } = await import("@oks-page/media");
+        const store = s3Adapter({ ...s3Test, prefix: "anna" });
+        for await (const key of store.list()) await store.delete(key);
+        await s3Client(s3Test).request("DELETE", "");
+      }
+    });
+
+    test("an upload and its sizes go to the bucket, not the disk; the site serves them with its protective headers", async () => {
+      const { s3Adapter } = await import("@oks-page/media");
+      const bucket = s3Adapter({ ...s3Test!, prefix: "anna" });
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const photo = await sharp({
+        create: { width: 1600, height: 1000, channels: 3, background: { r: 200, g: 120, b: 40 } },
+      })
+        .jpeg()
+        .toBuffer();
+      const upload = await page.request.post(site.base + "/api/admin/media", {
+        headers: { origin: site.base },
+        multipart: { file: { name: "garden photo.jpg", mimeType: "image/jpeg", buffer: photo } },
+      });
+      expect(upload.status()).toBeLessThan(300);
+      const id = String(((await upload.json()) as { id: string }).id);
+      await expect
+        .poll(
+          async () =>
+            String((await db.run("select status from media where id = ?", [id]))[0]!["status"]),
+          {
+            timeout: 60_000,
+          },
+        )
+        .toBe("ready");
+      const key = String(
+        (await db.run("select storage_key from media where id = ?", [id]))[0]!["storage_key"],
+      );
+      const sizes = (
+        await db.run("select storage_key from media_variants where media_id = ?", [id])
+      ).map((r) => String(r["storage_key"]));
+      expect(sizes.length).toBeGreaterThan(0);
+      // In the bucket (under the prefix), the same bytes as served; nothing on the disk.
+      expect(await bucket.exists(key)).toBe(true);
+      for (const k of sizes) expect(await bucket.exists(k), k).toBe(true);
+      const { existsSync } = await import("node:fs");
+      expect(existsSync(uploads)).toBe(false);
+      const served = await fetch(
+        `${site.base}/uploads/${key.split("/").map(encodeURIComponent).join("/")}`,
+      );
+      expect(served.status).toBe(200);
+      expect(served.headers.get("content-type")).toBe("image/jpeg");
+      expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(served.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+      expect(
+        Buffer.from(await served.arrayBuffer()).equals(Buffer.from(await bucket.get(key))),
+      ).toBe(true);
+      const size = await fetch(
+        `${site.base}/uploads/${sizes[0]!.split("/").map(encodeURIComponent).join("/")}`,
+      );
+      expect(size.status).toBe(200);
+      // The library shows the picture from the bucket.
+      await page.goto(site.base + "/admin/media");
+      await page.getByRole("heading", { name: "Media", level: 1 }).waitFor();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            [...document.images].some(
+              (i) => i.src.includes("/uploads/") && i.complete && i.naturalWidth > 0,
+            ),
+          ),
+        )
+        .toBe(true);
+    });
+  },
+);

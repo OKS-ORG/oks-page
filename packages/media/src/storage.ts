@@ -2,7 +2,17 @@
 // never reused, so a file is never overwritten.
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 export interface StorageAdapter {
@@ -11,6 +21,8 @@ export interface StorageAdapter {
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
   publicUrl(key: string): string;
+  /** Every key kept, in no set order (for moving files between storages). */
+  list(): AsyncIterable<string>;
 }
 
 /** A key looks like `2026/10/<id>-<clean-name>.<ext>`. */
@@ -95,6 +107,24 @@ export function localAdapter(options: LocalAdapterOptions): StorageAdapter {
     publicUrl(key) {
       assertSafeKey(key);
       return `${baseUrl}/${key.split("/").map(encodeURIComponent).join("/")}`;
+    },
+    async *list() {
+      // Files only; links are never followed, and a temporary file of a write that is still going is left out.
+      async function* walk(folder: string, prefix: string): AsyncGenerator<string> {
+        let names: string[];
+        try {
+          names = await readdir(folder);
+        } catch {
+          return;
+        }
+        for (const name of names.sort()) {
+          const full = path.join(folder, name);
+          const info = await lstat(full);
+          if (info.isDirectory()) yield* walk(full, `${prefix}${name}/`);
+          else if (info.isFile() && !name.endsWith(".tmp")) yield `${prefix}${name}`;
+        }
+      }
+      yield* walk(root, "");
     },
   };
 }

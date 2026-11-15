@@ -1,5 +1,6 @@
-// Where uploaded files live and how the background work for them is started. The folder comes from OKS_UPLOADS_DIR
-// (default: `uploads` in the project).
+// Where uploaded files live and how the background work for them is started. On the local disk by default, in the folder
+// OKS_UPLOADS_DIR (default: `uploads` in the project); in an S3-compatible bucket with OKS_STORAGE=s3 and the OKS_S3_*
+// settings (spec 09, section 7). Either way the site serves the files at /uploads/<key>.
 import path from "node:path";
 import {
   drainJobs,
@@ -8,13 +9,27 @@ import {
   mediaJobHandler,
   type MediaContext,
 } from "@oks-page/core";
-import { localAdapter } from "@oks-page/media";
+import { localAdapter, s3Adapter, s3OptionsFromEnv, type StorageAdapter } from "@oks-page/media";
 import { getRunner } from "./db";
 import { expireTags } from "./expire-tags";
 
-export function mediaContext(): MediaContext {
+const shared = globalThis as typeof globalThis & {
+  __oksStorage?: { from: string; storage: StorageAdapter };
+};
+
+/** The storage from the settings where the site runs; made once and kept while they stay the same. */
+function storage(): StorageAdapter {
+  const s3 = s3OptionsFromEnv(process.env);
   const root = process.env["OKS_UPLOADS_DIR"] ?? path.join(process.cwd(), "uploads");
-  return { storage: localAdapter({ root, baseUrl: "/uploads" }) };
+  const from = s3 ? JSON.stringify(s3) : root;
+  if (shared.__oksStorage?.from === from) return shared.__oksStorage.storage;
+  const made = s3 ? s3Adapter(s3) : localAdapter({ root, baseUrl: "/uploads" });
+  shared.__oksStorage = { from, storage: made };
+  return made;
+}
+
+export function mediaContext(): MediaContext {
+  return { storage: storage() };
 }
 
 /** The same, with the limits the site owner saved in the media settings (the biggest file and picture, photo details). */

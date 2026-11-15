@@ -51,6 +51,9 @@ importers:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
+      '@oks-page/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -155,6 +158,9 @@ importers:
       '@oks-page/db':
         specifier: workspace:*
         version: link:../db
+      '@oks-page/media':
+        specifier: workspace:*
+        version: link:../media
       '@oks-page/sandbox':
         specifier: workspace:*
         version: link:../sandbox

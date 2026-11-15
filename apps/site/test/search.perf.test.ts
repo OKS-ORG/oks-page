@@ -1,7 +1,7 @@
 // SEO-74: site search answers in under 200 ms for a site with 10,000 entries, on SQLite and PostgreSQL. Timed as a visitor
 // sees it: the whole /search page, from the request to the last byte. A speed test: it runs alone (`pnpm test:perf`).
 import { openers, openSqlite, type TestDb } from "@oks-page/db/testing";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -58,11 +58,15 @@ for (const { kind, skip } of openers) {
   describe.skipIf(skip)(`${kind}: site search speed`, () => {
     let db: TestDb;
     let site: Awaited<ReturnType<typeof startSite>>;
+    // The SQLite file of 10,000 entries is about 45 MB; /tmp may be a small memory disk, so it is removed afterwards.
+    let folder = "";
 
     beforeAll(async () => {
       db =
         kind === "sqlite"
-          ? await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-search-perf-")), "site.sqlite"))
+          ? await openSqlite(
+              join((folder = mkdtempSync(join(tmpdir(), "oks-search-perf-"))), "site.sqlite"),
+            )
           : await (await import("@oks-page/db/testing")).openPg();
       const s = await seed(db);
       for (let start = 0; start < ENTRIES; start += 200) {
@@ -97,6 +101,7 @@ for (const { kind, skip } of openers) {
     afterAll(async () => {
       site?.server.kill();
       await db?.close();
+      if (folder) rmSync(folder, { recursive: true, force: true });
     });
 
     test("SEO-74 results in under 200 ms for 10,000 entries", async () => {
