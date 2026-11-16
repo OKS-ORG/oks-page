@@ -47,6 +47,7 @@ import {
 import { exportTheme } from "./theme-export.js";
 import { installTheme, useTheme } from "./theme-install.js";
 import { planThemeSwitch } from "./theme-switch.js";
+import { loadContrastWarnings } from "./theme-contrast.js";
 import { checkThemePackage } from "./theme-package.js";
 import { saveThemeStyles } from "./theme-settings.js";
 import {
@@ -967,6 +968,28 @@ for (const { kind, open, skip } of openers) {
         await other.close();
         await rm(otherDir, { recursive: true, force: true });
       }
+    });
+
+    test("the contrast check reads the theme in use: weak dark colors are reported, and the owner's main color does not hide them (TH-52)", async () => {
+      expect(await loadContrastWarnings(db.runner, siteId)).toEqual([]);
+      const dusk = await install(
+        tgz({
+          "theme.json": JSON.stringify({
+            key: "dusk",
+            name: "Dusk",
+            version: "1.0.0",
+            tokens: { color: { text: "#222222" } },
+          }),
+        }),
+      );
+      await useTheme(db.runner, admin, siteId, dusk.id);
+      const found = await loadContrastWarnings(db.runner, siteId);
+      expect(found.map((w) => `${w.mode}:${w.part}`)).toEqual(["dark:text"]);
+      await saveThemeStyles(db.runner, admin, siteId, { mainColor: "#2a6f4f" });
+      expect((await loadContrastWarnings(db.runner, siteId)).map((w) => w.part)).toEqual(["text"]);
+      // Going back to a theme with no colors, the warning goes.
+      await useTheme(db.runner, admin, siteId, themeId);
+      expect(await loadContrastWarnings(db.runner, siteId)).toEqual([]);
     });
   });
 }

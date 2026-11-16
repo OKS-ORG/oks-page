@@ -5831,6 +5831,63 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
 
+    test("contrast warning: a theme whose text color is weak in dark mode is flagged on the Look screen, only for the modes a visitor can reach", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      expect(await page.getByText("Hard to read").count()).toBe(0);
+
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "dusk-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: tgz({
+          "theme.json": JSON.stringify({
+            key: "dusk",
+            name: "Dusk",
+            version: "1.0.0",
+            tokens: { color: { text: "#222222" } },
+          }),
+        }),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Dusk 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page.getByRole("button", { name: "Use Dusk" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Dusk" }).click();
+      await page.getByText("Your site uses Dusk now.").waitFor();
+
+      // A new site follows the device, so dark can be reached: the warning is there, in plain words, and saving still works.
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      const warning = page.getByText(
+        /In dark mode the text is hard to read \(contrast \d\.\d to 1/,
+      );
+      await warning.waitFor();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await axeViolations(page), `at ${width} px`).toEqual([]);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      // Always light: dark cannot be reached, so the warning goes. Always dark: it comes back.
+      await page.getByLabel("Always light").check();
+      await warning.waitFor({ state: "detached" });
+      await page.getByLabel("Always dark").check();
+      await warning.waitFor();
+      await page.getByLabel("Like the visitor's device (light or dark)").check();
+
+      // Back to the built-in design and remove Dusk: the warning is gone.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      await page.getByRole("button", { name: "Remove Dusk" }).click();
+      await page.getByRole("button", { name: "Yes, remove Dusk" }).click();
+      await page.getByText("Dusk is removed.").waitFor();
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      expect(await page.getByText("Hard to read").count()).toBe(0);
+    });
+
     test("theme layouts: public pages are drawn from the layouts of the theme in use, with live data, and the built-in pages come back when it is not", async () => {
       const page = await signedIn(owner);
       const b = (

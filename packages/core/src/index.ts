@@ -31,6 +31,7 @@ export * from "./theme-install.js";
 export * from "./theme-layouts.js";
 export * from "./theme-edits.js";
 export * from "./theme-switch.js";
+export * from "./theme-contrast.js";
 export * from "./saved-sections.js";
 export * from "./owner-layouts.js";
 export * from "./theme-export.js";

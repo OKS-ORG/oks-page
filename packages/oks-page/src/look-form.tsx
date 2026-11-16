@@ -17,6 +17,7 @@ import {
   type LibraryFont,
   type ThemeStyles,
 } from "@oks-page/core/theme";
+import type { ContrastWarning } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { MediaPicker } from "./media-picker";
@@ -48,7 +49,15 @@ const BUILT_IN_COLOR = "#2563eb";
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
 
-export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPreview | null }) {
+export function LookForm({
+  initial,
+  logo,
+  warnings = [],
+}: {
+  initial: ThemeStyles;
+  logo: LogoPreview | null;
+  warnings?: ContrastWarning[];
+}) {
   const [color, setColor] = useState<string | null>(initial.mainColor);
   const [bodyFont, setBodyFont] = useState<string>(initial.bodyFont);
   const [headingFont, setHeadingFont] = useState<string>(initial.headingFont);
@@ -213,6 +222,16 @@ export function LookForm({ initial, logo }: { initial: ThemeStyles; logo: LogoPr
             Show visitors a switch to choose light or dark for themselves
           </label>
         </p>
+        {warnings
+          .filter((w) => colorMode === "system" || w.mode === (colorMode as string))
+          .map((w) => (
+            <Alert
+              key={`${w.mode}-${w.part}`}
+              color="warning"
+              title="Hard to read"
+              description={`${w.message} Change the theme's colors, or choose another look. You can still save.`}
+            />
+          ))}
         <p>
           A visitor's choice is kept only in their own browser and is never sent to anyone. No
           cookie is set.
