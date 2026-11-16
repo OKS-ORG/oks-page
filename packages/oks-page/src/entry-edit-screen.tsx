@@ -15,6 +15,7 @@ import {
   useUnsavedCopy,
 } from "./entry-editing";
 import { allIds, copyWithNewIds, newBlockId, type LayoutBlock } from "./layout-tree";
+import { EntryAccessibility } from "./entry-accessibility";
 import { EntryRevisions } from "./entry-revisions";
 import { EntryPreview } from "./entry-preview";
 import { EntryLayoutPanel } from "./entry-layout-panel";
@@ -299,6 +300,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           return { repairs: body.repairs ?? [] };
         }}
       />
+      <EntryAccessibility blocks={blocksNow.current} />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
       <EntryLayoutPanel id={props.id} />
       <EntrySeoPanel id={props.id} />

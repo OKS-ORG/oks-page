@@ -5831,6 +5831,73 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
 
+    test("accessibility check: the editor lists what a screen reader user would struggle with, as advice only, and says when there is nothing to fix", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Check me",
+      });
+      const info = made.json as { id: string; slug: string; revision: number };
+      const words = (t: string) => [{ type: "text", text: t, styles: {} }];
+      const block = (
+        id: string,
+        type: string,
+        props: Record<string, unknown>,
+        content: unknown,
+      ) => ({ id, type, props, content, children: [] });
+      let revision = info.revision;
+      const save = async (blocks: unknown[]) => {
+        const result = await call(page, "PUT", `/api/admin/entries/${info.id}`, {
+          title: "Check me",
+          slugPart: info.slug,
+          status: "draft",
+          blocks,
+          revision,
+        });
+        expect(result.status).toBe(200);
+        revision = (result.json as { revision: number }).revision;
+      };
+      const open = async () => {
+        await page.goto(site.base + `/admin/pages/${info.id}`);
+        await page.getByRole("heading", { name: "Edit: Check me", level: 1 }).waitFor();
+        return page.getByRole("region", { name: "Accessibility check" });
+      };
+      const h2 = block("h1", "heading", { level: 2 }, words("Opening hours"));
+      const link = (text: string) =>
+        block("p1", "paragraph", {}, [{ type: "link", href: "https://example.org/", text }]);
+
+      // A heading that jumps from level 2 to level 4: one thing, in plain words. (The page is checked for accessibility
+      // here; the editor's own link color is a known gap of the editor, so the link step comes after.)
+      await save([h2, block("h2", "heading", { level: 4 }, words("Holidays"))]);
+      let panel = await open();
+      await panel
+        .getByText("1 thing to look at. This is advice: you can still save and publish.")
+        .waitFor();
+      await panel.getByText(/This heading jumps from level 2 to level 4/).waitFor();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect((await axeViolations(page)).join(" | "), `at ${width} px`).toBe("");
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+
+      // A vague link is the second thing.
+      await save([h2, block("h2", "heading", { level: 4 }, words("Holidays")), link("click here")]);
+      panel = await open();
+      await panel
+        .getByText("2 things to look at. This is advice: you can still save and publish.")
+        .waitFor();
+      await panel.getByText(/The link "click here" does not say where it goes/).waitFor();
+
+      // Fixed: the panel says so.
+      await save([
+        h2,
+        block("h2", "heading", { level: 3 }, words("Holidays")),
+        link("Read the holiday hours"),
+      ]);
+      panel = await open();
+      await panel.getByText("Nothing to fix. This page reads well for everyone.").waitFor();
+    });
+
     test("saved sections in page content: place one as a copy or linked in the editor; a change published in Design reaches the page; deleting the section keeps the page the same", async () => {
       const page = await signedIn(owner);
       // A theme must be installed to publish a section (Publish belongs to a theme's design).
