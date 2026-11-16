@@ -1408,7 +1408,15 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
           title,
           slugPart: String(made.json!["slug"]).replace(/^blog\//, ""),
           status: "published",
-          blocks: [],
+          blocks: [
+            {
+              id: "p1",
+              type: "paragraph",
+              props: {},
+              content: [{ type: "text", text: "Words.", styles: {} }],
+              children: [],
+            },
+          ],
           revision: made.json!["revision"],
         });
         expect(saved.status).toBe(200);
@@ -1898,7 +1906,15 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
         title: "Old name",
         slugPart,
         status: "published",
-        blocks: [],
+        blocks: [
+          {
+            id: "p1",
+            type: "paragraph",
+            props: {},
+            content: [{ type: "text", text: "Words.", styles: {} }],
+            children: [],
+          },
+        ],
         revision,
       });
       expect(saved.status).toBe(200);
@@ -3061,9 +3077,11 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
 
     await page.getByLabel("Published (everyone sees it)").check({ force: true });
     await page.getByRole("button", { name: "Save" }).click();
-    await expect
-      .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
-      .toBe("Saved.");
+    // The two pictures have no description, so the publish check lists them; the administrator goes on anyway.
+    const check = page.getByRole("alert", { name: "Before this goes live" });
+    await check.getByText(/Picture 1 has no description/).waitFor();
+    await check.getByRole("button", { name: "Publish anyway" }).click();
+    await page.getByText("Published anyway. This was written to the log.").waitFor();
 
     const html = await (await fetch(site.base + "/gallery-page")).text();
     expect(html).toContain(`src="${first.url}"`);
@@ -3657,7 +3675,15 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
           title,
           slugPart: slug.replace(/^blog\//, ""),
           status,
-          blocks: [],
+          blocks: [
+            {
+              id: "p1",
+              type: "paragraph",
+              props: {},
+              content: [{ type: "text", text: "Words.", styles: {} }],
+              children: [],
+            },
+          ],
           revision,
         });
       if (publish)
@@ -4423,7 +4449,17 @@ describe.skipIf(!findBrowser())(
     const publishNow = async () => {
       await page.getByLabel("Published (everyone sees it)").check({ force: true });
       await page.getByRole("button", { name: "Save", exact: true }).click();
-      await saved();
+      // A picture just uploaded has no description yet, so the publish check may list it first: the administrator goes
+      // on anyway (the check itself is tested on its own).
+      const check = page.getByRole("alert", { name: "Before this goes live" });
+      const status = page.locator(".oks-entry-actions [role=status]");
+      await expect
+        .poll(async () => (await status.textContent()) === "Saved." || (await check.count()) > 0)
+        .toBe(true);
+      if ((await check.count()) > 0) {
+        await check.getByRole("button", { name: "Publish anyway" }).click();
+        await page.getByText("Published anyway. This was written to the log.").waitFor();
+      }
     };
     const navLinks = (html: string, label: string) =>
       [
@@ -4546,7 +4582,15 @@ describe.skipIf(!findBrowser())(
             slugPart: "spring-special",
             status: "scheduled",
             scheduledAt: soon,
-            blocks: [],
+            blocks: [
+              {
+                id: "p1",
+                type: "paragraph",
+                props: {},
+                content: [{ type: "text", text: "Spring words.", styles: {} }],
+                children: [],
+              },
+            ],
             revision: body.revision,
           }),
         });
@@ -5091,7 +5135,15 @@ describe.skipIf(!findBrowser())(
             title: "Fresh news",
             slugPart: "fresh-news",
             status: "published",
-            blocks: [],
+            blocks: [
+              {
+                id: "p1",
+                type: "paragraph",
+                props: {},
+                content: [{ type: "text", text: "News words.", styles: {} }],
+                children: [],
+              },
+            ],
             revision: (fresh.json as { revision: number }).revision,
           })
         ).status,
@@ -5829,6 +5881,113 @@ describe.skipIf(!findBrowser())(
       await editor.goto(site.base + "/admin/settings/themes");
       await editor.waitForURL((url) => url.pathname === "/admin");
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
+    });
+
+    test("publish check: going live with no content or a picture with no description is refused with a list; an administrator may go on anyway and it is logged; an editor may not", async () => {
+      const page = await signedIn(owner);
+      const make = async (title: string) => {
+        const made = await call(page, "POST", "/api/admin/entries", { type: "page", title });
+        return made.json as { id: string; slug: string; revision: number };
+      };
+      const para = [
+        {
+          id: "p1",
+          type: "paragraph",
+          props: {},
+          content: [{ type: "text", text: "Hello.", styles: {} }],
+          children: [],
+        },
+      ];
+      const picture = {
+        id: "i1",
+        type: "image",
+        props: { src: "/uploads/none.png", alt: "" },
+        content: null,
+        children: [],
+      };
+      const put = (
+        page_: Page,
+        e: { id: string; slug: string; revision: number },
+        title: string,
+        blocks: unknown[],
+        extra = {},
+      ) =>
+        call(page_, "PUT", `/api/admin/entries/${e.id}`, {
+          title,
+          slugPart: e.slug,
+          status: "published",
+          blocks,
+          revision: e.revision,
+          ...extra,
+        });
+
+      // No content: refused, in plain words, with the rule named; the page stays unpublished.
+      const empty = await make("Not ready");
+      const refused = await put(page, empty, "Not ready", []);
+      expect(refused.status).toBe(422);
+      const error = (
+        refused.json as {
+          error: {
+            code: string;
+            message: string;
+            problems: { rule: string }[];
+            canPublishAnyway: boolean;
+          };
+        }
+      ).error;
+      expect(error.code).toBe("publish_check");
+      expect(error.problems.map((x) => x.rule)).toEqual(["empty-body"]);
+      expect(error.message).toMatch(/^Before this goes live: It has no content yet/);
+      expect(error.canPublishAnyway).toBe(true);
+      expect((await fetch(site.base + `/${empty.slug}`)).status).toBe(404);
+
+      // A picture with no description is a problem too; a page with words and a described picture goes live.
+      const withPicture = await make("Picture page");
+      const noAlt = await put(page, withPicture, "Picture page", [...para, picture]);
+      expect(noAlt.status).toBe(422);
+      expect(
+        (noAlt.json as { error: { problems: { rule: string }[] } }).error.problems.map(
+          (x) => x.rule,
+        ),
+      ).toEqual(["missing-alt"]);
+      const ok = await put(page, withPicture, "Picture page", [
+        ...para,
+        { ...picture, props: { ...picture.props, alt: "A door" } },
+      ]);
+      expect(ok.status).toBe(200);
+
+      // An administrator may go on anyway; it is written to the audit log, naming the rules set aside.
+      const anyway = await put(page, empty, "Not ready", [], { publishAnyway: true });
+      expect(anyway.status).toBe(200);
+      expect((await fetch(site.base + `/${empty.slug}`)).status).toBe(200);
+      const logged = await db.run(
+        "select detail from audit_log where action = 'entry.publish_anyway' and target_id = ?",
+        [empty.id],
+      );
+      expect(logged).toHaveLength(1);
+      expect(String(logged[0]!["detail"])).toContain("empty-body");
+
+      // An editor may publish, but not set the problems aside: the flag is ignored.
+      const editor = await signedIn(cara);
+      const other = await make("Also not ready");
+      const byEditor = await put(editor, other, "Also not ready", [], { publishAnyway: true });
+      expect(byEditor.status).toBe(422);
+      expect(
+        (byEditor.json as { error: { canPublishAnyway: boolean } }).error.canPublishAnyway,
+      ).toBe(false);
+
+      // In the editor: the list shows, and "Publish anyway" does it.
+      const third = await make("Third try");
+      await page.goto(site.base + `/admin/pages/${third.id}`);
+      await page.getByRole("heading", { name: "Edit: Third try", level: 1 }).waitFor();
+      await page.getByLabel("Published (everyone sees it)").check({ force: true });
+      await page.getByRole("button", { name: "Save" }).click();
+      const alert = page.getByRole("alert", { name: "Before this goes live" });
+      await alert.getByText(/It has no content yet/).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await alert.getByRole("button", { name: "Publish anyway" }).click();
+      await page.getByText("Published anyway. This was written to the log.").waitFor();
+      expect((await fetch(site.base + `/${third.slug}`)).status).toBe(200);
     });
 
     test("accessibility check: the editor lists what a screen reader user would struggle with, as advice only, and says when there is nothing to fix", async () => {

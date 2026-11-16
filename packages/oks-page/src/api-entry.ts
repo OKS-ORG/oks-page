@@ -1,7 +1,16 @@
 // PUT /api/admin/entries/[id]: save an entry. The core checks who may, repairs the blocks, writes the HTML and uses the
 // revision rule; then the cached public page is refreshed. DELETE moves an entry to the trash (or, with ?forever=1,
 // deletes one that is already in the trash); PATCH with {"action": "restore"} brings it back as a draft.
-import { deleteForever, restoreEntry, saveContent, trashEntry } from "@oks-page/core";
+import {
+  deleteForever,
+  mayPublishAnyway,
+  publishProblems,
+  recordPublishOverride,
+  restoreEntry,
+  saveContent,
+  trashEntry,
+  type PublishProblem,
+} from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -22,8 +31,35 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     return reply({ code: "invalid", message: "The request was not understood." }, 400);
   }
   const runner = getRunner();
-  const before = (await runner.all(`select "slug" from "entries" where "id" = ?`, [id]))[0];
-  const result = await saveContent(runner, await actorOf(member), member.siteId, id, {
+  const before = (
+    await runner.all(`select "slug", "status" from "entries" where "id" = ?`, [id])
+  )[0];
+  const actor = await actorOf(member);
+  // Going live (published or scheduled) checks what a reader would miss. An administrator may go on anyway: the problems
+  // are written to the audit log once the page is saved.
+  const live = (status: unknown) => status === "published" || status === "scheduled";
+  let setAside: PublishProblem[] = [];
+  const mayGoLive = actor.can("content.publish_any") || actor.can("content.publish_own");
+  if (mayGoLive && live(input["status"]) && !live(before?.["status"])) {
+    const problems = publishProblems(String(input["title"] ?? ""), input["blocks"]);
+    if (problems.length > 0) {
+      const may = mayPublishAnyway(actor);
+      if (!(may && input["publishAnyway"] === true))
+        return NextResponse.json(
+          {
+            error: {
+              code: "publish_check",
+              message: `Before this goes live: ${problems.map((p) => p.message).join(" ")}`,
+              problems,
+              canPublishAnyway: may,
+            },
+          },
+          { status: 422 },
+        );
+      setAside = problems;
+    }
+  }
+  const result = await saveContent(runner, actor, member.siteId, id, {
     title: String(input["title"] ?? ""),
     slugPart: String(input["slugPart"] ?? ""),
     status: String(input["status"] ?? ""),
@@ -32,6 +68,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     revision: Number(input["revision"]),
   });
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
+  if (setAside.length > 0) await recordPublishOverride(runner, actor, member.siteId, id, setAside);
   refreshEntry(id, result.slug, String(before?.["slug"] ?? result.slug));
   return NextResponse.json({
     revision: result.revision,

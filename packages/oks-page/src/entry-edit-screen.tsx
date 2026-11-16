@@ -50,7 +50,12 @@ interface SaveReply {
   revision?: number;
   repairs?: string[];
   slug?: string;
-  error?: { message: string };
+  error?: {
+    message: string;
+    code?: string;
+    problems?: { rule: string; message: string }[];
+    canPublishAnyway?: boolean;
+  };
 }
 
 /**
@@ -195,11 +200,83 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
     setTrashing(false);
   }
   const [problem, setProblem] = useState<string | null>(null);
+  // What is missing before the page may go live (the publish check), and whether this person may go on anyway.
+  const [check, setCheck] = useState<{
+    problems: { rule: string; message: string }[];
+    canPublishAnyway: boolean;
+  } | null>(null);
+  const [note, setNote] = useState("");
+
+  async function send(blocks: Block[], publishAnyway: boolean) {
+    setProblem(null);
+    const response = await fetch(`/api/admin/entries/${props.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        slugPart,
+        status,
+        scheduledAt:
+          status === "scheduled" ? fromLocalInput(scheduledAt, props.timeZone ?? null) : null,
+        blocks,
+        revision: revision.current,
+        ...(publishAnyway ? { publishAnyway: true } : {}),
+      }),
+    });
+    const body = (await response.json()) as SaveReply;
+    if (!response.ok) {
+      if (body.error?.code === "publish_check" && body.error.problems) {
+        setCheck({
+          problems: body.error.problems,
+          canPublishAnyway: body.error.canPublishAnyway === true,
+        });
+        throw new Error("it needs a few things before it goes live; see the list above");
+      }
+      const message = body.error?.message ?? "Saving did not work.";
+      setProblem(message);
+      throw new Error(message);
+    }
+    setCheck(null);
+    revision.current = body.revision ?? revision.current;
+    setRevisionNo(revision.current);
+    return { repairs: body.repairs ?? [] };
+  }
 
   return (
     <>
       <EditingNotice name={otherEditor} />
       {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
+      {check ? (
+        <div role="alert" aria-label="Before this goes live">
+          <strong>Before this goes live</strong>
+          <ul>
+            {check.problems.map((p) => (
+              <li key={p.rule + p.message}>{p.message}</li>
+            ))}
+          </ul>
+          {check.canPublishAnyway ? (
+            <p>
+              <Button
+                color="danger"
+                onPress={() =>
+                  void send(blocksNow.current, true).then(
+                    () => setNote("Published anyway. This was written to the log."),
+                    () => undefined,
+                  )
+                }
+              >
+                Publish anyway
+              </Button>{" "}
+              <small>Only administrators can. It is written to the log.</small>
+            </p>
+          ) : (
+            <p>
+              <small>Fix these, or keep it as a draft. An administrator can publish anyway.</small>
+            </p>
+          )}
+        </div>
+      ) : null}
+      {note ? <p role="status">{note}</p> : null}
       <TextField name="title" label="Title" required value={title} onChange={setTitle} />
       <TextField
         name="slug"
@@ -274,31 +351,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
             />
           </>
         )}
-        onSave={async (blocks) => {
-          setProblem(null);
-          const response = await fetch(`/api/admin/entries/${props.id}`, {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              title,
-              slugPart,
-              status,
-              scheduledAt:
-                status === "scheduled" ? fromLocalInput(scheduledAt, props.timeZone ?? null) : null,
-              blocks,
-              revision: revision.current,
-            }),
-          });
-          const body = (await response.json()) as SaveReply;
-          if (!response.ok) {
-            const message = body.error?.message ?? "Saving did not work.";
-            setProblem(message);
-            throw new Error(message);
-          }
-          revision.current = body.revision ?? revision.current;
-          setRevisionNo(revision.current);
-          return { repairs: body.repairs ?? [] };
-        }}
+        onSave={(blocks) => send(blocks, false)}
       />
       <EntryAccessibility blocks={blocksNow.current} />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
