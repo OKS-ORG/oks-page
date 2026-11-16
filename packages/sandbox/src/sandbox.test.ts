@@ -693,7 +693,15 @@ for (const { kind, open, skip } of openers) {
       ].map(user) as [string, string, string, string, string, string];
       let as: Record<"author" | "editor" | "recipes" | "admin" | "stranger", ActingUser>;
       const act = (actingFor: ActingUser | undefined, event: Record<string, string>) =>
-        host.call("acts-for", "hook", "content:afterSave", event, actingFor ? { actingFor } : {});
+        // A generous time limit: under a full test run a call can stall on the shared database, and these tests are
+        // about who may do what, not about speed.
+        host.call(
+          "acts-for",
+          "hook",
+          "content:afterSave",
+          event,
+          actingFor ? { actingFor, timeoutMs: 15_000 } : { timeoutMs: 15_000 },
+        );
 
       beforeAll(async () => {
         for (const [id, name] of [
