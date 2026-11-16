@@ -3063,23 +3063,34 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await page.getByRole("dialog", { name: "Insert an image from the library" }).waitFor();
     await page.getByRole("option", { name: /^Gallery-one\.png/ }).click();
     await page.getByRole("button", { name: "Insert image", exact: true }).click();
+    // The picture has no description yet, so the editor asks for one.
+    const describe = page.getByRole("dialog", { name: "Describe this picture" });
+    await describe.waitFor();
+    expect(await violations(page), "describe window").toEqual([]);
+    await describe.getByLabel("Describe the picture").fill("A purple square");
+    await describe.getByRole("button", { name: "Insert picture" }).click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
     await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
 
-    // A second picture, uploaded from the window: it is inserted at once.
+    // A second picture, uploaded from the window: it asks too; this time the description is left for later.
     await page.getByRole("button", { name: "Insert image from the library" }).click();
     await page
       .getByRole("dialog")
       .locator("input[type=file]")
       .setInputFiles({ name: "Gallery two.png", mimeType: "image/png", buffer: await png("#088") });
+    await page
+      .getByRole("dialog", { name: "Describe this picture" })
+      .getByRole("button", { name: "Insert without a description" })
+      .click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
     await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(1);
 
     await page.getByLabel("Published (everyone sees it)").check({ force: true });
     await page.getByRole("button", { name: "Save" }).click();
-    // The two pictures have no description, so the publish check lists them; the administrator goes on anyway.
+    // Only the second picture has no description, so the publish check lists that one; the administrator goes on anyway.
     const check = page.getByRole("alert", { name: "Before this goes live" });
-    await check.getByText(/Picture 1 has no description/).waitFor();
+    await check.getByText(/Picture 2 has no description/).waitFor();
+    expect(await check.getByText(/Picture 1 has no description/).count()).toBe(0);
     await check.getByRole("button", { name: "Publish anyway" }).click();
     await page.getByText("Published anyway. This was written to the log.").waitFor();
 
@@ -4510,6 +4521,9 @@ describe.skipIf(!findBrowser())(
           mimeType: "image/png",
           buffer: await picture("#c80"),
         });
+      const describe = page.getByRole("dialog", { name: "Describe this picture" });
+      await describe.getByLabel("Describe the picture").fill("A jar with a bubbling starter");
+      await describe.getByRole("button", { name: "Insert picture" }).click();
       await page.getByRole("dialog").waitFor({ state: "detached" });
       await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
       // Organise it: the category and two tags.
@@ -5027,8 +5041,9 @@ describe.skipIf(!findBrowser())(
       expect(html).toMatch(
         /<title>Sourdough for beginners – Maple Street Bakery &amp; Café<\/title>/,
       );
-      expect(meta(html, "name", "description")).toBe(
-        "Mix flour and water, wait a day, and feed it again.",
+      // The words of the page; the picture's description is part of its text now that the editor asks for one.
+      expect(meta(html, "name", "description")).toMatch(
+        /^Mix flour and water, wait a day, and feed it again\./,
       );
       expect(meta(html, "property", "og:title")).toBe(
         "Sourdough for beginners – Maple Street Bakery &amp; Café",

@@ -133,9 +133,19 @@ function InsertSection({
   );
 }
 
-/** The "Insert image from the library" button and its window. */
+/**
+ * The "Insert image from the library" button and its window. A picture that has no description
+ * yet first asks for one, so the publish check has nothing to stop later.
+ */
 function InsertFromLibrary({ insertImage }: { insertImage: (src: string, alt: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [needs, setNeeds] = useState<{ url: string } | null>(null);
+  const [words, setWords] = useState("");
+  const finish = (alt: string) => {
+    if (needs) insertImage(needs.url, alt.trim());
+    setNeeds(null);
+    setWords("");
+  };
   return (
     <>
       <Button onPress={() => setOpen(true)}>Insert image from the library</Button>
@@ -143,10 +153,25 @@ function InsertFromLibrary({ insertImage }: { insertImage: (src: string, alt: st
         isOpen={open}
         onClose={() => setOpen(false)}
         onPick={(item) => {
-          insertImage(item.url, item.alt);
           setOpen(false);
+          if (item.alt.trim()) insertImage(item.url, item.alt);
+          else setNeeds({ url: item.url });
         }}
       />
+      <Modal isOpen={needs !== null} onClose={() => finish("")} title="Describe this picture">
+        <p>
+          A short description lets people who cannot see the picture know what it shows. You can
+          also leave it empty and add it later; the page cannot go live with a picture that has
+          none, unless an administrator allows it.
+        </p>
+        <TextField label="Describe the picture" value={words} onChange={setWords} />
+        <p>
+          <Button color="primary" isDisabled={!words.trim()} onPress={() => finish(words)}>
+            Insert picture
+          </Button>{" "}
+          <Button onPress={() => finish("")}>Insert without a description</Button>
+        </p>
+      </Modal>
     </>
   );
 }
