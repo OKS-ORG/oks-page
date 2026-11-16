@@ -1,6 +1,7 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor } from "@oks-page/admin";
+import type { InsertableSection } from "@oks-page/core";
 import { utcToZonedLocal, zonedLocalToUtc } from "@oks-page/core/timezone";
 import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +14,7 @@ import {
   useEditingNotice,
   useUnsavedCopy,
 } from "./entry-editing";
+import { allIds, copyWithNewIds, newBlockId, type LayoutBlock } from "./layout-tree";
 import { EntryRevisions } from "./entry-revisions";
 import { EntryPreview } from "./entry-preview";
 import { EntryLayoutPanel } from "./entry-layout-panel";
@@ -31,6 +33,8 @@ export interface EntryEditScreenProps {
   scheduledAt: string | null;
   revision: number;
   blocks: Block[];
+  /** The saved sections that page content can hold. */
+  savedSections?: InsertableSection[];
   canPublish: boolean;
   canTrash: boolean;
   /** Posts have categories and tags; pages do not. */
@@ -62,6 +66,65 @@ function toLocalInput(iso: string | null, timeZone: string | null): string {
 function fromLocalInput(value: string, timeZone: string | null): string | null {
   const ms = zonedLocalToUtc(value, zoneOf(timeZone));
   return ms === null ? null : new Date(ms).toISOString();
+}
+
+/** "Saved section": choose one, then place a copy (changed here only) or a link (the same everywhere). */
+function InsertSection({
+  sections,
+  insertBlocks,
+}: {
+  sections: InsertableSection[];
+  insertBlocks: (blocks: Block[]) => void;
+}) {
+  const [id, setId] = useState("");
+  if (sections.length === 0) return null;
+  const chosen = sections.find((s) => s.id === id);
+  const copy = () => {
+    if (!chosen) return;
+    const taken = allIds(chosen.blocks as unknown as LayoutBlock[]);
+    insertBlocks(
+      (chosen.blocks as unknown as LayoutBlock[]).map(
+        (b) => copyWithNewIds(b, taken) as unknown as Block,
+      ),
+    );
+  };
+  const link = () => {
+    if (!chosen) return;
+    insertBlocks([
+      {
+        id: newBlockId(),
+        type: "linked-section",
+        props: { id: chosen.id },
+        content: null,
+        children: [],
+      },
+    ] as unknown as Block[]);
+  };
+  return (
+    <span role="group" aria-label="Insert a saved section">
+      <label>
+        Saved section{" "}
+        <select value={id} onChange={(event) => setId(event.target.value)}>
+          <option value="">Choose one…</option>
+          {sections.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </label>{" "}
+      <Button isDisabled={!chosen} onPress={copy}>
+        Insert as a copy
+      </Button>{" "}
+      <Button isDisabled={!chosen} onPress={link}>
+        Insert linked
+      </Button>
+      <small>
+        {" "}
+        Copy: change it here only. Linked: the same everywhere; to change it, go to Design.
+      </small>
+    </span>
+  );
 }
 
 /** The "Insert image from the library" button and its window. */
@@ -190,9 +253,11 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           blocksNow.current = next;
           setChanges((n) => n + 1);
         }}
-        toolbar={({ insertImage, replaceBlocks }) => (
+        savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
+        toolbar={({ insertImage, insertBlocks, replaceBlocks }) => (
           <>
             <InsertFromLibrary insertImage={insertImage} />
+            <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
             <UnsavedCopyBanner
               copy={unsaved}
               timeZone={props.timeZone ?? null}

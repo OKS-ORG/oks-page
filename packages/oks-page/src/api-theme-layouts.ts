@@ -14,6 +14,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { refreshEntry } from "./refresh-cache";
 
 type Context = { params: Promise<{ id: string }> };
 export const LAYOUT_STATUS = { forbidden: 403, invalid: 400, not_found: 404 } as const;
@@ -63,5 +64,7 @@ export async function POST(request: Request, context: Context) {
     (await loadThemeVersion(getRunner(), member.siteId, id))?.isActive
   )
     revalidateTag("theme", { expire: 0 });
+  // The pages and posts that link to a section just published were written again: their caches are made fresh.
+  for (const entry of result.entries) refreshEntry(entry.id, entry.slug);
   return NextResponse.json({ ok: true, published: result.published, sections: result.sections });
 }

@@ -7,6 +7,8 @@ import { openers, type TestDb } from "@oks-page/db/testing";
 import { localAdapter, type StorageAdapter } from "@oks-page/media";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Actor } from "./content.js";
+import { loadForEdit, saveContent } from "./content.js";
+import { entriesLinking, insertableSections } from "./saved-sections.js";
 import { DEFAULT_ROLES } from "./roles.js";
 import { runSetup } from "./setup.js";
 import {
@@ -235,6 +237,7 @@ for (const { kind, open, skip } of openers) {
         ok: true,
         published: ["parts/header", "templates/index"].sort(),
         sections: [],
+        entries: [],
       });
       expect(await states()).toMatchObject({
         "templates/index": ["owner", false, true],
@@ -258,6 +261,7 @@ for (const { kind, open, skip } of openers) {
         ok: true,
         published: [],
         sections: [],
+        entries: [],
       });
     });
 
@@ -501,6 +505,7 @@ for (const { kind, open, skip } of openers) {
         ok: true,
         published: [],
         sections: [id],
+        entries: [],
       });
       expect((await drawn()).header).toContain("Open from Tuesday");
       expect((await drawn()).index).toContain("Open every day but Monday");
@@ -990,6 +995,106 @@ for (const { kind, open, skip } of openers) {
       // Going back to a theme with no colors, the warning goes.
       await useTheme(db.runner, admin, siteId, themeId);
       expect(await loadContrastWarnings(db.runner, siteId)).toEqual([]);
+    });
+
+    // ----- saved sections inside page content (spec 05, 17.10)
+    const aboutPage = async () => {
+      const row = (await db.runner.all(`select "id" from "entries" where "slug" = 'about'`))[0]!;
+      return String(row["id"]);
+    };
+    const saveAbout = async (blocks: unknown[]) => {
+      const id = await aboutPage();
+      const loaded = await loadForEdit(db.runner, admin, siteId, id);
+      if (!loaded.ok) throw new Error(loaded.message);
+      const { entry } = loaded;
+      return saveContent(db.runner, admin, siteId, id, {
+        title: entry.title,
+        slugPart: entry.slugPart,
+        status: "published",
+        scheduledAt: null,
+        blocks,
+        revision: entry.revision,
+      });
+    };
+    const stored = async () => {
+      const row = (
+        await db.runner.all(`select "html", "plain_text", "body" from "entries" where "id" = ?`, [
+          await aboutPage(),
+        ])
+      )[0]!;
+      const body = typeof row["body"] === "string" ? JSON.parse(row["body"]) : row["body"];
+      return {
+        html: String(row["html"]),
+        plain: String(row["plain_text"]),
+        body: JSON.stringify(body),
+      };
+    };
+
+    test("a saved section inside page content: linked shows the section, publishing changes the page, deleting keeps what it shows (TH-75, TH-78)", async () => {
+      const id = await save("Opening hours", [text("Open nine to five")]);
+      const before = await saveAbout([text("Welcome"), linked(id)]);
+      expect(before.ok).toBe(true);
+      // The page shows the section's words, and so does the text search reads; the body keeps only the link.
+      let now = await stored();
+      expect(now.html).toContain("Open nine to five");
+      expect(now.plain).toContain("Open nine to five");
+      expect(now.body).toContain('"linked-section"');
+      expect(now.body).not.toContain("Open nine to five");
+      expect((await entriesLinking(db.runner, siteId, id)).map((e) => e.slug)).toEqual(["about"]);
+
+      // A change stays a draft: the page does not change until Publish; then it does, and the page is named for the refresh.
+      await saveSectionDraft(db.runner, admin, siteId, id, [text("Open ten to six")]);
+      expect((await stored()).html).toContain("nine to five");
+      const published = await publishLayouts(db.runner, admin, siteId, themeId);
+      expect(published).toMatchObject({ ok: true, sections: [id] });
+      expect(published.ok && published.entries.map((e) => e.slug)).toEqual(["about"]);
+      now = await stored();
+      expect(now.html).toContain("Open ten to six");
+      expect(now.html).not.toContain("nine to five");
+      expect(now.plain).toContain("Open ten to six");
+
+      // Publishing something else does not write the page again.
+      const again = await publishLayouts(db.runner, admin, siteId, themeId);
+      expect(again.ok && again.entries).toEqual([]);
+
+      // Deleting the section gives the page a copy first: it shows exactly the same, and nothing links any more.
+      const htmlBefore = (await stored()).html;
+      const removed = await deleteSavedSection(db.runner, admin, siteId, id);
+      expect(removed.ok && removed.entries.map((e) => e.slug)).toEqual(["about"]);
+      now = await stored();
+      expect(now.html).toBe(htmlBefore);
+      expect(now.body).not.toContain("linked-section");
+      expect(now.body).toContain("Open ten to six");
+      expect((await saveAbout(JSON.parse(now.body).blocks)).ok).toBe(true);
+    });
+
+    test("page content refuses a link to a section that is gone, or one that holds parts only a layout can show; a link with no choice draws nothing", async () => {
+      const gone = await saveAbout([text("Welcome"), linked("nope0000")]);
+      expect(gone).toMatchObject({ ok: false, code: "invalid" });
+      expect(!gone.ok && gone.message).toMatch(/no longer exists/);
+      const layoutOnly = await save("Header bits", [block("site-title"), text("hello")]);
+      const refused = await saveAbout([linked(layoutOnly)]);
+      expect(refused).toMatchObject({ ok: false, code: "invalid" });
+      expect(!refused.ok && refused.message).toMatch(/Header bits.*only a page layout/);
+      // The editor offers only what content can hold.
+      const fine = await save("Hours", [text("Open daily")]);
+      expect((await insertableSections(db.runner, siteId)).map((s) => s.id)).toEqual([fine]);
+      // The block the editor adds before the writer chooses draws nothing and does not stop the save.
+      expect((await saveAbout([text("Only this"), linked("")])).ok).toBe(true);
+      expect((await stored()).html).toContain("Only this");
+    });
+
+    test("a page linked to a section that links to another shows the whole chain, and changing the inner one changes the page", async () => {
+      const inner = await save("Inner", [text("Innermost words")]);
+      const outer = await save("Outer", [text("Outer words"), linked(inner)]);
+      expect((await saveAbout([linked(outer)])).ok).toBe(true);
+      const now = await stored();
+      expect(now.html).toContain("Outer words");
+      expect(now.html).toContain("Innermost words");
+      // Changing the inner section changes the page that links only to the outer one.
+      await saveSectionDraft(db.runner, admin, siteId, inner, [text("Inner changed")]);
+      await publishLayouts(db.runner, admin, siteId, themeId);
+      expect((await stored()).html).toContain("Inner changed");
     });
   });
 }

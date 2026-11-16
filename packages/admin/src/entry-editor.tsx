@@ -1,7 +1,69 @@
 // The entry editor (spec 03, sections 4 and 8): oks-ui's TextEditor with a Save button. The blocks are checked and
 // repaired on the server before they are stored (ADR 0019): this component only sends them and reports what was fixed.
-import { Button, TextEditor, type Block, type TextEditorHandle, type UploadHandler } from "oks-ui";
+import {
+  Button,
+  registerBlock,
+  TextEditor,
+  type Block,
+  type CustomBlockProps,
+  type TextEditorHandle,
+  type UploadHandler,
+} from "oks-ui";
 import { useRef, useState, type ReactNode } from "react";
+
+/** The saved sections this page may link to; set by the editor on the page, read by the block that draws a link. */
+let linkable: { id: string; name: string }[] = [];
+
+/**
+ * "Saved section" in the content (spec 05, 17.10): a block that holds only the id of a saved section. The editor shows
+ * its name; the section's own blocks are put in place when the page is saved and drawn.
+ */
+function LinkedSectionBlock({ props, setProps, readOnly }: CustomBlockProps) {
+  const id = typeof props["id"] === "string" ? props["id"] : "";
+  const found = linkable.find((s) => s.id === id);
+  const box = { border: "1px dashed currentColor", borderRadius: "4px", padding: "0.5rem 0.75rem" };
+  if (found)
+    return (
+      <div role="group" aria-label={`Saved section: ${found.name}`} style={box}>
+        <strong>Saved section: {found.name}</strong>
+        <br />
+        The same everywhere it is used. To change it, go to Design.
+      </div>
+    );
+  if (id !== "")
+    return (
+      <div role="group" aria-label="Saved section not available" style={box}>
+        This saved section is not available here. Take it off the page.
+      </div>
+    );
+  if (readOnly) return <div style={box}>No saved section chosen.</div>;
+  return (
+    <div role="group" aria-label="Saved section" style={box}>
+      <label>
+        Saved section{" "}
+        <select value="" onChange={(event) => setProps({ id: event.target.value })}>
+          <option value="">Choose one…</option>
+          {linkable.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+// Once, in the browser, before an editor is drawn.
+if (typeof window !== "undefined")
+  registerBlock({
+    type: "linked-section",
+    label: "Saved section",
+    keywords: ["shared", "reuse", "linked"],
+    defaultProps: { id: "" },
+    render: LinkedSectionBlock,
+    isEmpty: (block) => typeof block.props["id"] !== "string" || block.props["id"] === "",
+  });
 
 export interface SaveResult {
   /** One entry per repair the block checks made. */
@@ -19,6 +81,8 @@ export interface EntryEditorProps {
   /** The block types this content type may hold (EC-42 is enforced on the server as well). */
   allowedBlocks?: Block["type"][];
   label?: string;
+  /** The saved sections the writer may link to (the block "Saved section" shows their names). */
+  savedSections?: { id: string; name: string }[];
   /** Store a file the writer adds to an image, file or video block and give back its address. */
   onImageUpload?: UploadHandler;
   onFileUpload?: UploadHandler;
@@ -30,6 +94,8 @@ export interface EntryEditorProps {
 export interface EditorTools {
   /** Adds an image block at the end of the content. */
   insertImage: (src: string, alt: string) => void;
+  /** Adds blocks at the end of the content. */
+  insertBlocks: (blocks: Block[]) => void;
   /** Puts other content into the editor (for example an unsaved copy the writer chose to bring back). */
   replaceBlocks: (blocks: Block[]) => void;
 }
@@ -47,11 +113,13 @@ export function EntryEditor({
   onBlocksChange,
   allowedBlocks,
   label = "Content",
+  savedSections,
   onImageUpload,
   onFileUpload,
   onVideoUpload,
   toolbar,
 }: EntryEditorProps) {
+  linkable = savedSections ?? [];
   const editor = useRef<TextEditorHandle>(null);
   const [blocks, setBlocks] = useState(initialBlocks);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -77,6 +145,10 @@ export function EntryEditor({
       setBlocks(next);
       setDirty(true);
       onBlocksChange?.(next);
+    },
+    insertBlocks: (more) => {
+      const current = editor.current?.getBlocks() ?? blocks;
+      editor.current?.setBlocks([...current, ...more]);
     },
     insertImage: (src, alt) => {
       const current = editor.current?.getBlocks() ?? blocks;

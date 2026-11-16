@@ -6,9 +6,10 @@
 // that is still linked first turns every placement into a copy, so no page changes.
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, type SqlRunner } from "@oks-page/db";
+import { writeBlocks } from "@oks-page/renderer";
 import type { Actor } from "./content.js";
 import type { ThemeActionResult } from "./theme-install.js";
-import { MAX_PART_DEPTH, sectionGroup, type SectionGroup } from "./theme-package.js";
+import { MAX_PART_DEPTH, SITE_BLOCKS, sectionGroup, type SectionGroup } from "./theme-package.js";
 
 /** The block that places a saved section by reference. */
 export const LINKED_SECTION = "linked-section";
@@ -216,6 +217,140 @@ export function detachLinks(blocks: Block[], sectionId: string, sectionBlocks: B
       return [{ ...b, children: walk(b.children) }];
     });
   return walk(blocks);
+}
+
+// ----- saved sections inside page content (spec 05, 17.10)
+//
+// A page or post keeps its blocks, and its HTML and text written when it was saved. A linked section is put in place
+// before that writing, so the page shows the section and search finds its words. When a section is published the
+// pages that link to it are written again (`rewriteLinkedEntries`); when it is deleted they get a copy first.
+
+/** Blocks only a page layout can show: the site blocks, which need a theme to be drawn. */
+const LAYOUT_ONLY = new Set<string>(SITE_BLOCKS.filter((t) => t !== LINKED_SECTION));
+const holdsLayoutOnly = (blocks: Block[]): boolean =>
+  blocks.some((b) => LAYOUT_ONLY.has(b.type) || holdsLayoutOnly(b.children));
+
+/**
+ * The published sections a page's blocks link to, ready to draw, or what is wrong in plain words: a section that no
+ * longer exists, or one that holds parts only a layout can show. A page with no links costs nothing.
+ */
+export async function sectionsForContent(
+  runner: SqlRunner,
+  siteId: string,
+  blocks: Block[],
+): Promise<{ ok: true; sections: Map<string, Block[]> } | { ok: false; message: string }> {
+  // A block that has not been given a section yet (the editor shows a list to choose from) draws nothing.
+  const ids = linkedIds(blocks).filter((id) => id !== "");
+  if (ids.length === 0) return { ok: true, sections: new Map() };
+  const rows = await rowsOf(runner, siteId);
+  const sections = new Map([...rows.values()].map((r) => [r.id, r.published]));
+  const problems: string[] = [];
+  for (const id of ids) {
+    const row = rows.get(id);
+    if (!row) {
+      problems.push("A saved section used on this page no longer exists. Take it off the page.");
+      continue;
+    }
+    if (holdsLayoutOnly(expandLinked(row.published, sections, [id])))
+      problems.push(
+        `"${row.name}" holds parts that only a page layout can show, so it cannot be placed in page content.`,
+      );
+  }
+  return problems.length > 0 ? { ok: false, message: problems.join(" ") } : { ok: true, sections };
+}
+
+/** The HTML and the text of page content, with the linked sections in place. */
+export const writeContentBlocks = (blocks: Block[], sections: ReadonlyMap<string, Block[]>) =>
+  writeBlocks(expandLinked(blocks, sections));
+
+export interface InsertableSection {
+  id: string;
+  name: string;
+  group: SectionGroup;
+  /** The published blocks, for placing a copy. */
+  blocks: Block[];
+}
+
+/** The saved sections that page content can hold (not empty, nothing only a layout can show), by name. */
+export async function insertableSections(
+  runner: SqlRunner,
+  siteId: string,
+): Promise<InsertableSection[]> {
+  const rows = await rowsOf(runner, siteId);
+  const sections = new Map([...rows.values()].map((r) => [r.id, r.published]));
+  return [...rows.values()]
+    .filter(
+      (r) =>
+        r.published.length > 0 && !holdsLayoutOnly(expandLinked(r.published, sections, [r.id])),
+    )
+    .map((r) => ({ id: r.id, name: r.name, group: r.group, blocks: r.published }));
+}
+
+/** A page or post that links to a saved section. */
+export interface EntryUse {
+  id: string;
+  slug: string;
+  title: string;
+}
+
+interface LinkingEntry extends EntryUse {
+  blocks: Block[];
+  html: string;
+}
+
+async function entriesWithLinks(runner: SqlRunner, siteId: string): Promise<LinkingEntry[]> {
+  const rows = await runner.all(
+    `select "id", "slug", "title", "body", "html" from "entries"
+      where "site_id" = ? and "status" <> 'trash' and cast("body" as text) like ?`,
+    [siteId, `%${LINKED_SECTION}%`],
+  );
+  const out: LinkingEntry[] = [];
+  for (const r of rows) {
+    const value = readJson(r["body"]);
+    const list = Array.isArray(value) ? value : (value as { blocks?: unknown } | null)?.blocks;
+    const blocks = checkBlocks({ version: 1, blocks: list ?? [] }).body.blocks;
+    if (linkedIds(blocks).length === 0) continue;
+    out.push({
+      id: String(r["id"]),
+      slug: String(r["slug"]),
+      title: String(r["title"]),
+      blocks,
+      html: String(r["html"] ?? ""),
+    });
+  }
+  return out;
+}
+
+/** The pages and posts that link to a saved section, by title. */
+export async function entriesLinking(
+  runner: SqlRunner,
+  siteId: string,
+  id: string,
+): Promise<EntryUse[]> {
+  return (await entriesWithLinks(runner, siteId))
+    .filter((e) => linkedIds(e.blocks).includes(id))
+    .map(({ id: entryId, slug, title }) => ({ id: entryId, slug, title }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/**
+ * Writes the HTML and text again for every page and post that links to a saved section, from the sections as published
+ * now. A page whose HTML does not change is left alone. Returns the pages changed (their caches must be refreshed).
+ */
+export async function rewriteLinkedEntries(tx: SqlRunner, siteId: string): Promise<EntryUse[]> {
+  const sections = await loadSectionBlocks(tx, siteId);
+  const changed: EntryUse[] = [];
+  for (const e of await entriesWithLinks(tx, siteId)) {
+    const written = writeContentBlocks(e.blocks, sections);
+    if (written.html === e.html) continue;
+    await tx.all(`update "entries" set "html" = ?, "plain_text" = ? where "id" = ?`, [
+      written.html,
+      written.plainText,
+      e.id,
+    ]);
+    changed.push({ id: e.id, slug: e.slug, title: e.title });
+  }
+  return changed;
 }
 
 // ----- stored sections
@@ -552,12 +687,14 @@ export async function deleteSavedSection(
   siteId: string,
   id: string,
   now: number = Date.now(),
-): Promise<ThemeActionResult<{ copied: SectionPlace[] }>> {
+): Promise<ThemeActionResult<{ copied: SectionPlace[]; entries: EntryUse[] }>> {
   if (!actor.can("themes.manage")) return forbidden;
   const rows = await rowsOf(runner, siteId);
   const row = rows.get(id);
   if (!row) return notFound;
   const places = await sectionPlaces(runner, siteId, id);
+  const uses = await entriesWithLinks(runner, siteId);
+  const pages = uses.filter((e) => linkedIds(e.blocks).includes(id));
   await runner.transaction(async (tx) => {
     for (const place of places) {
       if (place.key.startsWith("sections/")) {
@@ -587,6 +724,12 @@ export async function deleteSavedSection(
         ],
       );
     }
+    // Pages and posts keep what they show: the link becomes a copy of the published blocks (their HTML does not change).
+    for (const page of pages)
+      await tx.all(`update "entries" set "body" = ? where "id" = ?`, [
+        JSON.stringify({ version: 1, blocks: detachLinks(page.blocks, id, row.published) }),
+        page.id,
+      ]);
     await tx.all(`delete from "saved_sections" where "id" = ? and "site_id" = ?`, [id, siteId]);
     await tx.all(
       `insert into "audit_log" ("id", "site_id", "actor_type", "actor_id", "action", "target_type", "target_id",
@@ -596,10 +739,17 @@ export async function deleteSavedSection(
         siteId,
         actor.userId,
         id,
-        JSON.stringify({ name: row.name, copiedInto: places.map((p) => p.key) }),
+        JSON.stringify({
+          name: row.name,
+          copiedInto: [...places.map((p) => p.key), ...pages.map((p) => `entries/${p.id}`)],
+        }),
         new Date(now),
       ],
     );
   });
-  return { ok: true, copied: places };
+  return {
+    ok: true,
+    copied: places,
+    entries: pages.map(({ id: entryId, slug, title }) => ({ id: entryId, slug, title })),
+  };
 }

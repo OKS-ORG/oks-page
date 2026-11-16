@@ -1,5 +1,5 @@
 // /admin/pages/[id] and /admin/posts/[id]: the edit screen. Anyone who may not edit this entry is sent back to the list.
-import { isSetupDone, loadForEdit, loadGeneralSettings } from "@oks-page/core";
+import { insertableSections, isSetupDone, loadForEdit, loadGeneralSettings } from "@oks-page/core";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -26,6 +26,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
   }
   const { entry } = loaded;
   const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
+  const savedSections = await insertableSections(getRunner(), member.siteId);
   const segment = entry.type === "post" ? "posts" : "pages";
   const canPublish =
     actor.can("content.publish_any", entry.type) ||
@@ -53,6 +54,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         revision={entry.revision}
         // The stored blocks passed the block checks; oks-ui's own type is stricter than the checks' type.
         blocks={entry.blocks as unknown as EntryEditScreenProps["blocks"]}
+        savedSections={savedSections}
         canPublish={canPublish}
         canTrash={
           actor.can("content.delete_any", entry.type) ||

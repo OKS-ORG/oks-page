@@ -5831,6 +5831,115 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
 
+    test("saved sections in page content: place one as a copy or linked in the editor; a change published in Design reaches the page; deleting the section keeps the page the same", async () => {
+      const page = await signedIn(owner);
+      // A theme must be installed to publish a section (Publish belongs to a theme's design).
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "plain-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: tgz({
+          "theme.json": JSON.stringify({ key: "plain", name: "Plain", version: "1.0.0" }),
+        }),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByText("Plain 1.0.0 is installed. It is not in use yet.").waitFor();
+      await page.getByRole("button", { name: "Use Plain" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Plain" }).click();
+      await page.getByText("Your site uses Plain now.").waitFor();
+      const themeId = (
+        (await call(page, "GET", "/api/admin/themes")).json as {
+          themes: { id: string; name: string }[];
+        }
+      ).themes.find((t) => t.name === "Plain")!.id;
+
+      const words = (t: string) => [{ type: "text", text: t, styles: {} }];
+      const para = (id: string, t: string) => ({
+        id,
+        type: "paragraph",
+        props: {},
+        content: words(t),
+        children: [],
+      });
+      const made = await call(page, "POST", "/api/admin/sections", {
+        name: "Opening hours",
+        group: "contact",
+        blocks: [para("hours1", "Open nine to five")],
+      });
+      expect(made.status).toBe(201);
+      const sectionId = (made.json as { section: { id: string } }).section.id;
+      const created = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Visit us",
+      });
+      const pageId = (created.json as { id: string }).id;
+
+      await page.goto(site.base + `/admin/pages/${pageId}`);
+      await page.getByRole("heading", { name: "Edit: Visit us", level: 1 }).waitFor();
+      const group = page.getByRole("group", { name: "Insert a saved section" });
+      await group.getByLabel("Saved section").selectOption({ label: "Opening hours" });
+      await group.getByRole("button", { name: "Insert linked" }).click();
+      // The editor shows the link by name, not the section's words.
+      await page.getByRole("group", { name: "Saved section: Opening hours" }).waitFor();
+      await group.getByRole("button", { name: "Insert as a copy" }).click();
+      await expect.poll(() => page.getByText("Open nine to five").count()).toBeGreaterThan(0);
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await axeViolations(page), `at ${width} px`).toEqual([]);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.getByLabel("Published (everyone sees it)").check({ force: true });
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect
+        .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
+        .toBe("Saved.");
+      const count = (html: string, t: string) => html.split(`<p>${t}</p>`).length - 1;
+      let html = await (await fetch(site.base + "/visit-us")).text();
+      expect(count(html, "Open nine to five")).toBe(2);
+
+      // A change to the section stays a draft until Publish; then the linked place changes, the copy does not.
+      expect(
+        (
+          await call(page, "PUT", `/api/admin/sections/${sectionId}`, {
+            blocks: [para("hours1", "Open ten to six")],
+          })
+        ).status,
+      ).toBe(200);
+      expect(count(await (await fetch(site.base + "/visit-us")).text(), "Open nine to five")).toBe(
+        2,
+      );
+      expect(
+        (await call(page, "POST", `/api/admin/themes/${themeId}/layouts`, { action: "publish" }))
+          .status,
+      ).toBe(200);
+      await expect
+        .poll(async () => {
+          const now = await (await fetch(site.base + "/visit-us")).text();
+          return [count(now, "Open nine to five"), count(now, "Open ten to six")];
+        })
+        .toEqual([1, 1]);
+
+      // Delete the section: the page shows the same, and a new save still works (the link became a copy).
+      expect((await call(page, "DELETE", `/api/admin/sections/${sectionId}`)).status).toBe(200);
+      html = await (await fetch(site.base + "/visit-us")).text();
+      expect([count(html, "Open nine to five"), count(html, "Open ten to six")]).toEqual([1, 1]);
+      await page.reload();
+      await page.getByRole("heading", { name: "Edit: Visit us", level: 1 }).waitFor();
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect
+        .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
+        .toBe("Saved.");
+
+      // Back to the built-in design, and remove the theme.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      await page.getByRole("button", { name: "Remove Plain" }).click();
+      await page.getByRole("button", { name: "Yes, remove Plain" }).click();
+      await page.getByText("Plain is removed.").waitFor();
+    });
+
     test("contrast warning: a theme whose text color is weak in dark mode is flagged on the Look screen, only for the modes a visitor can reach", async () => {
       const page = await signedIn(owner);
       await page.goto(site.base + "/admin/settings/look");
@@ -6618,7 +6727,7 @@ describe.skipIf(!findBrowser())(
         ((await call(page, "GET", "/api/admin/sections")).json as { sections: unknown[] }).sections,
       ).toEqual([]);
       const audit = await db.run(
-        "select action from audit_log where action = 'saved_section.delete'",
+        "select action from audit_log where action = 'saved_section.delete' and detail like '%Welcome box%'",
       );
       expect(audit).toHaveLength(1);
 

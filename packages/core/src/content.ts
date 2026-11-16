@@ -4,8 +4,8 @@
 import { newPostDefaults } from "./site-settings.js";
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
-import { writeBlocks } from "@oks-page/renderer";
 import { recordSlugChange } from "./redirects.js";
+import { sectionsForContent, writeContentBlocks } from "./saved-sections.js";
 import { canonicalJson, pruneRevisions, summarise } from "./revision-parts.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
@@ -381,7 +381,10 @@ export async function saveContent(
 
   // The same checks every other path uses, then our own writer for the stored HTML and text.
   const checked = checkBlocks({ version: 1, blocks: input.blocks });
-  const written = writeBlocks(checked.body.blocks);
+  // A saved section linked in the page is put in place before the HTML and the text are written.
+  const linked = await sectionsForContent(runner, siteId, checked.body.blocks);
+  if (!linked.ok) return fail("invalid", linked.message, { field: "blocks" });
+  const written = writeContentBlocks(checked.body.blocks, linked.sections);
   const at = new Date(now());
   const saved = await saveEntry(runner, {
     entryId: id,

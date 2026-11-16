@@ -10,8 +10,10 @@ import type { Actor } from "./content.js";
 import {
   missingLinks,
   publishSectionDrafts,
+  rewriteLinkedEntries,
   savedSectionIds,
   sectionProblems,
+  type EntryUse,
 } from "./saved-sections.js";
 import { loadThemeVersion, type ThemeActionResult, type ThemeVersion } from "./theme-install.js";
 import { checkParts, type ThemeLayout } from "./theme-package.js";
@@ -342,7 +344,7 @@ export async function publishLayouts(
   siteId: string,
   themeId: string,
   now: number = Date.now(),
-): Promise<ThemeActionResult<{ published: string[]; sections: string[] }>> {
+): Promise<ThemeActionResult<{ published: string[]; sections: string[]; entries: EntryUse[] }>> {
   const theme = await themeFor(runner, actor, siteId, themeId);
   if (!theme.ok) return theme;
   const rows = await overridesOf(runner, themeId);
@@ -360,7 +362,7 @@ export async function publishLayouts(
   ];
   if (problems.length > 0) return invalid(problems.join(" "));
 
-  const sections = await runner.transaction(async (tx) => {
+  const done = await runner.transaction(async (tx) => {
     for (const r of drafts) {
       const themeLayout = themeLayoutOf(theme.version, r.key);
       const value = JSON.stringify(r.draft);
@@ -394,9 +396,17 @@ export async function publishLayouts(
       for (const extra of old.slice(LAYOUT_HISTORY))
         await tx.all(`delete from "theme_override_versions" where "id" = ?`, [extra["id"]]);
     }
-    return publishSectionDrafts(tx, actor, siteId, now);
+    const sectionIds = await publishSectionDrafts(tx, actor, siteId, now);
+    // The pages that link to a published section are written again, so they show it (and search finds its words).
+    const entries = sectionIds.length > 0 ? await rewriteLinkedEntries(tx, siteId) : [];
+    return { sectionIds, entries };
   });
-  return { ok: true, published: drafts.map((r) => r.key), sections };
+  return {
+    ok: true,
+    published: drafts.map((r) => r.key),
+    sections: done.sectionIds,
+    entries: done.entries,
+  };
 }
 
 /** The published versions of a layout, newest first (at most 20). */
