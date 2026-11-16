@@ -289,6 +289,8 @@ export async function insertableSections(
 /** A page or post that links to a saved section. */
 export interface EntryUse {
   id: string;
+  /** "page", "post" or another content type. */
+  type: string;
   slug: string;
   title: string;
 }
@@ -300,7 +302,7 @@ interface LinkingEntry extends EntryUse {
 
 async function entriesWithLinks(runner: SqlRunner, siteId: string): Promise<LinkingEntry[]> {
   const rows = await runner.all(
-    `select "id", "slug", "title", "body", "html" from "entries"
+    `select "id", "type_key", "slug", "title", "body", "html" from "entries"
       where "site_id" = ? and "status" <> 'trash' and cast("body" as text) like ?`,
     [siteId, `%${LINKED_SECTION}%`],
   );
@@ -312,6 +314,7 @@ async function entriesWithLinks(runner: SqlRunner, siteId: string): Promise<Link
     if (linkedIds(blocks).length === 0) continue;
     out.push({
       id: String(r["id"]),
+      type: String(r["type_key"]),
       slug: String(r["slug"]),
       title: String(r["title"]),
       blocks,
@@ -329,7 +332,7 @@ export async function entriesLinking(
 ): Promise<EntryUse[]> {
   return (await entriesWithLinks(runner, siteId))
     .filter((e) => linkedIds(e.blocks).includes(id))
-    .map(({ id: entryId, slug, title }) => ({ id: entryId, slug, title }))
+    .map(({ id: entryId, type, slug, title }) => ({ id: entryId, type, slug, title }))
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
@@ -348,7 +351,7 @@ export async function rewriteLinkedEntries(tx: SqlRunner, siteId: string): Promi
       written.plainText,
       e.id,
     ]);
-    changed.push({ id: e.id, slug: e.slug, title: e.title });
+    changed.push({ id: e.id, type: e.type, slug: e.slug, title: e.title });
   }
   return changed;
 }
@@ -750,6 +753,11 @@ export async function deleteSavedSection(
   return {
     ok: true,
     copied: places,
-    entries: pages.map(({ id: entryId, slug, title }) => ({ id: entryId, slug, title })),
+    entries: pages.map(({ id: entryId, type, slug, title }) => ({
+      id: entryId,
+      type,
+      slug,
+      title,
+    })),
   };
 }

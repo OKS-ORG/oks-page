@@ -1,6 +1,7 @@
 // Settings > Site editor (spec 05, section 17.5): change the layouts of the theme in use on a live preview of the real
 // site. For people who may change the site design. The editor itself is a client screen; this page loads what it needs.
 import {
+  entriesLinking,
   isSetupDone,
   listLayouts,
   listSavedSections,
@@ -46,6 +47,7 @@ export default async function SiteEditorPage() {
         savedList.sections.map(async (s) => ({
           ...s,
           places: (await sectionPlaces(runner, member.siteId, s.id)).length,
+          pages: (await entriesLinking(runner, member.siteId, s.id)).length,
         })),
       )
     : [];

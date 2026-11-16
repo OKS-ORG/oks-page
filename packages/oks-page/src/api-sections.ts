@@ -2,7 +2,12 @@
 //   GET   every saved section, by name, with where each one is linked
 //   POST  { name, group, blocks } saves blocks as a new section (published at once; it shows nowhere until placed)
 // Only people who may change the site design (`themes.manage`).
-import { createSavedSection, listSavedSections, sectionPlaces } from "@oks-page/core";
+import {
+  createSavedSection,
+  entriesLinking,
+  listSavedSections,
+  sectionPlaces,
+} from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -20,6 +25,7 @@ export async function GET() {
     result.sections.map(async (s) => ({
       ...s,
       places: (await sectionPlaces(runner, member.siteId, s.id)).length,
+      pages: (await entriesLinking(runner, member.siteId, s.id)).length,
     })),
   );
   return NextResponse.json({ sections });

@@ -1040,7 +1040,9 @@ for (const { kind, open, skip } of openers) {
       expect(now.plain).toContain("Open nine to five");
       expect(now.body).toContain('"linked-section"');
       expect(now.body).not.toContain("Open nine to five");
-      expect((await entriesLinking(db.runner, siteId, id)).map((e) => e.slug)).toEqual(["about"]);
+      expect(
+        (await entriesLinking(db.runner, siteId, id)).map((e) => [e.type, e.slug, e.title]),
+      ).toEqual([["page", "about", expect.any(String)]]);
 
       // A change stays a draft: the page does not change until Publish; then it does, and the page is named for the refresh.
       await saveSectionDraft(db.runner, admin, siteId, id, [text("Open ten to six")]);

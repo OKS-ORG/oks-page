@@ -5907,6 +5907,11 @@ describe.skipIf(!findBrowser())(
         mimeType: "application/gzip",
         buffer: tgz({
           "theme.json": JSON.stringify({ key: "plain", name: "Plain", version: "1.0.0" }),
+          // One part that no page uses, so the site editor has a layout to open (and pages are drawn the built-in way).
+          "parts/note.json": JSON.stringify({
+            title: "Note",
+            blocks: [{ id: "n1", type: "paragraph", props: {}, content: [], children: [] }],
+          }),
         }),
       });
       await page.getByRole("button", { name: "Upload and check" }).click();
@@ -5986,11 +5991,38 @@ describe.skipIf(!findBrowser())(
         })
         .toEqual([1, 1]);
 
+      // The Design screen names the page that uses the section, and the delete panel lists it.
+      const listed = (await call(page, "GET", "/api/admin/sections")).json as {
+        sections: { id: string; pages: number }[];
+      };
+      expect(listed.sections.find((s) => s.id === sectionId)?.pages).toBe(1);
+      expect(
+        (
+          (await call(page, "GET", `/api/admin/sections/${sectionId}`)).json as {
+            entries: { title: string; type: string }[];
+          }
+        ).entries,
+      ).toMatchObject([{ title: "Visit us", type: "page" }]);
+      await page.goto(site.base + "/admin/settings/site-editor");
+      await page
+        .getByRole("navigation", { name: "Layouts" })
+        .getByRole("button", { name: /^Opening hours/ })
+        .click();
+      const box = page.getByRole("region", { name: "This saved section" });
+      await box.getByText(/used in 1 page or post/).waitFor();
+      await box.getByRole("heading", { name: "Pages and posts that use it" }).waitFor();
+      expect(await box.getByRole("link", { name: "Visit us" }).getAttribute("href")).toBe(
+        `/admin/pages/${pageId}`,
+      );
+      await box.getByRole("button", { name: "Delete this section" }).click();
+      await box.getByText("Page: Visit us").waitFor();
+      await box.getByRole("button", { name: "Keep it", exact: true }).click();
+
       // Delete the section: the page shows the same, and a new save still works (the link became a copy).
       expect((await call(page, "DELETE", `/api/admin/sections/${sectionId}`)).status).toBe(200);
       html = await (await fetch(site.base + "/visit-us")).text();
       expect([count(html, "Open nine to five"), count(html, "Open ten to six")]).toEqual([1, 1]);
-      await page.reload();
+      await page.goto(site.base + `/admin/pages/${pageId}`);
       await page.getByRole("heading", { name: "Edit: Visit us", level: 1 }).waitFor();
       await page.getByRole("button", { name: "Save" }).click();
       await expect

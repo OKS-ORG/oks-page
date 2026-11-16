@@ -7,6 +7,7 @@
 // Only people who may change the site design (`themes.manage`); the server refuses everyone else (TH-77).
 import {
   deleteSavedSection,
+  entriesLinking,
   discardSectionDraft,
   getSavedSection,
   layoutUsage,
@@ -52,6 +53,8 @@ export async function GET(_request: Request, context: Context) {
   return NextResponse.json({
     section: result.section,
     places: result.places,
+    // The pages and posts that link to it, by title.
+    entries: await entriesLinking(runner, member.siteId, id),
     versions: versions.ok ? versions.versions : [],
     usage,
   });

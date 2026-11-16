@@ -4,6 +4,7 @@
 // Every change is kept as a draft on the server a moment after it is made; Publish shows all changed layouts at once.
 import { EntryEditor } from "@oks-page/admin";
 import type {
+  EntryUse,
   LayoutDetail,
   LayoutInfo,
   LayoutUsage,
@@ -78,7 +79,7 @@ interface Making {
   from: string;
 }
 
-export type SavedSection = SavedSectionInfo & { places: number };
+export type SavedSection = SavedSectionInfo & { places: number; pages: number };
 const SECTION_KEY = "sections/";
 const LINKED = "linked-section";
 
@@ -91,6 +92,14 @@ function publishedWords(layouts: number, sections: number): string {
 }
 const placesWords = (n: number) =>
   n === 0 ? "not linked anywhere yet" : n === 1 ? "linked in 1 place" : `linked in ${n} places`;
+/** "linked in 2 places and used in 3 pages and posts", for a saved section. */
+const usedWords = (places: number, pages: number) =>
+  pages === 0
+    ? placesWords(places)
+    : `${places === 0 ? "" : `${placesWords(places)} and `}used in ${pages === 1 ? "1 page or post" : `${pages} pages and posts`}`;
+/** Where to edit a page or a post. */
+const editHref = (e: { id: string; type: string }) =>
+  `/admin/${e.type === "post" ? "posts" : "pages"}/${e.id}`;
 
 /** The preview sizes, each drawn at its real width and scaled down to fit (spec 06, section 4.1 breakpoints). */
 const PREVIEW_SIZES = [
@@ -268,6 +277,7 @@ export function SiteEditor({
   const [layouts, setLayouts] = useState(initialLayouts);
   const [saved, setSaved] = useState(initialSaved);
   const [savedPlaces, setSavedPlaces] = useState<SectionPlace[]>([]);
+  const [savedPages, setSavedPages] = useState<EntryUse[]>([]);
   const [saving2, setSaving2] = useState<{ name: string; group: string; link: boolean } | null>(
     null,
   );
@@ -350,6 +360,7 @@ export function SiteEditor({
         const body = (await response.json().catch(() => null)) as {
           section?: SavedSectionDetail;
           places?: SectionPlace[];
+          entries?: EntryUse[];
           versions?: LayoutVersion[];
           usage?: LayoutUsage | null;
         } | null;
@@ -359,6 +370,7 @@ export function SiteEditor({
         }
         setDetail(null);
         setSavedPlaces(body.places ?? []);
+        setSavedPages(body.entries ?? []);
         setVersions(body.versions ?? []);
         setUsage(body.usage ?? null);
         if (keepBlocks) return;
@@ -886,7 +898,7 @@ export function SiteEditor({
                         {s.name}
                         <br />
                         <small>
-                          {placesWords(s.places)}
+                          {usedWords(s.places, s.pages)}
                           {s.hasDraft ? " · draft" : ""}
                         </small>
                       </button>
@@ -1287,8 +1299,20 @@ export function SiteEditor({
             <section aria-label="This saved section">
               <h2 style={{ fontSize: "1rem" }}>This saved section</h2>
               <p>
-                {`"${savedOpen.name}" is ${placesWords(savedPlaces.length)}. Changes stay a draft until you publish; then every place shows them.`}
+                {`"${savedOpen.name}" is ${usedWords(savedPlaces.length, savedPages.length)}. Changes stay a draft until you publish; then every place shows them.`}
               </p>
+              {savedPages.length > 0 ? (
+                <>
+                  <h3 style={{ fontSize: "0.9rem" }}>Pages and posts that use it</h3>
+                  <ul>
+                    {savedPages.map((e) => (
+                      <li key={e.id}>
+                        <a href={editHref(e)}>{e.title || "(no title)"}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
               {renaming ? (
                 <fieldset style={{ border: "1px solid currentColor", padding: "0.5rem" }}>
                   <legend>Name and group</legend>
@@ -1348,7 +1372,7 @@ export function SiteEditor({
                 </fieldset>
               ) : deleting ? (
                 <div role="group" aria-label="Delete this section">
-                  {savedPlaces.length > 0 ? (
+                  {savedPlaces.length + savedPages.length > 0 ? (
                     <>
                       <p>
                         It is linked in these places. Each one gets a copy first, so no page
@@ -1366,6 +1390,11 @@ export function SiteEditor({
                                   )
                                 : `${layoutTitle(p.key, "")} (in another theme)`}
                           </li>
+                        ))}
+                        {savedPages.map((e) => (
+                          <li
+                            key={e.id}
+                          >{`${e.type === "post" ? "Post" : "Page"}: ${e.title || "(no title)"}`}</li>
                         ))}
                       </ul>
                     </>
@@ -1399,7 +1428,7 @@ export function SiteEditor({
                         })()
                       }
                     >
-                      {savedPlaces.length > 0
+                      {savedPlaces.length + savedPages.length > 0
                         ? "Keep it on these pages as copies, then delete"
                         : "Yes, delete it"}
                     </Button>
@@ -1613,7 +1642,7 @@ export function SiteEditor({
             .map((s) => (
               <li key={`saved-${s.id}`}>
                 <h3 style={{ fontSize: "1rem", margin: 0 }}>{s.name}</h3>
-                <small>{`My sections · ${placesWords(s.places)}`}</small>
+                <small>{`My sections · ${usedWords(s.places, s.pages)}`}</small>
                 <div className="oks-library-picture">
                   <iframe
                     title={`Picture of ${s.name}`}
