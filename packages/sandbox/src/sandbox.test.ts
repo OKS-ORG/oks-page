@@ -224,7 +224,9 @@ for (const { kind, open, skip } of openers) {
     );
 
     test("PL-11 plugin storage stops at its limit with a storage_limit error", async () => {
-      const r = await hook("storer", "content:afterSave", {});
+      // The plugin writes until the limit stops it (about 12 writes). The test is about the limit, not about how fast
+      // the database is: a database that stalls for a moment (a disk flush) must not turn this into a time-out.
+      const r = await host.call("storer", "hook", "content:afterSave", {}, { timeoutMs: 15_000 });
       if (!r.ok) console.log("storer failed:", JSON.stringify(r));
       const out = r.ok ? (r.result as { stoppedAfter: number; code?: string }) : null;
       expect(out?.code).toBe("storage_limit");
