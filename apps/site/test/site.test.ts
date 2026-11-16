@@ -8368,6 +8368,7 @@ describe.skipIf(!findBrowser())(
       expect(titles(first)).toEqual(Array.from({ length: 10 }, (_, i) => post(25 - i)));
       expect(first).toContain("Page 1 of 3");
       expect(first).toContain('href="/page/2"');
+      expect(first).toContain('aria-label="Page 1, this page"');
       expect(first).not.toContain("Newer posts");
       expect(first).not.toContain("Post 26");
       expect(first).not.toContain("Post 27");
@@ -8381,6 +8382,10 @@ describe.skipIf(!findBrowser())(
         /<a [^>]*href="\/"[^>]*rel="prev"|<a [^>]*rel="prev"[^>]*href="\/"/,
       );
       expect(secondHtml).toContain('href="/page/3"');
+      // The numbers: every page is a link except this one, which says so.
+      expect(secondHtml).toContain('aria-current="page" aria-label="Page 2, this page"');
+      expect(secondHtml).toMatch(/<a [^>]*href="\/"[^>]*aria-label="Page 1"/);
+      expect(secondHtml).toMatch(/<a [^>]*href="\/page\/3"[^>]*aria-label="Page 3"/);
       // It is a page of its own: its own title and canonical address, and it can be indexed.
       expect(secondHtml).toMatch(/<title>[^<]*Page 2[^<]*<\/title>/);
       expect(secondHtml).toContain(
@@ -8402,6 +8407,24 @@ describe.skipIf(!findBrowser())(
       await page.goto(site.base + "/page/2");
       await page.getByRole("navigation", { name: "Pages of posts" }).waitFor();
       expect(await axeViolations(page)).toEqual([]);
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        // Every number is at least 24 px tall and wide, and the page does not scroll sideways.
+        const boxes = await page
+          .getByRole("navigation", { name: "Pages of posts" })
+          .getByRole("link", { name: /^Page \d$/ })
+          .evaluateAll((links) =>
+            links.map((l) => [l.getBoundingClientRect().width, l.getBoundingClientRect().height]),
+          );
+        expect(boxes.length).toBe(2);
+        for (const [w, h] of boxes) expect(Math.min(w!, h!)).toBeGreaterThanOrEqual(24);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.getByRole("link", { name: "Page 3", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === "/page/3");
 
       // A page of 5: the owner changes "posts per page"; the pages are made again (25 posts, 5 pages).
       expect((await setReading({ perPage: 5 })).status()).toBe(200);

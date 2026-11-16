@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { pageCount, pagePath, pagingOf } from "./paging";
+import { pageCount, pageNumbers, pagePath, pagingOf } from "./paging";
 
 describe("addresses of the later pages of a list", () => {
   test("the list and the page number are read from the end of the address", () => {
@@ -41,5 +41,36 @@ describe("addresses of the later pages of a list", () => {
     expect(pageCount(11, 10)).toBe(2);
     expect(pageCount(25, 10)).toBe(3);
     expect(pageCount(5, 0)).toBe(5);
+  });
+});
+
+describe("the numbers under a list", () => {
+  test("a short list shows every number", () => {
+    expect(pageNumbers(1, 1)).toEqual([1]);
+    expect(pageNumbers(2, 5)).toEqual([1, 2, 3, 4, 5]);
+    expect(pageNumbers(1, 6)).toEqual([1, 2, 3, "gap", 6]);
+  });
+  test("a long list shows the first, the last and the pages near the current one", () => {
+    expect(pageNumbers(1, 20)).toEqual([1, 2, 3, "gap", 20]);
+    expect(pageNumbers(10, 20)).toEqual([1, "gap", 8, 9, 10, 11, 12, "gap", 20]);
+    expect(pageNumbers(20, 20)).toEqual([1, "gap", 18, 19, 20]);
+    expect(pageNumbers(999999, 999999)).toEqual([1, "gap", 999997, 999998, 999999]);
+  });
+  test("a hole of one page is filled, not shown as a gap", () => {
+    expect(pageNumbers(5, 9)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(pageNumbers(1, 5)).toEqual([1, 2, 3, 4, 5]);
+    expect(pageNumbers(7, 12)).toEqual([1, "gap", 5, 6, 7, 8, 9, "gap", 12]);
+  });
+  test("the current page is always in, and no number repeats", () => {
+    for (let pages = 1; pages <= 30; pages++)
+      for (let page = 1; page <= pages; page++) {
+        const out = pageNumbers(page, pages);
+        const numbers = out.filter((n): n is number => n !== "gap");
+        expect(numbers).toContain(page);
+        expect(new Set(numbers).size).toBe(numbers.length);
+        expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+        expect(numbers[0]).toBe(1);
+        expect(numbers.at(-1)).toBe(pages);
+      }
   });
 });

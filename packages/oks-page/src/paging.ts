@@ -25,3 +25,22 @@ export function pagePath(base: string, page: number): string {
 export function pageCount(total: number, perPage: number): number {
   return Math.max(1, Math.ceil(total / Math.max(1, perPage)));
 }
+
+/**
+ * The numbers to show under a list: the first page, the last page, and the pages next to the current one (two each side).
+ * A hole of one page is filled with that page (a gap sign for one page would be longer than the page), a bigger hole is
+ * "gap". Short lists show every number.
+ */
+export function pageNumbers(page: number, pages: number): (number | "gap")[] {
+  const wanted = new Set<number>([1, pages]);
+  for (let n = page - 2; n <= page + 2; n++) if (n >= 1 && n <= pages) wanted.add(n);
+  const sorted = [...wanted].sort((a, b) => a - b);
+  const out: (number | "gap")[] = [];
+  sorted.forEach((n, i) => {
+    const before = sorted[i - 1];
+    if (before !== undefined && n - before === 2) out.push(before + 1);
+    else if (before !== undefined && n - before > 2) out.push("gap");
+    out.push(n);
+  });
+  return out;
+}
