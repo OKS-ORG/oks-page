@@ -139,6 +139,7 @@ for (const { kind, open, skip } of openers) {
       expect(await publishDue(db.runner, everyone, () => T.getTime() + 30 * 60_000)).toEqual({
         published: [],
         blocked: [],
+        held: [],
       });
       const now = () => T.getTime() + 2 * HOUR;
       const run = await publishDue(db.runner, everyone, now);
@@ -150,7 +151,60 @@ for (const { kind, open, skip } of openers) {
       expect(done["published_at"]).not.toBeNull();
       expect((await row(later.id))["status"]).toBe("scheduled");
       // Running it again does nothing more.
-      expect(await publishDue(db.runner, everyone, now)).toEqual({ published: [], blocked: [] });
+      expect(await publishDue(db.runner, everyone, now)).toEqual({
+        published: [],
+        blocked: [],
+        held: [],
+      });
+    });
+
+    test("the page is checked again when the time comes: one that lost its content goes back to a draft with the reason; an administrator's set-aside is respected", async () => {
+      const emptied = await draft(anna, "Emptied");
+      const kept = await draft(anna, "Set aside");
+      await schedule(anna, emptied.id, 1, iso(T.getTime() + HOUR));
+      await saveContent(
+        db.runner,
+        anna,
+        siteId,
+        kept.id,
+        {
+          title: "T",
+          slugPart: kept.id.toLowerCase(),
+          status: "scheduled",
+          scheduledAt: iso(T.getTime() + HOUR),
+          blocks: [],
+          revision: 1,
+        },
+        () => T.getTime(),
+        { publishAnyway: true },
+      );
+      // The first one is changed after it was scheduled: its words are taken out and it is saved again.
+      await saveContent(
+        db.runner,
+        anna,
+        siteId,
+        emptied.id,
+        {
+          title: "T",
+          slugPart: emptied.id.toLowerCase(),
+          status: "scheduled",
+          scheduledAt: iso(T.getTime() + HOUR),
+          blocks: [],
+          revision: 2,
+        },
+        () => T.getTime(),
+      );
+      const run = await publishDue(db.runner, everyone, () => T.getTime() + 2 * HOUR);
+      expect(run.held.map((e) => e.id)).toEqual([emptied.id]);
+      expect(run.published.map((e) => e.id)).toEqual([kept.id]);
+      expect(run.blocked).toEqual([]);
+      const after = await row(emptied.id);
+      expect(after["status"]).toBe("draft");
+      expect(after["scheduled_at"]).toBeNull();
+      const revisions = await listRevisions(db.runner, anna, siteId, emptied.id);
+      if (!revisions.ok) throw new Error(revisions.message);
+      expect(revisions.revisions[0]!.summary).toMatch(/^Not published: .*no content yet/);
+      expect((await row(kept.id))["status"]).toBe("published");
     });
 
     test("two servers asking at once publish an entry only once", async () => {

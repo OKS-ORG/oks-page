@@ -5898,6 +5898,56 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
 
+    test("publish check: a scheduled page is checked when it is scheduled and every time it is saved again; the administrator's set-aside is remembered for the job", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Scheduled page",
+      });
+      const e = made.json as { id: string; slug: string; revision: number };
+      const words = [
+        {
+          id: "p1",
+          type: "paragraph",
+          props: {},
+          content: [{ type: "text", text: "Coming soon.", styles: {} }],
+          children: [],
+        },
+      ];
+      const when = new Date(Date.now() + 24 * 3_600_000).toISOString();
+      let revision = e.revision;
+      const schedule = (blocks: unknown[], extra = {}) =>
+        call(page, "PUT", `/api/admin/entries/${e.id}`, {
+          title: "Scheduled page",
+          slugPart: e.slug,
+          status: "scheduled",
+          scheduledAt: when,
+          blocks,
+          revision,
+          ...extra,
+        });
+      const rules = (r: { json: unknown }) =>
+        (r.json as { error: { problems: { rule: string }[] } }).error.problems.map((x) => x.rule);
+
+      // Nothing to publish: refused at once.
+      const first = await schedule([]);
+      expect(first.status).toBe(422);
+      expect(rules(first)).toEqual(["empty-body"]);
+      // With words it is scheduled.
+      const ok = await schedule(words);
+      expect(ok.status).toBe(200);
+      revision = (ok.json as { revision: number }).revision;
+      // Saved again as scheduled with the words taken out: checked again, not waved through.
+      const again = await schedule([]);
+      expect(again.status).toBe(422);
+      expect(rules(again)).toEqual(["empty-body"]);
+      // The administrator sets it aside: saved, and the page remembers it, so the job does not hold it back.
+      const anyway = await schedule([], { publishAnyway: true });
+      expect(anyway.status).toBe(200);
+      const meta = (await db.run(`select "meta" from "entries" where "id" = ?`, [e.id]))[0]!;
+      expect(JSON.stringify(meta["meta"])).toMatch(/publishAnyway\\?"?:\s*true/);
+    });
+
     test("publish check: going live with no content or a picture with no description is refused with a list; an administrator may go on anyway and it is logged; an editor may not", async () => {
       const page = await signedIn(owner);
       const make = async (title: string) => {

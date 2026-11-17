@@ -40,7 +40,8 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   const live = (status: unknown) => status === "published" || status === "scheduled";
   let setAside: PublishProblem[] = [];
   const mayGoLive = actor.can("content.publish_any") || actor.can("content.publish_own");
-  if (mayGoLive && live(input["status"]) && !live(before?.["status"])) {
+  // A page that is already published is not checked again; a scheduled one is, because it has not gone live yet.
+  if (mayGoLive && live(input["status"]) && before?.["status"] !== "published") {
     const problems = publishProblems(String(input["title"] ?? ""), input["blocks"]);
     if (problems.length > 0) {
       const may = mayPublishAnyway(actor);
@@ -59,14 +60,22 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       setAside = problems;
     }
   }
-  const result = await saveContent(runner, actor, member.siteId, id, {
-    title: String(input["title"] ?? ""),
-    slugPart: String(input["slugPart"] ?? ""),
-    status: String(input["status"] ?? ""),
-    scheduledAt: input["scheduledAt"] == null ? null : String(input["scheduledAt"]),
-    blocks: input["blocks"],
-    revision: Number(input["revision"]),
-  });
+  const result = await saveContent(
+    runner,
+    actor,
+    member.siteId,
+    id,
+    {
+      title: String(input["title"] ?? ""),
+      slugPart: String(input["slugPart"] ?? ""),
+      status: String(input["status"] ?? ""),
+      scheduledAt: input["scheduledAt"] == null ? null : String(input["scheduledAt"]),
+      blocks: input["blocks"],
+      revision: Number(input["revision"]),
+    },
+    undefined,
+    setAside.length > 0 ? { publishAnyway: true } : {},
+  );
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   if (setAside.length > 0) await recordPublishOverride(runner, actor, member.siteId, id, setAside);
   refreshEntry(id, result.slug, String(before?.["slug"] ?? result.slug));

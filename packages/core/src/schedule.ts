@@ -3,6 +3,7 @@
 // the permission of the person who scheduled it, checked at that moment: if they have lost it, the entry goes back to
 // a draft instead of going live. Two servers on one database never publish the same entry twice.
 import { newId, type SqlRunner } from "@oks-page/db";
+import { publishProblems } from "./publish-check.js";
 
 export interface DueEntry {
   id: string;
@@ -23,6 +24,8 @@ export interface PublishDueResult {
   published: DueEntry[];
   /** Scheduled by someone who may no longer publish: these went back to drafts. */
   blocked: DueEntry[];
+  /** Scheduled, but the page no longer passes the publish check: these went back to drafts, with the reason. */
+  held: DueEntry[];
 }
 
 const parseJson = (value: unknown): unknown =>
@@ -40,7 +43,7 @@ export async function publishDue(
       where "status" = 'scheduled' and "scheduled_at" <= ? order by "scheduled_at", "id" limit ${Math.min(Math.max(Math.trunc(limit), 1), 500)}`,
     [at],
   );
-  const result: PublishDueResult = { published: [], blocked: [] };
+  const result: PublishDueResult = { published: [], blocked: [], held: [] };
   for (const row of due) {
     const entry: DueEntry = {
       id: String(row["id"]),
@@ -54,7 +57,14 @@ export async function publishDue(
     const allowed =
       scheduler !== "" &&
       (await mayPublish({ siteId: entry.siteId, userId: scheduler, type: entry.type, authorId }));
-    const status = allowed ? "published" : "draft";
+    // The page may have been changed since it was scheduled: it is checked again, unless an administrator set the check
+    // aside when scheduling it.
+    const body = parseJson(row["body"]) as { blocks?: unknown } | null;
+    const problems =
+      allowed && meta["publishAnyway"] !== true
+        ? publishProblems(String(row["title"]), body?.blocks ?? [])
+        : [];
+    const status = allowed && problems.length === 0 ? "published" : "draft";
     // The status check in the update is what makes this safe with two servers: only one of them gets the row.
     const claimed = await runner.transaction(async (tx) => {
       const got = await tx.all(
@@ -76,9 +86,11 @@ export async function publishDue(
             status,
             body: parseJson(row["body"]),
           }),
-          allowed
-            ? "Published on schedule"
-            : "Not published: the person who scheduled it may no longer publish",
+          !allowed
+            ? "Not published: the person who scheduled it may no longer publish"
+            : problems.length > 0
+              ? `Not published: ${problems.map((p) => p.message).join(" ")}`
+              : "Published on schedule",
           // The copy belongs to the person who scheduled it, or to the author when that is not known.
           scheduler || authorId,
           at,
@@ -86,7 +98,10 @@ export async function publishDue(
       );
       return true;
     });
-    if (claimed) (allowed ? result.published : result.blocked).push(entry);
+    if (claimed)
+      (!allowed ? result.blocked : problems.length > 0 ? result.held : result.published).push(
+        entry,
+      );
   }
   return result;
 }

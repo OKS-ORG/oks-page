@@ -72,7 +72,7 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
     console.error("[oks] The email checks could not run:", error),
   );
   const result = await publishDue(getRunner(), mayPublish, now);
-  for (const entry of [...result.published, ...result.blocked])
+  for (const entry of [...result.published, ...result.blocked, ...result.held])
     await expireTags(entry.siteId, entry.id, entry.slug);
   if (now() - lastPurge >= PURGE_EVERY) {
     lastPurge = now();

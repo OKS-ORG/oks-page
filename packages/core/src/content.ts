@@ -323,7 +323,7 @@ export async function saveContent(
   id: string,
   input: SaveInput,
   now: () => number = Date.now,
-  options: { summary?: string } = {},
+  options: { summary?: string; publishAnyway?: boolean } = {},
 ): Promise<ContentResult<SavedContent>> {
   const row = (
     await runner.all(
@@ -373,6 +373,9 @@ export async function saveContent(
   const meta: Record<string, unknown> = { ...oldMeta };
   if (scheduledAt) meta["scheduledBy"] = actor.userId;
   else delete meta["scheduledBy"];
+  // An administrator who scheduled the page and set the publish check aside: the job does not hold it back again.
+  if (scheduledAt && options.publishAnyway === true) meta["publishAnyway"] = true;
+  else delete meta["publishAnyway"];
 
   const prefix = (await addressPrefix(runner, siteId, type)) ?? "";
   const slug = prefix + slugPart;
