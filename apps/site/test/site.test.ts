@@ -6062,6 +6062,20 @@ describe.skipIf(!findBrowser())(
         .waitFor();
       await panel.getByText(/The link "click here" does not say where it goes/).waitFor();
 
+      // Each message has a button that takes the keyboard to its block: the heading first, then the link.
+      const focusedBlock = () =>
+        page.evaluate(
+          () =>
+            (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-block-id]")
+              ?.dataset["blockId"] ?? null,
+        );
+      const goTo = panel.getByRole("button", { name: /^Go to / });
+      expect(await goTo.count()).toBe(2);
+      await goTo.nth(0).click();
+      await expect.poll(focusedBlock).toBe("h2");
+      await goTo.nth(1).click();
+      await expect.poll(focusedBlock).toBe("p1");
+
       // Fixed: the panel says so.
       await save([
         h2,
