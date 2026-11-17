@@ -34,7 +34,7 @@ export async function getSiteInfo(): Promise<SiteInfo> {
 
 export async function getLook(): Promise<Look> {
   // A static host has nothing to answer `/site-style/...`, so the page carries the CSS itself.
-  return { ...(await loadLook()), cssUrl: null };
+  return { ...(await loadLook()), cssUrl: null, styleFiles: false };
 }
 
 export async function getThemeLayouts(): Promise<ThemeLayouts | null> {

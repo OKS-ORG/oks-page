@@ -147,7 +147,9 @@ function checkOneBlock(
     return null;
   }
   const raw = candidate as Record<string, unknown>;
-  if (typeof raw.type !== "string" || !TYPE_RE.test(raw.type)) {
+  // The editor's own names have capital letters (bulletList, numberedList, taskList, codeBlock); a block of a plug-in
+  // is lower case. Both are allowed; anything else is not a block.
+  if (typeof raw.type !== "string" || !(BUILT_IN_TYPES.has(raw.type) || TYPE_RE.test(raw.type))) {
     repairs.add("removed_invalid_block");
     return null;
   }

@@ -35,6 +35,7 @@ export * from "./theme-contrast.js";
 export * from "./publish-check.js";
 export * from "./owner-fonts.js";
 export * from "./import-pages.js";
+export * from "./markdown-import.js";
 export * from "./saved-sections.js";
 export * from "./owner-layouts.js";
 export * from "./theme-export.js";

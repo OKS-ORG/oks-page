@@ -1,7 +1,8 @@
-// Importing pages and posts from a CSV file (spec 03, section 9). One row is one page or post. Every row goes through the
-// same paths as a page made in the editor: it is created as a draft and saved with the block checks, and a row that asks
-// to be published goes through the publish check (pull request 102), so an import can never put an empty page or a
-// picture with no description on the site. A row that does not pass is kept as a draft, with the reason in the report.
+// Importing pages and posts (spec 03, section 9): from a CSV file (one row is one page or post) or from Markdown files
+// (one file is one page or post). Every one goes through the same paths as a page made in the editor: it is created as a
+// draft and saved with the block checks, and one that asks to be published goes through the publish check (pull request
+// 102), so an import can never put an empty page or a picture with no description on the site. One that does not pass
+// is kept as a draft, with the reason in the report.
 import { newId, type SqlRunner } from "@oks-page/db";
 import { createDraft, saveContent, type Actor } from "./content.js";
 import { publishProblems } from "./publish-check.js";
@@ -47,22 +48,24 @@ export function parseCsv(input: string): string[][] {
 }
 
 export interface ImportItem {
-  /** The row's number in the file (the header is row 1). */
+  /** The row's number in the file (the header is row 1), or the file's number in a Markdown import. */
   row: number;
+  /** The file's name, for a Markdown import. */
+  name?: string;
   title: string;
   outcome: "created" | "skipped";
   /** What it is now: "published" or "draft". */
   status?: "published" | "draft";
   id?: string;
   slug?: string;
-  /** Why a row is not what was asked for, in plain words. */
+  /** Why it is not what was asked for, in plain words. */
   note?: string;
 }
 
 export interface ImportReport {
   created: number;
   published: number;
-  /** Rows that asked to be published and were kept as drafts. */
+  /** Ones that asked to be published and were kept as drafts. */
   keptAsDrafts: number;
   skipped: number;
   items: ImportItem[];
@@ -70,6 +73,124 @@ export interface ImportReport {
 
 export type ImportResult =
   ({ ok: true } & ImportReport) | { ok: false; code: "forbidden" | "invalid"; message: string };
+
+/** One page or post to import, whatever file it came from. */
+export interface ImportRow {
+  number: number;
+  name?: string;
+  title: string;
+  slug: string;
+  type: string;
+  /** What the file says: "draft", "published" or something else (a draft, with a note). */
+  status: string;
+  blocks: unknown[];
+}
+
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Creates every row through the editor's paths and writes the report and the audit line. */
+export async function importRows(
+  runner: SqlRunner,
+  actor: Actor,
+  siteId: string,
+  rows: ImportRow[],
+  source: "csv" | "markdown",
+  now: () => number = Date.now,
+): Promise<ImportReport> {
+  const mayPublish = (type: string) =>
+    actor.can("content.publish_any", type) || actor.can("content.publish_own", type);
+  const report: ImportReport = { created: 0, published: 0, keptAsDrafts: 0, skipped: 0, items: [] };
+  for (const item of rows) {
+    const { title, type, blocks } = item;
+    const label = { row: item.number, ...(item.name ? { name: item.name } : {}), title };
+    const skip = (note: string) => {
+      report.skipped++;
+      report.items.push({ ...label, outcome: "skipped", note });
+    };
+    if (!title) {
+      skip("It has no title.");
+      continue;
+    }
+    const made = await createDraft(runner, actor, siteId, { type, title }, now);
+    if (!made.ok) {
+      skip(made.message);
+      continue;
+    }
+    const notes: string[] = [];
+    let status: "published" | "draft" = "draft";
+    const wanted = item.status.trim().toLowerCase();
+    if (wanted === "published") {
+      const problems = publishProblems(title, blocks);
+      if (!mayPublish(type))
+        notes.push("You may not publish this kind of content, so it is a draft.");
+      else if (problems.length > 0) {
+        notes.push(`Kept as a draft. ${problems.map((p) => p.message).join(" ")}`);
+        report.keptAsDrafts++;
+      } else status = "published";
+    } else if (wanted !== "" && wanted !== "draft")
+      notes.push(`"${item.status.trim()}" is not a status, so it is a draft.`);
+
+    const given = item.slug.trim().toLowerCase();
+    const madePart = made.slug.slice(made.slug.lastIndexOf("/") + 1);
+    const wantedPart = given !== "" && SLUG.test(given) ? given : madePart;
+    if (given !== "" && wantedPart !== given)
+      notes.push("The address was not usable, so one was made from the title.");
+    const save = (slugPart: string) =>
+      saveContent(
+        runner,
+        actor,
+        siteId,
+        made.id,
+        { title, slugPart, status, scheduledAt: null, blocks, revision: made.revision },
+        now,
+      );
+    let saved = await save(wantedPart);
+    if (!saved.ok && saved.code === "slug_taken" && wantedPart !== madePart) {
+      notes.push("The address is already used, so one was made from the title.");
+      saved = await save(madePart);
+    }
+    report.created++;
+    if (!saved.ok) {
+      report.items.push({
+        ...label,
+        outcome: "created",
+        status: "draft",
+        id: made.id,
+        slug: made.slug,
+        note: `Saved as an empty draft: ${saved.message}`,
+      });
+      continue;
+    }
+    if (status === "published") report.published++;
+    report.items.push({
+      ...label,
+      outcome: "created",
+      status,
+      id: made.id,
+      slug: saved.slug,
+      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+    });
+  }
+  await runner.all(
+    `insert into "audit_log" ("id", "site_id", "actor_type", "actor_id", "action", "target_type", "target_id",
+      "detail", "created_at") values (?, ?, 'user', ?, 'content.import', 'site', ?, ?, ?)`,
+    [
+      newId(),
+      siteId,
+      actor.userId,
+      siteId,
+      JSON.stringify({
+        source,
+        created: report.created,
+        published: report.published,
+        keptAsDrafts: report.keptAsDrafts,
+        skipped: report.skipped,
+      }),
+      new Date(now()),
+    ],
+  );
+  return report;
+}
 
 const COLUMNS: Record<string, string[]> = {
   title: ["title", "name"],
@@ -80,7 +201,7 @@ const COLUMNS: Record<string, string[]> = {
 };
 
 /** Paragraphs from plain text: a blank line starts a new one, a single new line stays inside one. */
-function paragraphs(text: string): unknown[] {
+export function paragraphs(text: string): unknown[] {
   return text
     .split(/\r?\n\s*\r?\n/)
     .map((p) => p.replace(/\s*\r?\n\s*/g, " ").trim())
@@ -93,8 +214,6 @@ function paragraphs(text: string): unknown[] {
       children: [],
     }));
 }
-
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * Imports the rows of a CSV file. The first row names the columns: `title` (needed), and optionally `slug`, `type`
@@ -134,103 +253,13 @@ export async function importPagesFromCsv(
       message: `The file has ${rows.length} rows. At most ${MAX_IMPORT_ROWS} can be imported at once.`,
     };
   const cell = (row: string[], name: string) => (row[col(name)] ?? "").trim();
-  const mayPublish = (type: string) =>
-    actor.can("content.publish_any", type) || actor.can("content.publish_own", type);
-
-  const report: ImportReport = { created: 0, published: 0, keptAsDrafts: 0, skipped: 0, items: [] };
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
-    const number = i + 2;
-    const title = cell(row, "title");
-    const skip = (note: string) => {
-      report.skipped++;
-      report.items.push({ row: number, title, outcome: "skipped", note });
-    };
-    if (!title) {
-      skip("It has no title.");
-      continue;
-    }
-    const type = (cell(row, "type") || defaultType).toLowerCase();
-    const made = await createDraft(runner, actor, siteId, { type, title }, now);
-    if (!made.ok) {
-      skip(made.message);
-      continue;
-    }
-    const notes: string[] = [];
-    let status: "published" | "draft" = "draft";
-    const wanted = cell(row, "status").toLowerCase();
-    const blocks = paragraphs(row[col("content")] ?? "");
-    if (wanted === "published") {
-      const problems = publishProblems(title, blocks);
-      if (!mayPublish(type))
-        notes.push("You may not publish this kind of content, so it is a draft.");
-      else if (problems.length > 0) {
-        notes.push(`Kept as a draft. ${problems.map((p) => p.message).join(" ")}`);
-        report.keptAsDrafts++;
-      } else status = "published";
-    } else if (wanted !== "" && wanted !== "draft")
-      notes.push(`"${cell(row, "status")}" is not a status, so it is a draft.`);
-
-    const given = cell(row, "slug").toLowerCase();
-    const made_part = made.slug.slice(made.slug.lastIndexOf("/") + 1);
-    const wantedPart = given !== "" && SLUG.test(given) ? given : made_part;
-    if (given !== "" && wantedPart !== given)
-      notes.push("The address was not usable, so one was made from the title.");
-    const save = (slugPart: string) =>
-      saveContent(
-        runner,
-        actor,
-        siteId,
-        made.id,
-        { title, slugPart, status, scheduledAt: null, blocks, revision: made.revision },
-        now,
-      );
-    let saved = await save(wantedPart);
-    if (!saved.ok && saved.code === "slug_taken" && wantedPart !== made_part) {
-      notes.push("The address is already used, so one was made from the title.");
-      saved = await save(made_part);
-    }
-    if (!saved.ok) {
-      report.created++;
-      report.items.push({
-        row: number,
-        title,
-        outcome: "created",
-        status: "draft",
-        id: made.id,
-        slug: made.slug,
-        note: `Saved as an empty draft: ${saved.message}`,
-      });
-      continue;
-    }
-    report.created++;
-    if (status === "published") report.published++;
-    report.items.push({
-      row: number,
-      title,
-      outcome: "created",
-      status,
-      id: made.id,
-      slug: saved.slug,
-      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
-    });
-  }
-  await runner.all(
-    `insert into "audit_log" ("id", "site_id", "actor_type", "actor_id", "action", "target_type", "target_id",
-      "detail", "created_at") values (?, ?, 'user', ?, 'content.import', 'site', ?, ?, ?)`,
-    [
-      newId(),
-      siteId,
-      actor.userId,
-      siteId,
-      JSON.stringify({
-        created: report.created,
-        published: report.published,
-        keptAsDrafts: report.keptAsDrafts,
-        skipped: report.skipped,
-      }),
-      new Date(now()),
-    ],
-  );
-  return { ok: true, ...report };
+  const items: ImportRow[] = rows.map((row, i) => ({
+    number: i + 2,
+    title: cell(row, "title"),
+    slug: cell(row, "slug"),
+    type: (cell(row, "type") || defaultType).toLowerCase(),
+    status: cell(row, "status"),
+    blocks: paragraphs(row[col("content")] ?? ""),
+  }));
+  return { ok: true, ...(await importRows(runner, actor, siteId, items, "csv", now)) };
 }

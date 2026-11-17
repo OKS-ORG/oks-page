@@ -11,7 +11,11 @@ import {
   type PublicMenuItem,
 } from "@oks-page/core";
 import { Fragment, type ReactNode } from "react";
+import { HIDE_CSS } from "./hide-css";
 import { LINK, LookStyles, MenuList } from "./public-frame";
+import { styleFileUrl } from "./site-style";
+
+export { HIDE_CSS };
 
 /** What the layout needs to know about the page it draws. */
 export interface ThemedPageInfo {
@@ -33,10 +37,6 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * 1024 px, desktop from 1025 px. Mobile-first with min-width only (spec 06, section 4): a later rule wins, so a block
  * hidden on phone and tablet shows again from 1025 px. The wrapper takes no room of its own (display: contents).
  */
-export const HIDE_CSS =
-  ".oks-hide{display:contents}.oks-hide-phone{display:none}" +
-  "@media (min-width:768px){.oks-hide-phone{display:contents}.oks-hide-tablet{display:none}}" +
-  "@media (min-width:1025px){.oks-hide-tablet{display:contents}.oks-hide-desktop{display:none}}";
 const SCREEN_WORDS: Record<string, string> = {
   phone: "phone",
   tablet: "tablet",
@@ -289,7 +289,13 @@ export async function ThemedPage({
   return (
     <div lang={site.lang} dir={site.dir} className="oks-site">
       <LookStyles look={look} />
-      {hiding ? <style dangerouslySetInnerHTML={{ __html: HIDE_CSS }} /> : null}
+      {hiding ? (
+        look.styleFiles ? (
+          <link rel="stylesheet" href={styleFileUrl(HIDE_CSS)} />
+        ) : (
+          <style dangerouslySetInnerHTML={{ __html: HIDE_CSS }} />
+        )
+      ) : null}
       {before}
       {drawn}
     </div>

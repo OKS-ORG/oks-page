@@ -58,6 +58,8 @@ export interface Look {
   css: string;
   /** The owner's CSS as a file (`/site-style/<fingerprint>.css`), or null when it is written into the page. */
   cssUrl: string | null;
+  /** Whether the page may link to style files (`/site-style/...`): the server build yes, the export build no. */
+  styleFiles: boolean;
   logo: { url: string; width: number | null; height: number | null; alt: string } | null;
   /** Light only, dark only, or the visitor's device decides; and whether visitors get a switch. */
   colorMode: "light" | "dark" | "system";

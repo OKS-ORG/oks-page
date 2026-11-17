@@ -23,7 +23,8 @@ const work = join(site, ".export-build");
 
 /**
  * The font route is left out of the export, so the font files the pages use are written as plain files in `fonts/`: every
- * address of the form /fonts/<name>.woff2 found in the exported pages that is exactly one of the library's.
+ * address of the form /fonts/<name>.woff2 found in the exported pages that is exactly one of the library's, and the fonts
+ * the owner uploaded (`own-<kind>-<weight>-<16 letters>.woff2`), which are read from the database the export reads.
  */
 async function writeFontFiles(folder) {
   const core = join(site, "..", "..", "packages", "core", "dist");
@@ -31,6 +32,7 @@ async function writeFontFiles(folder) {
   const { fontFileByName } = await load("theme.js");
   const { FONT_FILES } = await load("font-files.js");
   const wanted = new Set();
+  const wantedOwn = new Set();
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
@@ -40,6 +42,11 @@ async function writeFontFiles(folder) {
           /\/fonts\/([a-z0-9-]+\.[0-9a-f]{16}\.woff2)/g,
         ))
           wanted.add(m[1]);
+      if (/\.(html|css|txt)$/.test(entry.name))
+        for (const m of readFileSync(path, "utf8").matchAll(
+          /\/fonts\/(own-(?:sans|serif|mono)-(?:400|700|vf)-[0-9a-f]{16}\.woff2)/g,
+        ))
+          wantedOwn.add(m[1]);
     }
   };
   walk(folder);
@@ -52,6 +59,26 @@ async function writeFontFiles(folder) {
       Buffer.from(FONT_FILES[found.file.sha256], "base64"),
     );
   }
+  await writeOwnerFontFiles(folder, wantedOwn);
+}
+
+/** The owner's own fonts used by the pages, written as plain files from the database the export reads. */
+async function writeOwnerFontFiles(folder, names) {
+  if (names.size === 0) return;
+  const core = join(site, "..", "..", "packages", "core", "dist");
+  const { loadOwnerFontFile } = await import(pathToFileURL(join(core, "index.js")).href);
+  const { getRunner } = await import("oks-page/db");
+  const runner = getRunner();
+  for (const name of names) {
+    const bytes = await loadOwnerFontFile(runner, name.slice(-22, -6));
+    if (!bytes) continue;
+    mkdirSync(join(folder, "fonts"), { recursive: true });
+    writeFileSync(join(folder, "fonts", name), bytes);
+  }
+  // The connection is closed so the script ends.
+  const native = globalThis.__oks?.native;
+  if (native?.kind === "postgres") await native.pool.end();
+  else native?.db.close();
 }
 
 rmSync(work, { recursive: true, force: true });

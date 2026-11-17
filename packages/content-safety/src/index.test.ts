@@ -192,6 +192,19 @@ test("EC-17 invalid type names remove the block", () => {
   }
 });
 
+test("EC-17b the editor's own names with capital letters (lists, code) are kept; a made-up name with capitals is not a block", () => {
+  const runs = [{ type: "text", text: "item", styles: {} }];
+  const types = ["bulletList", "numberedList", "taskList", "codeBlock"];
+  const kept = checkBlocks({
+    blocks: types.map((type, i) => block({ id: `b${i}`, type, content: runs })),
+  });
+  expect(kept.repairs).toEqual([]);
+  expect(kept.body.blocks.map((b) => b.type)).toEqual(types);
+  const refused = checkBlocks({ blocks: [block({ type: "MyOwnBlock" })] });
+  expect(refused.body.blocks).toEqual([]);
+  expect(refused.repairs).toContain("removed_invalid_block");
+});
+
 test("EC-18 props with functions or NaN are replaced by {}", () => {
   const withFn = checkBlocks({
     blocks: [block({ props: { onClick: () => {} } })],

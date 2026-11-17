@@ -25,7 +25,48 @@ interface ImportReply {
   published: number;
   keptAsDrafts: number;
   skipped: number;
-  items: { row: number; title: string; outcome: string; status?: string; note?: string }[];
+  items: {
+    row: number;
+    name?: string;
+    title: string;
+    outcome: string;
+    status?: string;
+    note?: string;
+  }[];
+}
+
+/** What an import did: the counts, and a line for each one that needs a word. */
+function ImportOutcome({
+  problem,
+  report,
+  segment,
+}: {
+  problem: string | null;
+  report: ImportReply | null;
+  segment: string;
+}) {
+  return (
+    <>
+      {problem ? <Alert color="danger" title="Not imported" description={problem} /> : null}
+      {report ? (
+        <section aria-label="Import report">
+          <p role="status">
+            {`${report.created} added (${report.published} published, ${report.created - report.published} drafts), ${report.skipped} skipped.`}{" "}
+            <a href={`/admin/${segment}`}>See the list</a>
+          </p>
+          <ul>
+            {report.items
+              .filter((item) => item.note || item.outcome === "skipped")
+              .map((item) => (
+                <li key={item.row}>
+                  {`${item.name ? `File ${item.name}` : `Row ${item.row}`}${item.title && !item.name ? ` (${item.title})` : ""}: ${item.note ?? ""}`}
+                </li>
+              ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
+  );
 }
 
 export function ContentList({
@@ -47,17 +88,12 @@ export function ContentList({
   const [importing, setImporting] = useState(false);
   const [importProblem, setImportProblem] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<ImportReply | null>(null);
+  const [markdownFiles, setMarkdownFiles] = useState<File[]>([]);
 
-  async function importCsv() {
-    if (!importFile) {
-      setImportProblem("Choose a CSV file first.");
-      return;
-    }
+  async function runImport(data: FormData) {
     setImporting(true);
     setImportProblem(null);
     setImportReport(null);
-    const data = new FormData();
-    data.append("file", importFile);
     data.append("type", type);
     try {
       const response = await fetch("/api/admin/import/pages", { method: "POST", body: data });
@@ -68,6 +104,28 @@ export function ContentList({
       setImportProblem("The site could not be reached. Check your connection and try again.");
     }
     setImporting(false);
+  }
+
+  async function importCsv() {
+    if (!importFile) {
+      setImportProblem("Choose a CSV file first.");
+      setImportReport(null);
+      return;
+    }
+    const data = new FormData();
+    data.append("file", importFile);
+    await runImport(data);
+  }
+
+  async function importMarkdown() {
+    if (markdownFiles.length === 0) {
+      setImportProblem("Choose one or more Markdown files first.");
+      setImportReport(null);
+      return;
+    }
+    const data = new FormData();
+    for (const file of markdownFiles) data.append("files", file);
+    await runImport(data);
   }
 
   /** Restores or deletes one trashed entry, then shows the list again. */
@@ -129,53 +187,65 @@ export function ContentList({
         </a>
       </nav>
       {canAdd && !inTrashView ? (
-        <details>
-          <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
-            Import from a CSV file
-          </summary>
-          <p>
-            The first row names the columns. Use <code>title</code> (needed), and if you like{" "}
-            <code>slug</code>, <code>type</code> (page or post), <code>status</code> (draft or
-            published) and <code>content</code> (a blank line starts a new paragraph). A row that
-            asks to be published is checked first: if it has no content or a picture with no
-            description, it is kept as a draft and the report says why.
-          </p>
-          <p>
-            <label htmlFor="import-file">CSV file</label>
-            <br />
-            <input
-              id="import-file"
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
-            />
-          </p>
-          <p>
-            <Button onPress={() => void importCsv()} isDisabled={importing}>
-              Import the file
-            </Button>
-          </p>
-          {importProblem ? (
-            <Alert color="danger" title="Not imported" description={importProblem} />
-          ) : null}
-          {importReport ? (
-            <section aria-label="Import report">
-              <p role="status">
-                {`${importReport.created} added (${importReport.published} published, ${importReport.created - importReport.published} drafts), ${importReport.skipped} skipped.`}{" "}
-                <a href={`/admin/${segment}`}>See the list</a>
-              </p>
-              <ul>
-                {importReport.items
-                  .filter((item) => item.note || item.outcome === "skipped")
-                  .map((item) => (
-                    <li key={item.row}>
-                      {`Row ${item.row}${item.title ? ` (${item.title})` : ""}: ${item.note ?? ""}`}
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          ) : null}
-        </details>
+        <div className="oks-imports">
+          <details>
+            <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
+              Import from a CSV file
+            </summary>
+            <p>
+              The first row names the columns. Use <code>title</code> (needed), and if you like{" "}
+              <code>slug</code>, <code>type</code> (page or post), <code>status</code> (draft or
+              published) and <code>content</code> (a blank line starts a new paragraph). A row that
+              asks to be published is checked first: if it has no content or a picture with no
+              description, it is kept as a draft and the report says why.
+            </p>
+            <p>
+              <label htmlFor="import-file">CSV file</label>
+              <br />
+              <input
+                id="import-file"
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+              />
+            </p>
+            <p>
+              <Button onPress={() => void importCsv()} isDisabled={importing}>
+                Import the file
+              </Button>
+            </p>
+            <ImportOutcome problem={importProblem} report={importReport} segment={segment} />
+          </details>
+          <details>
+            <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
+              Import from Markdown files
+            </summary>
+            <p>
+              One file is one {singular}. A block of lines between two <code>---</code> lines at the
+              top may give <code>title</code>, <code>slug</code>, <code>type</code> and{" "}
+              <code>status</code>; without a title, the first heading or the file name is used.
+              Headings, lists, quotes, code, pictures, bold, italic and links are kept. Pictures are
+              not downloaded, and a picture with no description keeps a {singular} from going live.
+            </p>
+            <p>
+              <label htmlFor="import-md">Markdown files</label>
+              <br />
+              <input
+                id="import-md"
+                type="file"
+                multiple
+                accept=".md,.markdown,text/markdown"
+                onChange={(event) => setMarkdownFiles(Array.from(event.target.files ?? []))}
+              />
+            </p>
+            <p>
+              <Button onPress={() => void importMarkdown()} isDisabled={importing}>
+                Import the files
+              </Button>
+            </p>
+            <ImportOutcome problem={importProblem} report={importReport} segment={segment} />
+          </details>
+        </div>
       ) : null}
       {problem && inTrashView ? (
         <Alert color="danger" title="Not done" description={problem} />

@@ -446,6 +446,8 @@ for (const { kind, skip } of openers) {
     let db: TestDb;
     let site: Awaited<ReturnType<typeof startSite>>;
     let out = "";
+    let ownFont: Buffer = Buffer.alloc(0);
+    let ownKey = "";
     const SITE_URL = "https://example.test";
 
     // What a visitor sees: the title, the canonical address and the page content, without the framework's own scripts.
@@ -511,10 +513,38 @@ for (const { kind, skip } of openers) {
         ],
       );
       // The text font is one of the library, so the export has to carry its files.
-      await db.run(
-        "insert into settings (site_id, key, value, revision, updated_at) values (?, 'theme', ?, 1, ?)",
-        [s.site, JSON.stringify({ bodyFont: "inter" }), new Date()],
-      );
+      // The headings use a font the owner uploaded, so the export has to carry that file too.
+      const { createHash } = await import("node:crypto");
+      ownFont = Buffer.alloc(200);
+      ownFont.write("wOF2", 0, "latin1");
+      ownFont.writeUInt32BE(200, 8);
+      ownFont.writeUInt16BE(5, 12);
+      ownFont.writeUInt32BE(4242, 20);
+      const sha = createHash("sha256").update(ownFont).digest("hex");
+      ownKey = `own-serif-700-${sha.slice(0, 16)}`;
+      for (const [key, value] of [
+        ["theme", { bodyFont: "inter", headingFont: ownKey }],
+        [
+          "owner-fonts",
+          [
+            {
+              key: ownKey,
+              name: "Export Serif",
+              kind: "serif",
+              weight: "700",
+              sha256: sha,
+              bytes: 200,
+              addedBy: "x",
+              addedAt: new Date().toISOString(),
+            },
+          ],
+        ],
+        [`owner-font-file:${sha.slice(0, 16)}`, { data: ownFont.toString("base64") }],
+      ] as const)
+        await db.run(
+          "insert into settings (site_id, key, value, revision, updated_at) values (?, ?, ?, 1, ?)",
+          [s.site, key, JSON.stringify(value), new Date()],
+        );
       site = await startSite(kind, db, { OKS_SITE_URL: SITE_URL });
       out = mkdtempSync(join(tmpdir(), "oks-exp-out-"));
       buildExport(kind, db, out, { OKS_SITE_URL: SITE_URL });
@@ -536,7 +566,10 @@ for (const { kind, skip } of openers) {
       ].sort();
       // Inter, Latin, regular and bold: nothing else, and nothing from another host.
       expect(names).toHaveLength(2);
-      expect(readdirSync(join(out, "fonts")).sort()).toEqual(names);
+      // The owner's own font is there too, byte for byte; nothing else is in the folder.
+      expect(readdirSync(join(out, "fonts")).sort()).toEqual([...names, `${ownKey}.woff2`].sort());
+      expect(home).toContain(`/fonts/${ownKey}.woff2`);
+      expect(readFileSync(join(out, "fonts", `${ownKey}.woff2`)).equals(ownFont)).toBe(true);
       for (const name of names) {
         const bytes = readFileSync(join(out, "fonts", name));
         expect(bytes.subarray(0, 4).toString()).toBe("wOF2");
@@ -6440,6 +6473,8 @@ describe.skipIf(!findBrowser())(
       // The page does not carry the text itself any more.
       expect(html).not.toContain("--oks-color-primary-700");
       expect(html).not.toContain("letter-spacing");
+      // A public page of the server build carries no inline style element at all.
+      expect(html).not.toMatch(/<style[\s>]/);
       const file = await fetch(site.base + href!);
       expect(file.status).toBe(200);
       expect(file.headers.get("content-type")).toBe("text/css; charset=utf-8");
@@ -6509,6 +6544,44 @@ describe.skipIf(!findBrowser())(
         `select "detail" from "audit_log" where "action" = 'content.import'`,
       );
       expect(log.length).toBeGreaterThan(0);
+    });
+
+    test("importing Markdown files: the screen takes several files and reports each; the published one is public with its list, a picture with no description keeps its page a draft", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/pages");
+      await page.getByText("Import from Markdown files").click();
+      await page.locator("#import-md").setInputFiles([
+        {
+          name: "from-markdown.md",
+          mimeType: "text/markdown",
+          buffer: Buffer.from(
+            "---\nstatus: published\nslug: from-markdown\n---\n# From Markdown\n\nSome **bold** words.\n\n- first item\n- second item\n",
+          ),
+        },
+        {
+          name: "no-description.md",
+          mimeType: "text/markdown",
+          buffer: Buffer.from(
+            "---\nstatus: published\n---\n# Markdown picture page\n\n![](/uploads/none.png)\n",
+          ),
+        },
+      ]);
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByRole("button", { name: "Import the files" }).click();
+      const report = page.getByRole("region", { name: "Import report" });
+      await report.getByText(/2 added \(1 published, 1 drafts\), 0 skipped\./).waitFor();
+      await report
+        .getByText(/File no-description\.md: Kept as a draft\. Picture 1 has no description/)
+        .waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      const live = await fetch(site.base + "/from-markdown");
+      expect(live.status).toBe(200);
+      const html = await live.text();
+      expect(html).toContain("<strong>bold</strong>");
+      expect(html).toContain("<ul><li>first item</li><li>second item</li></ul>");
+      await page.goto(site.base + "/admin/pages");
+      await page.getByRole("link", { name: "From Markdown" }).waitFor();
+      await page.getByRole("link", { name: "Markdown picture page" }).waitFor();
     });
 
     test("security headers: every page and API answer says where it may be framed, its base address and where forms may send; the upload and font files keep their own stricter policy", async () => {
@@ -7146,7 +7219,15 @@ describe.skipIf(!findBrowser())(
       expect(await axeViolations(visitor)).toEqual([]);
 
       // Every mix of screens, with the CSS the site writes, at the edges of each size.
-      const css = /<style>(\.oks-hide\{[^<]*)<\/style>/.exec(home)?.[1];
+      // The rules that hide a block are a file the page links to, not text inside the page.
+      expect(home).not.toMatch(/<style[\s>]/);
+      let css: string | undefined;
+      for (const m of home.matchAll(
+        /<link rel="stylesheet" href="(\/site-style\/[0-9a-f]{16}\.css)"/g,
+      )) {
+        const text = await (await fetch(site.base + m[1]!)).text();
+        if (text.startsWith(".oks-hide{")) css = text;
+      }
       expect(css).toBeTruthy();
       const mixes = [
         ["phone"],
