@@ -1,5 +1,5 @@
 // Settings > Look, for a signed-in member who may manage the settings: the main color, the fonts and the logo.
-import { isSetupDone, loadContrastWarnings, loadThemeStyles } from "@oks-page/core";
+import { isSetupDone, loadContrastWarnings, loadOwnerFonts, loadThemeStyles } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -23,6 +23,9 @@ export default async function LookSettingsPage() {
   if (!actor.can("settings.manage")) redirect("/admin");
   const styles = await loadThemeStyles(getRunner(), member.siteId);
   const warnings = await loadContrastWarnings(getRunner(), member.siteId);
+  const ownerFonts = (await loadOwnerFonts(getRunner(), member.siteId)).map(
+    ({ key, name, kind, weight, bytes }) => ({ key, name, kind, weight, bytes }),
+  );
   let logo: LogoPreview | null = null;
   if (styles.logoMediaId) {
     const found = await getRunner().all(
@@ -46,7 +49,7 @@ export default async function LookSettingsPage() {
       breadcrumbs={[{ label: "Settings" }, { label: "Look" }]}
     >
       <SettingsLinks current="look" />
-      <LookForm initial={styles} logo={logo} warnings={warnings} />
+      <LookForm initial={styles} logo={logo} warnings={warnings} ownerFonts={ownerFonts} />
     </AdminFrame>
   );
 }

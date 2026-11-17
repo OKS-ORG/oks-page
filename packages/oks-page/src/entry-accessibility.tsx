@@ -22,7 +22,14 @@ export function goToBlock(blockId: string): boolean {
   return true;
 }
 
-export function EntryAccessibility({ blocks }: { blocks: unknown[] }) {
+export function EntryAccessibility({
+  blocks,
+  onMarkDecorative,
+}: {
+  blocks: unknown[];
+  /** Marks a picture as only decoration (so it needs no description). */
+  onMarkDecorative?: (blockId: string) => void;
+}) {
   const issues = checkAccessibility(blocks as CheckedBlock[]);
   return (
     <section aria-label="Accessibility check" className="oks-a11y-check">
@@ -42,6 +49,14 @@ export function EntryAccessibility({ blocks }: { blocks: unknown[] }) {
                 <Button size="sm" onPress={() => goToBlock(issue.blockId)}>
                   Go to {issue.where}
                 </Button>
+                {issue.rule === "missing-alt" && onMarkDecorative ? (
+                  <>
+                    {" "}
+                    <Button size="sm" onPress={() => onMarkDecorative(issue.blockId)}>
+                      Mark {issue.where} as decoration
+                    </Button>
+                  </>
+                ) : null}
               </li>
             ))}
           </ul>

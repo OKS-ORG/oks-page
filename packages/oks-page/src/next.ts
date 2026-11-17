@@ -11,6 +11,24 @@ const { name, version } = JSON.parse(
 
 const unique = <T>(list: T[]): T[] => [...new Set(list)];
 
+/**
+ * The rules every page and API answer carries (spec 05, section 5; step one of the content security policy). They
+ * decide where a page may be framed, which address it is based on, where its forms may send data and that no plug-in
+ * object runs: none of them needs a decision about scripts or styles, so they cannot break a page. The rules about
+ * scripts and styles come with the CSS served as a file (TH-49). Files under /uploads and /fonts set their own, stricter
+ * policy and are left out.
+ */
+export const SECURITY_HEADERS = [
+  {
+    key: "Content-Security-Policy",
+    value: "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'",
+  },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+
 export function withOksPage(config: NextConfig = {}): NextConfig {
   // OKS_BUILD=export builds the public pages as plain files (static mode). The data module is the one file that differs.
   const exportBuild = process.env["OKS_BUILD"] === "export";
@@ -45,7 +63,11 @@ export function withOksPage(config: NextConfig = {}): NextConfig {
               source,
               headers: [{ key: "Cache-Control", value: "private, no-store" }],
             }));
-            return [...mine, ...(headers ? await headers() : [])];
+            const everywhere = {
+              source: "/((?!uploads/|fonts/|_next/).*)",
+              headers: SECURITY_HEADERS,
+            };
+            return [everywhere, ...mine, ...(headers ? await headers() : [])];
           },
         }),
     // The database drivers are native or Node-only, so they are not bundled. The package is compiled code in

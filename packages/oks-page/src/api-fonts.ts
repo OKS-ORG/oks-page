@@ -3,12 +3,20 @@
 // they never change under a name, so they are cached for a year. Nothing here reads the database or the visitor.
 import { createHash } from "node:crypto";
 import { fontFileByName } from "@oks-page/core/theme";
+import { loadOwnerFontFile } from "@oks-page/core";
+import { getRunner } from "./db";
 
 const notFound = () => new Response("Not found", { status: 404 });
 const checked = new Map<string, Uint8Array>();
 
 export async function GET(_request: Request, context: { params: Promise<{ file: string }> }) {
   const { file: name } = await context.params;
+  // A font the owner uploaded: `own-<kind>-<weight>-<16 letters>.woff2`, read from the site's own settings.
+  const own = /^own-(?:sans|serif|mono)-(?:400|700|vf)-([0-9a-f]{16})\.woff2$/.exec(name);
+  if (own) {
+    const data = await loadOwnerFontFile(getRunner(), own[1]!);
+    return data ? fontResponse(data) : notFound();
+  }
   const found = fontFileByName(name);
   if (!found) return notFound();
   let bytes = checked.get(found.file.sha256);
@@ -21,6 +29,10 @@ export async function GET(_request: Request, context: { params: Promise<{ file: 
     bytes = data;
     checked.set(found.file.sha256, bytes);
   }
+  return fontResponse(bytes);
+}
+
+function fontResponse(bytes: Uint8Array): Response {
   return new Response(bytes as unknown as BodyInit, {
     status: 200,
     headers: {

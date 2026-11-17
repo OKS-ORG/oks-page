@@ -176,6 +176,17 @@ function InsertFromLibrary({ insertImage }: { insertImage: (src: string, alt: st
   );
 }
 
+/** The blocks with one picture marked as decoration (found at any depth). */
+function markDecorative(blocks: { id: string }[], blockId: string): unknown[] {
+  return blocks.map((b) => {
+    const block = b as { id: string; props?: Record<string, unknown>; children?: { id: string }[] };
+    const children = block.children ? markDecorative(block.children, blockId) : block.children;
+    return block.id === blockId
+      ? { ...block, props: { ...block.props, decorative: true }, children }
+      : { ...block, children };
+  });
+}
+
 export function EntryEditScreen(props: EntryEditScreenProps) {
   const [title, setTitle] = useState(props.title);
   const [slugPart, setSlugPart] = useState(props.slugPart);
@@ -191,6 +202,8 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
   // Autosave: a counter that goes up with every change, and the latest content to send.
   const [changes, setChanges] = useState(0);
   const blocksNow = useRef(props.blocks);
+  // The editor's way to replace its content, kept for the buttons outside it (the accessibility check).
+  const replaceBlocksNow = useRef<((blocks: Block[]) => void) | null>(null);
   const typed = useRef({ title, slugPart });
   typed.current = { title, slugPart };
   const firstRender = useRef(true);
@@ -357,28 +370,38 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           setChanges((n) => n + 1);
         }}
         savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
-        toolbar={({ insertImage, insertBlocks, replaceBlocks }) => (
-          <>
-            <InsertFromLibrary insertImage={insertImage} />
-            <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
-            <UnsavedCopyBanner
-              copy={unsaved}
-              timeZone={props.timeZone ?? null}
-              onBringBack={(copy) => {
-                setTitle(copy.title);
-                replaceBlocks(copy.blocks);
-                forgetUnsaved();
-              }}
-              onThrowAway={() => {
-                forgetUnsaved();
-                void fetch(`/api/admin/entries/${props.id}/autosave`, { method: "DELETE" });
-              }}
-            />
-          </>
-        )}
+        toolbar={({ insertImage, insertBlocks, replaceBlocks }) => {
+          replaceBlocksNow.current = replaceBlocks;
+          return (
+            <>
+              <InsertFromLibrary insertImage={insertImage} />
+              <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
+              <UnsavedCopyBanner
+                copy={unsaved}
+                timeZone={props.timeZone ?? null}
+                onBringBack={(copy) => {
+                  setTitle(copy.title);
+                  replaceBlocks(copy.blocks);
+                  forgetUnsaved();
+                }}
+                onThrowAway={() => {
+                  forgetUnsaved();
+                  void fetch(`/api/admin/entries/${props.id}/autosave`, { method: "DELETE" });
+                }}
+              />
+            </>
+          );
+        }}
         onSave={(blocks) => send(blocks, false)}
       />
-      <EntryAccessibility blocks={blocksNow.current} />
+      <EntryAccessibility
+        blocks={blocksNow.current}
+        onMarkDecorative={(blockId) =>
+          replaceBlocksNow.current?.(
+            markDecorative(blocksNow.current as { id: string }[], blockId) as Block[],
+          )
+        }
+      />
       {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
       <EntryLayoutPanel id={props.id} />
       <EntrySeoPanel id={props.id} />

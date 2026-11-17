@@ -159,7 +159,9 @@ function blockHtml(block: Block, ctx: Context): string {
     case "image": {
       const src = str(p["src"]).trim();
       if (!isSafeUrl(src)) return "";
-      const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(str(p["alt"]))}" loading="lazy">`;
+      // A picture marked as decoration has an empty description, so a screen reader skips it.
+      const alt = p["decorative"] === true ? "" : str(p["alt"]);
+      const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy">`;
       const caption = str(p["caption"]);
       return caption
         ? `<figure>${img}<figcaption>${escapeHtml(caption)}</figcaption></figure>`
@@ -241,7 +243,7 @@ function blockText(block: Block, depth: number, lines: string[]): void {
   };
   switch (block.type) {
     case "image":
-      push(str(p["alt"]) + " " + str(p["caption"]));
+      push((p["decorative"] === true ? "" : str(p["alt"])) + " " + str(p["caption"]));
       break;
     case "embed":
     case "video":

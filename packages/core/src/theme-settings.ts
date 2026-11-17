@@ -8,6 +8,7 @@ import {
   FONT_CHOICES,
   isColorMode,
   isLibraryFont,
+  isOwnFont,
   parseHex,
   stylesToCss,
   type ThemeStyles,
@@ -21,7 +22,8 @@ export type ThemeResult<T> =
 
 /** A system font or a font of the built-in library. */
 const isFont = (value: unknown): value is string =>
-  typeof value === "string" && ((FONT_CHOICES as string[]).includes(value) || isLibraryFont(value));
+  typeof value === "string" &&
+  ((FONT_CHOICES as string[]).includes(value) || isLibraryFont(value) || isOwnFont(value));
 const isMainColor = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) && parseHex(value) !== null;
 
@@ -75,6 +77,25 @@ export async function loadThemeStyles(runner: SqlRunner, siteId: string): Promis
 /** The CSS the public pages carry; empty while the site still has the built-in look. */
 export async function loadThemeCss(runner: SqlRunner, siteId: string): Promise<string> {
   return stylesToCss(await loadThemeStyles(runner, siteId));
+}
+
+/** A font of the owner's own may be chosen only while the site still has it. */
+async function mayUseFont(runner: SqlRunner, siteId: string, font: string): Promise<boolean> {
+  if (!isOwnFont(font)) return true;
+  const rows = await runner.all(
+    `select "value" from "settings" where "site_id" = ? and "key" = ?`,
+    [siteId, "owner-fonts"],
+  );
+  const raw = rows[0]?.["value"];
+  let list: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      list = null;
+    }
+  }
+  return Array.isArray(list) && list.some((f) => (f as { key?: unknown } | null)?.key === font);
 }
 
 /** Saves the look; only the parts that are given change. Needs `settings.manage`. */
@@ -131,12 +152,14 @@ export async function saveThemeStyles(
   }
   let bodyFont = current.bodyFont;
   if (input.bodyFont !== undefined) {
-    if (!isFont(input.bodyFont)) return bad("bodyFont", "Choose a font from the list.");
+    if (!isFont(input.bodyFont) || !(await mayUseFont(runner, siteId, input.bodyFont)))
+      return bad("bodyFont", "Choose a font from the list.");
     bodyFont = input.bodyFont;
   }
   let headingFont = current.headingFont;
   if (input.headingFont !== undefined) {
-    if (!isFont(input.headingFont)) return bad("headingFont", "Choose a font from the list.");
+    if (!isFont(input.headingFont) || !(await mayUseFont(runner, siteId, input.headingFont)))
+      return bad("headingFont", "Choose a font from the list.");
     headingFont = input.headingFont;
   }
 

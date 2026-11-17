@@ -6136,6 +6136,51 @@ describe.skipIf(!findBrowser())(
       await panel.getByText("Nothing to fix. This page reads well for everyone.").waitFor();
     });
 
+    test("accessibility check: a picture with no description can be marked as decoration from the panel; the page then passes the publish check and the public page has an empty description", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Decor page",
+      });
+      const info = made.json as { id: string; slug: string; revision: number };
+      const blocks = [
+        {
+          id: "p1",
+          type: "paragraph",
+          props: {},
+          content: [{ type: "text", text: "Words.", styles: {} }],
+          children: [],
+        },
+        {
+          id: "i1",
+          type: "image",
+          props: { src: "/uploads/none.png", alt: "" },
+          content: null,
+          children: [],
+        },
+      ];
+      const saved = await call(page, "PUT", `/api/admin/entries/${info.id}`, {
+        title: "Decor page",
+        slugPart: info.slug,
+        status: "draft",
+        blocks,
+        revision: info.revision,
+      });
+      expect(saved.status).toBe(200);
+      await page.goto(site.base + `/admin/pages/${info.id}`);
+      await page.getByRole("heading", { name: "Edit: Decor page", level: 1 }).waitFor();
+      const panel = page.getByRole("region", { name: "Accessibility check" });
+      await panel.getByText(/This picture has no description/).waitFor();
+      await panel.getByRole("button", { name: /^Mark Picture 1 as decoration/ }).click();
+      await panel.getByText("Nothing to fix. This page reads well for everyone.").waitFor();
+      // Published: it is no longer stopped for the missing description, and the public page has alt="".
+      await page.getByLabel("Published (everyone sees it)").check({ force: true });
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.locator(".oks-entry-actions [role=status]").getByText("Saved.").waitFor();
+      const html = await (await fetch(site.base + "/" + info.slug)).text();
+      expect(html).toMatch(/<img src="\/uploads\/none\.png" alt=""/);
+    });
+
     test("saved sections in page content: place one as a copy or linked in the editor; a change published in Design reaches the page; deleting the section keeps the page the same", async () => {
       const page = await signedIn(owner);
       // A theme must be installed to publish a section (Publish belongs to a theme's design).
@@ -6275,6 +6320,114 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Remove Plain" }).click();
       await page.getByRole("button", { name: "Yes, remove Plain" }).click();
       await page.getByText("Plain is removed.").waitFor();
+    });
+
+    test("own fonts: the owner adds a woff2 font on the Look screen, chooses it, the public page carries its rule and the file is served from the site; a file that is not a font is refused; a font in use cannot be removed", async () => {
+      const page = await signedIn(owner);
+      // A file with the shape of a woff2 font (signature, length, tables).
+      const font = Buffer.alloc(200);
+      font.write("wOF2", 0, "latin1");
+      font.writeUInt32BE(200, 8);
+      font.writeUInt16BE(5, 12);
+      font.writeUInt32BE(77, 20);
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      await page.getByText("You have not added a font of your own yet.").waitFor();
+
+      // Not a font: refused in plain words, nothing kept.
+      await page.locator("#own-font-file").setInputFiles({
+        name: "notes.woff2",
+        mimeType: "font/woff2",
+        buffer: Buffer.from("<svg onload=alert(1)>".padEnd(120)),
+      });
+      await page.locator("#own-font-name").fill("Garden Sans");
+      await page.getByLabel("I have the right to use this font on my site").check();
+      await page.getByRole("button", { name: "Add the font" }).click();
+      await page.getByText("This is not a .woff2 font file.").waitFor();
+
+      // Without the word about the licence: refused.
+      await page.locator("#own-font-file").setInputFiles({
+        name: "garden.woff2",
+        mimeType: "font/woff2",
+        buffer: font,
+      });
+      await page.getByLabel("I have the right to use this font on my site").uncheck();
+      await page.getByRole("button", { name: "Add the font" }).click();
+      await page
+        .getByText("Confirm that you have the right to use this font on your site.")
+        .waitFor();
+
+      // A real one: added, listed, and offered in the font lists.
+      await page.getByLabel("I have the right to use this font on my site").check();
+      await page.getByRole("button", { name: "Add the font" }).click();
+      await page
+        .getByText("Garden Sans is added. Choose it in the lists above, then save.")
+        .waitFor();
+      await page.getByRole("button", { name: "Remove Garden Sans" }).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByLabel("Font for text").selectOption({ label: "Garden Sans (Regular)" });
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await page.getByText("Saved. Your site shows the new look now.").waitFor();
+
+      // The public page carries the rule and the variable; the file is served from the site, safely and cached.
+      const list = (await call(page, "GET", "/api/admin/fonts")).json as {
+        fonts: { key: string; name: string }[];
+      };
+      expect(list.fonts.map((f) => f.name)).toEqual(["Garden Sans"]);
+      const key = list.fonts[0]!.key;
+      const home = await (await fetch(site.base + "/")).text();
+      expect(home).toContain(`@font-face{font-family:"oks-${key}"`);
+      expect(home).toContain(`--oks-site-font-body:"oks-${key}"`);
+      const file = await fetch(site.base + `/fonts/${key}.woff2`);
+      expect(file.status).toBe(200);
+      expect(file.headers.get("content-type")).toBe("font/woff2");
+      expect(file.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(file.headers.get("cache-control")).toMatch(/immutable/);
+      expect(Buffer.from(await file.arrayBuffer()).equals(font)).toBe(true);
+      expect((await fetch(site.base + "/fonts/own-sans-400-0000000000000000.woff2")).status).toBe(
+        404,
+      );
+
+      // In use: cannot be removed (the answer says why), and the file stays.
+      const refused = await call(page, "DELETE", `/api/admin/fonts/${key}`);
+      expect(refused.status).toBe(409);
+      expect((refused.json as { error: { message: string } }).error.message).toMatch(
+        /is used by your site/,
+      );
+      expect((await fetch(site.base + `/fonts/${key}.woff2`)).status).toBe(200);
+
+      // Choose another font, then it can be removed; the file is gone.
+      await page.reload();
+      await page.getByLabel("Font for text").selectOption("system-serif");
+      await page.getByRole("button", { name: "Save the look" }).click();
+      await page.getByText("Saved. Your site shows the new look now.").waitFor();
+      await page.getByRole("button", { name: "Remove Garden Sans" }).click();
+      await page.getByText("Garden Sans is removed.").waitFor();
+      expect((await fetch(site.base + `/fonts/${key}.woff2`)).status).toBe(404);
+    });
+
+    test("security headers: every page and API answer says where it may be framed, its base address and where forms may send; the upload and font files keep their own stricter policy", async () => {
+      const rules =
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'";
+      for (const path of ["/", "/admin/login", "/api/admin/settings/theme", "/robots.txt"]) {
+        const res = await fetch(site.base + path);
+        expect(res.headers.get("content-security-policy"), path).toBe(rules);
+        expect(res.headers.get("x-frame-options"), path).toBe("SAMEORIGIN");
+        expect(res.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+        expect(res.headers.get("permissions-policy"), path).toBe(
+          "camera=(), microphone=(), geolocation=()",
+        );
+      }
+      // The admin and the API are still never stored by a CDN.
+      expect((await fetch(site.base + "/admin/login")).headers.get("cache-control")).toBe(
+        "private, no-store",
+      );
+      // A library font file keeps its own, stricter policy (not doubled).
+      const font = await fetch(site.base + "/fonts/inter-latin-400.0000000000000000.woff2");
+      expect(font.status).toBe(404);
+      const page = await signedIn(owner);
+      const live = await page.goto(site.base + "/admin/settings/look");
+      expect(live!.headers()["content-security-policy"]).toBe(rules);
     });
 
     test("contrast warning: a theme whose text color is weak in dark mode is flagged on the Look screen, only for the modes a visitor can reach", async () => {

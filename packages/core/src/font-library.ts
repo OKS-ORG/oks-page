@@ -5,6 +5,7 @@
 import { FONT_LIBRARY_LIST } from "./font-library-list.js";
 
 export type FontKind = "sans" | "serif" | "mono";
+export const FONT_KINDS = ["sans", "serif", "mono"] as const;
 
 export interface LibraryFontFile {
   /** "latin" or "devanagari": the part of the alphabet the file holds. */
@@ -45,6 +46,29 @@ export const FONT_FALLBACKS: Record<FontKind, string> = {
   sans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   serif: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif',
   mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+};
+
+/**
+ * A font the owner uploaded is chosen by a key that carries what the page needs to draw it: `own-<kind>-<weight>-<16
+ * letters of the file's fingerprint>`, weight being 400, 700 or `vf` (a font with every weight). Nothing else is needed
+ * to write its rules, so the page code never has to look anything up.
+ */
+export const OWN_FONT_KEY = /^own-(sans|serif|mono)-(400|700|vf)-([0-9a-f]{16})$/;
+export const isOwnFont = (key: unknown): key is string =>
+  typeof key === "string" && OWN_FONT_KEY.test(key);
+/** The name CSS uses for an owner's font: never the owner's own text. */
+export const ownFontFamily = (key: string): string => `oks-${key}`;
+export const ownFontStack = (key: string): string => {
+  const m = OWN_FONT_KEY.exec(key);
+  const kind = (m?.[1] ?? "sans") as FontKind;
+  return `"${ownFontFamily(key)}", ${FONT_FALLBACKS[kind]}`;
+};
+export const ownFontUrl = (key: string): string => `/fonts/${key}.woff2`;
+export const ownFontFaceCss = (key: string): string => {
+  const m = OWN_FONT_KEY.exec(key);
+  if (!m) return "";
+  const weight = m[2] === "vf" ? "100 900" : m[2];
+  return `@font-face{font-family:"${ownFontFamily(key)}";font-style:normal;font-weight:${weight};font-display:swap;src:url(${ownFontUrl(key)}) format("woff2")}`;
 };
 
 /** The CSS font-family value of a library font. */
@@ -92,6 +116,10 @@ const UNICODE_RANGE: Record<string, string> = {
 export function fontFaceCss(keys: readonly string[]): string {
   const rules: string[] = [];
   for (const key of new Set(keys)) {
+    if (isOwnFont(key)) {
+      rules.push(ownFontFaceCss(key));
+      continue;
+    }
     const font = fontByKey(key);
     if (!font) continue;
     for (const file of font.files)

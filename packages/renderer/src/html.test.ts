@@ -224,6 +224,22 @@ describe("plain text", () => {
   });
 });
 
+describe("a decorative picture", () => {
+  test("is written with an empty description, and its description is left out of the plain text", () => {
+    const decorative = block("image", {
+      props: { src: "/a.png", alt: "A cat", decorative: true, caption: "Cap" },
+    });
+    expect(html(decorative)).toBe(
+      '<figure><img src="/a.png" alt="" loading="lazy"><figcaption>Cap</figcaption></figure>',
+    );
+    expect(writeBlocks([decorative]).plainText).toBe("Cap");
+    // Anything but true changes nothing.
+    expect(
+      html(block("image", { props: { src: "/a.png", alt: "A cat", decorative: "yes" } })),
+    ).toBe('<figure><img src="/a.png" alt="A cat" loading="lazy"></figure>');
+  });
+});
+
 describe("hostile documents (EC-33)", () => {
   const hostile: Block[] = [
     para(text("x", { color: 'red" onmouseover="alert(1)' })),

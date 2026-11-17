@@ -4,7 +4,7 @@
 // This file knows nothing about databases; it is pure.
 import { checkThemeCss } from "./css-check.js";
 import { colorModeCss, type ColorMode } from "./color-mode.js";
-import { fontByKey, fontFaceCss, libraryStack } from "./font-library.js";
+import { fontByKey, fontFaceCss, isOwnFont, libraryStack, ownFontStack } from "./font-library.js";
 
 export * from "./color-mode.js";
 export * from "./font-library.js";
@@ -160,6 +160,7 @@ export function checkTokens(input: unknown): TokenCheck {
 /** The CSS font-family value of a font token. */
 export const fontStack = (value: string): string => {
   if (value in FONT_STACKS) return FONT_STACKS[value as FontChoice];
+  if (isOwnFont(value)) return ownFontStack(value);
   const library = fontByKey(value);
   return library ? libraryStack(library) : `"${value}", system-ui, sans-serif`;
 };
