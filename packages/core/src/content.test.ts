@@ -215,6 +215,50 @@ for (const { kind, open, skip } of openers) {
       expect(stored).not.toContain("onmouseover");
     });
 
+    test("CT-60: a save that removes a block leaves a line in the log, a clean save does not", async () => {
+      const made = await draft(anna, "Logged");
+      const count = async () =>
+        (
+          await db.run(
+            `select detail from audit_log where action = 'content.repaired' and target_id = ?`,
+            [made.id],
+          )
+        ).length;
+      const clean = await saveContent(
+        db.runner,
+        anna,
+        siteId,
+        made.id,
+        input({ blocks: [para("ok")] }),
+      );
+      expect(clean.ok).toBe(true);
+      expect(await count()).toBe(0);
+      const revision = clean.ok ? clean.revision : 0;
+      const bad = await saveContent(
+        db.runner,
+        anna,
+        siteId,
+        made.id,
+        input({
+          revision,
+          blocks: [
+            para("ok"),
+            { id: "x", type: "Not A Block", props: {}, content: null, children: [] },
+          ],
+        }),
+      );
+      expect(bad.ok).toBe(true);
+      expect(await count()).toBe(1);
+      const row = (
+        await db.run(
+          `select detail from audit_log where action = 'content.repaired' and target_id = ?`,
+          [made.id],
+        )
+      )[0]!;
+      const detail = typeof row["detail"] === "string" ? JSON.parse(row["detail"]) : row["detail"];
+      expect(detail).toEqual({ removed: 1, repairs: ["removed_invalid_block"] });
+    });
+
     test("publishing sets the publish time once; saving again keeps it", async () => {
       const made = await draft(anna, "News");
       const first = new Date(1_800_000_000_000);

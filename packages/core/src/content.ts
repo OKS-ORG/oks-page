@@ -446,6 +446,23 @@ export async function saveContent(
     return fail("not_found", "This entry does not exist.");
   }
   await pruneRevisions(runner, id, at.getTime());
+  // A save that removed or cut content leaves a line in the log, so a loss is never silent.
+  const lost = checked.repairs.filter(
+    (r) => r === "removed_invalid_block" || r === "cut_document_size",
+  );
+  if (lost.length > 0)
+    await runner.all(
+      `insert into "audit_log" ("id", "site_id", "actor_type", "actor_id", "action", "target_type", "target_id",
+        "detail", "created_at") values (?, ?, 'user', ?, 'content.repaired', 'entry', ?, ?, ?)`,
+      [
+        newId(),
+        siteId,
+        actor.userId,
+        id,
+        JSON.stringify({ removed: lost.length, repairs: [...new Set(lost)] }),
+        at,
+      ],
+    );
   // A published page that gets a new address keeps its old address working (a 301, chains collapsed).
   if (
     String(row["status"]) === "published" &&
