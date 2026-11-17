@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|fonts|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|fonts|site-style|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -401,6 +401,22 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/fonts/[file]/route.ts",
       content: `export { GET } from ${from("api-fonts")};\n`,
+    },
+    {
+      path: "app/api/admin/import/pages/route.ts",
+      content: `export { POST } from ${from("api-import-pages")};\n`,
+    },
+    {
+      path: "app/site-style/[file]/route.ts",
+      content: `export { GET } from ${from("api-site-style")};\n`,
+    },
+    {
+      path: "app/api/admin/fonts/route.ts",
+      content: `export { GET, POST } from ${from("api-owner-fonts")};\n`,
+    },
+    {
+      path: "app/api/admin/fonts/[key]/route.ts",
+      content: `export { DELETE } from ${from("api-owner-font")};\n`,
     },
     {
       path: "app/api/admin/settings/theme/route.ts",

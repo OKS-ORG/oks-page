@@ -54,7 +54,10 @@ export interface PostsPage {
 export interface Look {
   /** The address of the CSS file of the theme in use (fonts, design values, the theme's CSS), or null. */
   themeCssUrl: string | null;
+  /** The owner's CSS as text, for a page that cannot link to a file (the export build). */
   css: string;
+  /** The owner's CSS as a file (`/site-style/<fingerprint>.css`), or null when it is written into the page. */
+  cssUrl: string | null;
   logo: { url: string; width: number | null; height: number | null; alt: string } | null;
   /** Light only, dark only, or the visitor's device decides; and whether visitors get a switch. */
   colorMode: "light" | "dark" | "system";

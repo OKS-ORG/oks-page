@@ -20,6 +20,14 @@ export interface ContentListProps {
   timeZone?: string | null;
 }
 
+interface ImportReply {
+  created: number;
+  published: number;
+  keptAsDrafts: number;
+  skipped: number;
+  items: { row: number; title: string; outcome: string; status?: string; note?: string }[];
+}
+
 export function ContentList({
   type,
   segment,
@@ -35,6 +43,32 @@ export function ContentList({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<TrashedEntry | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProblem, setImportProblem] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<ImportReply | null>(null);
+
+  async function importCsv() {
+    if (!importFile) {
+      setImportProblem("Choose a CSV file first.");
+      return;
+    }
+    setImporting(true);
+    setImportProblem(null);
+    setImportReport(null);
+    const data = new FormData();
+    data.append("file", importFile);
+    data.append("type", type);
+    try {
+      const response = await fetch("/api/admin/import/pages", { method: "POST", body: data });
+      const body = (await response.json()) as ImportReply & { error?: { message: string } };
+      if (response.ok) setImportReport(body);
+      else setImportProblem(body.error?.message ?? "The file could not be imported.");
+    } catch {
+      setImportProblem("The site could not be reached. Check your connection and try again.");
+    }
+    setImporting(false);
+  }
 
   /** Restores or deletes one trashed entry, then shows the list again. */
   async function inTrash(entry: TrashedEntry, what: "restore" | "forever") {
@@ -94,6 +128,55 @@ export function ContentList({
           Trash ({trashed.length})
         </a>
       </nav>
+      {canAdd && !inTrashView ? (
+        <details>
+          <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
+            Import from a CSV file
+          </summary>
+          <p>
+            The first row names the columns. Use <code>title</code> (needed), and if you like{" "}
+            <code>slug</code>, <code>type</code> (page or post), <code>status</code> (draft or
+            published) and <code>content</code> (a blank line starts a new paragraph). A row that
+            asks to be published is checked first: if it has no content or a picture with no
+            description, it is kept as a draft and the report says why.
+          </p>
+          <p>
+            <label htmlFor="import-file">CSV file</label>
+            <br />
+            <input
+              id="import-file"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+            />
+          </p>
+          <p>
+            <Button onPress={() => void importCsv()} isDisabled={importing}>
+              Import the file
+            </Button>
+          </p>
+          {importProblem ? (
+            <Alert color="danger" title="Not imported" description={importProblem} />
+          ) : null}
+          {importReport ? (
+            <section aria-label="Import report">
+              <p role="status">
+                {`${importReport.created} added (${importReport.published} published, ${importReport.created - importReport.published} drafts), ${importReport.skipped} skipped.`}{" "}
+                <a href={`/admin/${segment}`}>See the list</a>
+              </p>
+              <ul>
+                {importReport.items
+                  .filter((item) => item.note || item.outcome === "skipped")
+                  .map((item) => (
+                    <li key={item.row}>
+                      {`Row ${item.row}${item.title ? ` (${item.title})` : ""}: ${item.note ?? ""}`}
+                    </li>
+                  ))}
+              </ul>
+            </section>
+          ) : null}
+        </details>
+      ) : null}
       {problem && inTrashView ? (
         <Alert color="danger" title="Not done" description={problem} />
       ) : null}

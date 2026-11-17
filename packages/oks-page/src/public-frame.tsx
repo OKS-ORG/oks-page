@@ -37,7 +37,11 @@ export function LookStyles({ look }: { look: Look }) {
   return (
     <>
       {look.themeCssUrl ? <link rel="stylesheet" href={look.themeCssUrl} /> : null}
-      {look.css ? <style dangerouslySetInnerHTML={{ __html: look.css }} /> : null}
+      {look.cssUrl ? (
+        <link rel="stylesheet" href={look.cssUrl} />
+      ) : look.css ? (
+        <style dangerouslySetInnerHTML={{ __html: look.css }} />
+      ) : null}
       {needsColorMode(look.colorMode, look.modeSwitch) ? (
         <script
           data-mode={look.colorMode}

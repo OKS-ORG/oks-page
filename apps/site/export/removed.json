@@ -14,7 +14,8 @@
     "app/test-form",
     "app/admin",
     "app/uploads",
-    "app/fonts"
+    "app/fonts",
+    "app/site-style"
   ],
   "replaced": {
     "app/[[...slug]]/page.tsx": "export/page.tsx"

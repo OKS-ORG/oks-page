@@ -24,6 +24,7 @@ import {
 import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import { pageCount } from "../paging";
+import { styleFileUrl } from "../site-style";
 import type { EntryView, Look, PostsPage, SiteInfo, TermArchive } from "./types";
 
 /**
@@ -53,9 +54,11 @@ export async function loadLook(): Promise<Look> {
     }
   }
   const themeCssKey = await loadActiveThemeCssKey(runner, siteId);
+  const css = stylesToCss(styles);
   return {
     themeCssUrl: themeCssKey ? mediaContext().storage.publicUrl(themeCssKey) : null,
-    css: stylesToCss(styles),
+    css,
+    cssUrl: css ? styleFileUrl(css) : null,
     logo,
     colorMode: styles.colorMode,
     modeSwitch: styles.modeSwitch,

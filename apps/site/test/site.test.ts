@@ -23,6 +23,18 @@ import { chromium, type Browser } from "playwright-core";
 import { SMTPServer } from "smtp-server";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
+/** The page's HTML followed by the owner's look, which the page links to as a file (`/site-style/<fingerprint>.css`). */
+async function withLook(base: string, html: string): Promise<string> {
+  const hrefs = new Set(
+    [...html.matchAll(/<link rel="stylesheet" href="(\/site-style\/[0-9a-f]{16}\.css)"/g)].map(
+      (m) => m[1]!,
+    ),
+  );
+  let all = html;
+  for (const href of hrefs) all += "\n" + (await (await fetch(base + href)).text());
+  return all;
+}
+
 beforeAll(() => buildSite(), 300_000);
 
 for (const { kind, skip } of openers) {
@@ -3619,7 +3631,7 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
 
   const get = async (path: string) => {
     const response = await fetch(site.base + path);
-    return { response, body: await response.text() };
+    return { response, body: await withLook(site.base, await response.text()) };
   };
   const locs = (xml: string) => [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]!);
 
@@ -4434,7 +4446,7 @@ describe.skipIf(!findBrowser())(
 
     const get = async (path: string) => {
       const response = await fetch(site.base + path);
-      return { response, body: await response.text() };
+      return { response, body: await withLook(site.base, await response.text()) };
     };
     const saved = () =>
       expect
@@ -5572,7 +5584,11 @@ describe.skipIf(!findBrowser())(
       );
     const publicStyle = async () => {
       const html = await (await fetch(site.base + "/")).text();
-      return /<style>([^<]*--oks-color-primary-700:[^<]*)<\/style>/.exec(html)?.[1] ?? null;
+      const linked = /<link rel="stylesheet" href="(\/site-style\/[0-9a-f]{16}\.css)"/.exec(
+        html,
+      )?.[1];
+      const css = linked ? await (await fetch(site.base + linked)).text() : html;
+      return /--oks-color-primary-700:/.test(css) ? css : null;
     };
 
     test("a new site has the built-in look; the owner sets a color and fonts and every public page shows them at once; bad values, editors and signed-out visitors are refused", async () => {
@@ -5602,7 +5618,10 @@ describe.skipIf(!findBrowser())(
       const css = await publicStyle();
       expect(css).toContain("--oks-color-primary-700:");
       expect(css).toContain("--oks-site-font-heading:");
-      const search = await (await fetch(site.base + "/search?q=garden")).text();
+      const search = await withLook(
+        site.base,
+        await (await fetch(site.base + "/search?q=garden")).text(),
+      );
       expect(search).toContain("--oks-color-primary-700:");
 
       // In a real browser: the fonts and the link color are used.
@@ -5679,7 +5698,7 @@ describe.skipIf(!findBrowser())(
       }
       const afterRefusals = (await fetch(site.base + "/")).headers.get("content-type");
       expect(afterRefusals).toContain("text/html");
-      const html = await (await fetch(site.base + "/")).text();
+      const html = await withLook(site.base, await (await fetch(site.base + "/")).text());
       expect(html).not.toContain("evil.example");
       expect(html).not.toContain("window.pwned");
       expect(html).toContain("letter-spacing");
@@ -6375,7 +6394,7 @@ describe.skipIf(!findBrowser())(
       };
       expect(list.fonts.map((f) => f.name)).toEqual(["Garden Sans"]);
       const key = list.fonts[0]!.key;
-      const home = await (await fetch(site.base + "/")).text();
+      const home = await withLook(site.base, await (await fetch(site.base + "/")).text());
       expect(home).toContain(`@font-face{font-family:"oks-${key}"`);
       expect(home).toContain(`--oks-site-font-body:"oks-${key}"`);
       const file = await fetch(site.base + `/fonts/${key}.woff2`);
@@ -6404,6 +6423,92 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Remove Garden Sans" }).click();
       await page.getByText("Garden Sans is removed.").waitFor();
       expect((await fetch(site.base + `/fonts/${key}.woff2`)).status).toBe(404);
+    });
+
+    test("the owner's look is a file: the page links to /site-style/<fingerprint>.css instead of carrying the text, the file is cached for a year while its name matches, and an older name still gets the current look, not cached", async () => {
+      const page = await signedIn(owner);
+      const saved = await call(page, "PUT", "/api/admin/settings/theme", {
+        mainColor: "#2a6f4f",
+        customCss: "h1 { letter-spacing: 0.4em }",
+      });
+      expect(saved.status).toBe(200);
+      const html = await (await fetch(site.base + "/")).text();
+      const href = /<link rel="stylesheet" href="(\/site-style\/([0-9a-f]{16})\.css)"/.exec(
+        html,
+      )?.[1];
+      expect(href).toBeTruthy();
+      // The page does not carry the text itself any more.
+      expect(html).not.toContain("--oks-color-primary-700");
+      expect(html).not.toContain("letter-spacing");
+      const file = await fetch(site.base + href!);
+      expect(file.status).toBe(200);
+      expect(file.headers.get("content-type")).toBe("text/css; charset=utf-8");
+      expect(file.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(file.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      const css = await file.text();
+      expect(css).toContain("--oks-color-primary-700:");
+      expect(css).toContain("h1 { letter-spacing: 0.4em }");
+      // An older name (a page that was cached before the change) gets the current look, never cached for long.
+      const older = await fetch(site.base + "/site-style/0000000000000000.css");
+      expect(older.status).toBe(200);
+      expect(older.headers.get("cache-control")).toBe("no-cache");
+      expect(await older.text()).toBe(css);
+      // Names that are not a fingerprint are not served.
+      for (const bad of ["x.css", "0000000000000000.txt", "0000000000000000"])
+        expect((await fetch(site.base + `/site-style/${bad}`)).status, bad).toBe(404);
+      // Changing the look changes the name, so no one keeps an old file under the new name.
+      await call(page, "PUT", "/api/admin/settings/theme", {
+        customCss: "h1 { letter-spacing: 0.1em }",
+      });
+      const after = await (await fetch(site.base + "/")).text();
+      const next = /<link rel="stylesheet" href="(\/site-style\/[0-9a-f]{16}\.css)"/.exec(
+        after,
+      )?.[1];
+      expect(next).toBeTruthy();
+      expect(next).not.toBe(href);
+    });
+
+    test("importing pages from a CSV file: the screen takes a file and reports row by row; a row that passes the publish check goes live, one that does not is kept as a draft with the reason", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/pages");
+      await page.getByText("Import from a CSV file").click();
+      await page.locator("#import-file").setInputFiles({
+        name: "pages.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+          [
+            "title,slug,status,content",
+            'Imported hello,imported-hello,published,"Hello from a file.\n\nSecond paragraph."',
+            "Empty imported,empty-imported,published,",
+            ",no-title,draft,Words",
+          ].join("\n"),
+        ),
+      });
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByRole("button", { name: "Import the file" }).click();
+      const report = page.getByRole("region", { name: "Import report" });
+      await report.getByText(/2 added \(1 published, 1 drafts\), 1 skipped\./).waitFor();
+      await report
+        .getByText(/Row 3 \(Empty imported\): Kept as a draft\. It has no content yet/)
+        .waitFor();
+      await report.getByText(/Row 4: It has no title\./).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+
+      // The published one is on the public site with both paragraphs; the draft is not.
+      const live = await fetch(site.base + "/imported-hello");
+      expect(live.status).toBe(200);
+      const html = await live.text();
+      expect(html).toContain("<p>Hello from a file.</p>");
+      expect(html).toContain("<p>Second paragraph.</p>");
+      expect((await fetch(site.base + "/empty-imported")).status).toBe(404);
+      // Both are in the list, and the import is in the log.
+      await page.goto(site.base + "/admin/pages");
+      await page.getByRole("link", { name: "Imported hello" }).waitFor();
+      await page.getByRole("link", { name: "Empty imported" }).waitFor();
+      const log = await db.run(
+        `select "detail" from "audit_log" where "action" = 'content.import'`,
+      );
+      expect(log.length).toBeGreaterThan(0);
     });
 
     test("security headers: every page and API answer says where it may be framed, its base address and where forms may send; the upload and font files keep their own stricter policy", async () => {
