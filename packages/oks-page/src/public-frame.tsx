@@ -3,6 +3,7 @@
 import { getLook, getSiteInfo } from "@data";
 import type { PublicMenuItem } from "@oks-page/core";
 import { COLOR_MODE_SCRIPT, needsColorMode } from "@oks-page/core/theme";
+import { BlockBehaviour } from "./block-behaviour";
 import { ColorModeSwitch } from "./color-mode-switch";
 import type { Look } from "./data/types";
 import type { ReactNode } from "react";
@@ -72,6 +73,7 @@ export async function PublicFrame({
   return (
     <div lang={site.lang} dir={site.dir} className="oks-site">
       <LookStyles look={look} />
+      <BlockBehaviour />
       {header.length > 0 || logo ? (
         <header>
           {logo ? (

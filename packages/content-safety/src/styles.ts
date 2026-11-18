@@ -42,6 +42,36 @@ export function breakpointRanges(
   });
 }
 
+/** What each screen size is called on the screen, and the width its preview is drawn at. */
+export const SCREEN_LABELS: Record<string, string> = {
+  base: "Phone",
+  "mobile-lg": "Large phone",
+  tablet: "Tablet",
+  "tablet-lg": "Large tablet",
+  laptop: "Laptop",
+  desktop: "Desktop",
+  widescreen: "Wide screen",
+};
+
+/** The screen sizes that are on, with their label, their range of widths and the width a preview is drawn at. */
+export interface ScreenSize extends BreakpointRange {
+  label: string;
+  previewWidth: number;
+}
+
+export function screenSizesOf(enabled: readonly string[]): ScreenSize[] {
+  return breakpointRanges(enabled).map((range) => ({
+    ...range,
+    label: SCREEN_LABELS[range.name] ?? range.name,
+    previewWidth:
+      range.from === 0
+        ? 390
+        : range.to === null
+          ? Math.max(1200, range.from + 100)
+          : Math.min(range.from + 32, range.to),
+  }));
+}
+
 // ---- allowed values (4.2, 4.4) ----
 
 type Check = (value: string) => string | null;

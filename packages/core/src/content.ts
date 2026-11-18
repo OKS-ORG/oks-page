@@ -13,6 +13,8 @@ import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
 import { recordSlugChange } from "./redirects.js";
 import { sectionsForContent, writeContentBlocks } from "./saved-sections.js";
 import { canonicalJson, pruneRevisions, summarise } from "./revision-parts.js";
+import { loadScreenSizes } from "./screen-sizes.js";
+import { addVideoCovers } from "./video-covers.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
 export interface Actor {
@@ -360,7 +362,10 @@ export async function saveContent(
     if (hasLock(before) || JSON.stringify(input.blocks ?? null).includes('"locked"')) {
       const violation = lockViolation(
         before,
-        checkBlocks({ version: 1, blocks: input.blocks }).body.blocks,
+        checkBlocks(
+          { version: 1, blocks: input.blocks },
+          { breakpoints: await loadScreenSizes(runner, siteId) },
+        ).body.blocks,
       );
       if (violation) return fail("forbidden", violation, { field: "blocks" });
     }
@@ -413,7 +418,12 @@ export async function saveContent(
     return fail("slug_taken", "Another entry already has this address.", { field: "slug" });
 
   // The same checks every other path uses, then our own writer for the stored HTML and text.
-  const checked = checkBlocks({ version: 1, blocks: input.blocks });
+  const checked = checkBlocks(
+    { version: 1, blocks: input.blocks },
+    { breakpoints: await loadScreenSizes(runner, siteId) },
+  );
+  // A video block gets the picture it shows before a click (fetched once, kept in Media); a failure only leaves it out.
+  await addVideoCovers(checked.body.blocks, siteId, actor);
   // A saved section linked in the page is put in place before the HTML and the text are written.
   const linked = await sectionsForContent(runner, siteId, checked.body.blocks);
   if (!linked.ok) return fail("invalid", linked.message, { field: "blocks" });

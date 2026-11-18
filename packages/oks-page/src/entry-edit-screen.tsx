@@ -42,6 +42,8 @@ export interface EntryEditScreenProps {
   editor?: "writing" | "layout";
   /** Whether this person may lock parts of a page (a designer). */
   canLock?: boolean;
+  /** The screen sizes that are on for the site (Settings > Screen sizes). */
+  screens?: string[];
   /** Posts have categories and tags; pages do not. */
   showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
@@ -436,6 +438,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           label="Content"
           initialBlocks={props.blocks as unknown as LayoutBlocks}
           canLock={props.canLock === true}
+          {...(props.screens ? { screens: props.screens } : {})}
           onChange={(next) => {
             blocksNow.current = next as unknown as Block[];
             setChanges((n) => n + 1);

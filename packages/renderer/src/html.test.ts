@@ -129,16 +129,21 @@ describe("media and other blocks", () => {
   });
 
   test("a video is drawn only from an allowed host, through the privacy-friendly player", () => {
-    const frame = (src: string) =>
-      `<iframe src="${src}" title="Video" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+    // The player address sits in a data attribute until the visitor clicks (PB-93); "load at once" draws the frame.
+    const player = (src: string) => `data-player="${src}"`;
     expect(
       html(block("video", { props: { src: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" } })),
-    ).toBe(frame("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"));
-    expect(html(block("video", { props: { src: "https://youtu.be/dQw4w9WgXcQ" } }))).toBe(
-      frame("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"),
+    ).toContain(player("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"));
+    expect(html(block("video", { props: { src: "https://youtu.be/dQw4w9WgXcQ" } }))).toContain(
+      player("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"),
     );
-    expect(html(block("video", { props: { src: "https://vimeo.com/123456789" } }))).toBe(
-      frame("https://player.vimeo.com/video/123456789"),
+    expect(html(block("video", { props: { src: "https://vimeo.com/123456789" } }))).toContain(
+      player("https://player.vimeo.com/video/123456789"),
+    );
+    expect(
+      html(block("video", { props: { src: "https://vimeo.com/123456789", loadNow: true } })),
+    ).toBe(
+      '<iframe src="https://player.vimeo.com/video/123456789" title="Video" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>',
     );
     expect(html(block("video", { props: { src: "https://evil.test/v.mp4" } }))).toBe("");
     expect(

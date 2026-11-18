@@ -6,6 +6,8 @@ import {
   applyOp,
   checkStyle,
   DEFAULT_BREAKPOINTS,
+  positionWarnings,
+  screenSizesOf,
   duplicateBlock,
   insertBlock,
   moveBlock,
@@ -204,11 +206,13 @@ function findPlace(tree: Block[], id: string | null): Place | null {
   return walk(tree, null);
 }
 
-const DEVICES = [
-  { key: "base", label: "Phone", width: 390 },
-  { key: "tablet", label: "Tablet", width: 800 },
-  { key: "desktop", label: "Desktop", width: 1200 },
-] as const;
+/** The screen sizes that are on, each with its name and the width its preview is drawn at. */
+const devicesOf = (sizes: readonly string[]) =>
+  screenSizesOf(sizes).map((s) => ({
+    key: s.name as string,
+    label: s.label,
+    width: s.previewWidth,
+  }));
 
 /** What a block shows as when it is not hidden, to put back after a smaller screen hides it. */
 const NATURAL_DISPLAY: Record<string, string> = {
@@ -218,11 +222,14 @@ const NATURAL_DISPLAY: Record<string, string> = {
   button: "inline-block",
 };
 
-const readStyle = (b: Block): Style => checkStyle(b.props["style"], DEFAULT_BREAKPOINTS).style;
+const readStyle = (b: Block, sizes: readonly string[]): Style =>
+  checkStyle(b.props["style"], sizes).style;
 
 export interface LayoutEditorProps {
   label?: string;
   initialBlocks: Block[];
+  /** The screen sizes that are on for the site (Settings > Screen sizes); phone, tablet and desktop when left out. */
+  screens?: readonly string[];
   /** Whether this person is a designer: only a designer may lock parts of a page. */
   canLock?: boolean;
   /** Every change, so the screen can autosave. */
@@ -242,7 +249,13 @@ export function LayoutEditor(props: LayoutEditorProps) {
   const [past, setPast] = useState<TreeOp[]>([]);
   const [future, setFuture] = useState<TreeOp[]>([]);
   const [message, setMessage] = useState("");
-  const [device, setDevice] = useState<(typeof DEVICES)[number]["key"]>("desktop");
+  const sizes = props.screens ?? DEFAULT_BREAKPOINTS;
+  const devices = useMemo(() => devicesOf(sizes), [sizes.join()]);
+  const [chosenDevice, setDevice] = useState<string>("");
+  // The largest size first shown, as before; a size that was switched off is replaced by the largest.
+  const device = devices.some((d) => d.key === chosenDevice)
+    ? chosenDevice
+    : devices[devices.length - 1]!.key;
   const [adding, setAdding] = useState(CATALOGUE[0]!.type);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState("");
@@ -378,11 +391,11 @@ export function LayoutEditor(props: LayoutEditorProps) {
   };
   const setDeclaration = (screen: string, property: string, value: string | null) => {
     if (!place) return;
-    const style: Style = JSON.parse(JSON.stringify(readStyle(place.block)));
+    const style: Style = JSON.parse(JSON.stringify(readStyle(place.block, sizes)));
     const declarations = { ...(style[screen as keyof Style] ?? {}) };
     if (value === null) delete declarations[property];
     else {
-      const checked = checkStyle({ [screen]: { [property]: value } }, DEFAULT_BREAKPOINTS);
+      const checked = checkStyle({ [screen]: { [property]: value } }, sizes);
       if (checked.messages.length > 0) return setMessage(checked.messages[0]!);
       Object.assign(declarations, checked.style[screen as keyof Style] ?? {});
     }
@@ -393,8 +406,8 @@ export function LayoutEditor(props: LayoutEditorProps) {
   /** "Hide on phone / tablet / desktop" uses display: none on those screens, and puts the usual display back after. */
   const setHidden = (screen: string, hidden: boolean) => {
     if (!place) return;
-    const style: Style = JSON.parse(JSON.stringify(readStyle(place.block)));
-    const order = DEVICES.map((d) => d.key as string);
+    const style: Style = JSON.parse(JSON.stringify(readStyle(place.block, sizes)));
+    const order = devices.map((d) => d.key);
     const now = new Set(order.filter((k) => style[k as keyof Style]?.["display"] === "none"));
     if (hidden) now.add(screen);
     else now.delete(screen);
@@ -413,9 +426,9 @@ export function LayoutEditor(props: LayoutEditorProps) {
   // ---- the preview ----
   const document = useMemo(() => {
     const written = writeBlocks(tree, { ids: true });
-    const css = pageCss(tree);
+    const css = pageCss(tree, sizes);
     return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;margin:0;padding:1rem}img{max-inline-size:100%}[data-oks-id]{cursor:default}[data-selected]{outline:2px solid #2563eb;outline-offset:2px}${css}</style><body>${written.html}`;
-  }, [tree]);
+  }, [tree, sizes.join()]);
 
   // A click in the preview chooses the block under it. The frame has no script (it only shares its origin, so this page
   // can read it); the click is caught here, and links in the preview do nothing.
@@ -494,10 +507,40 @@ export function LayoutEditor(props: LayoutEditorProps) {
     setSaving(false);
   }
 
-  const style = place ? readStyle(place.block) : {};
+  const style = place ? readStyle(place.block, sizes) : {};
   const hiddenOn = (key: string) => style[key as keyof Style]?.["display"] === "none";
   const locked = place?.block.props["locked"] === true;
-  const deviceWidth = DEVICES.find((d) => d.key === device)!.width;
+  // Free positioning (spec 06, section 7): placed with numbers inside a block that has a relative position and a height.
+  const here = style[device as keyof Style] ?? {};
+  const freeOn = here["position"] === "absolute";
+  const warnings = place && freeOn ? positionWarnings(tree, place.block.id, sizes) : [];
+  const setMany = (screen: string, changes: Record<string, string | null>) => {
+    if (!place) return;
+    const next: Style = JSON.parse(JSON.stringify(readStyle(place.block, sizes)));
+    const declarations = { ...(next[screen as keyof Style] ?? {}) };
+    for (const [property, value] of Object.entries(changes)) {
+      if (value === null) delete declarations[property];
+      else {
+        const checked = checkStyle({ [screen]: { [property]: value } }, sizes);
+        if (checked.messages.length > 0) return setMessage(checked.messages[0]!);
+        Object.assign(declarations, checked.style[screen as keyof Style] ?? {});
+      }
+    }
+    if (Object.keys(declarations).length > 0) next[screen as keyof Style] = declarations;
+    else delete next[screen as keyof Style];
+    setStyle(next);
+  };
+  const makeContainerRelative = () => {
+    const parent = place?.parent;
+    if (!parent) return;
+    const next: Style = JSON.parse(JSON.stringify(readStyle(parent, sizes)));
+    const base = { ...(next.base ?? {}) };
+    base["position"] = "relative";
+    if (!base["height"] && !base["min-height"]) base["min-height"] = "300px";
+    next.base = base;
+    run(updateProps(tree, parent.id, { ...parent.props, style: next }));
+  };
+  const deviceWidth = devices.find((d) => d.key === device)!.width;
   const panel = { flex: "1 1 16rem", minWidth: 0 } as const;
 
   const outline = (list: Block[], depth: number): ReactNode => (
@@ -925,7 +968,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
         </label>
         <Button onPress={add}>Add</Button>
         <span role="radiogroup" aria-label="Preview size">
-          {DEVICES.map((d) => (
+          {devices.map((d) => (
             <label key={d.key} style={{ marginInlineEnd: "0.5rem" }}>
               <input
                 type="radio"
@@ -1003,7 +1046,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
               {typeSettings}
               <fieldset style={{ margin: "0.75rem 0" }}>
                 <legend>Hide on</legend>
-                {DEVICES.map((d) => (
+                {devices.map((d) => (
                   <label key={d.key} style={{ marginInlineEnd: "0.75rem" }}>
                     <input
                       type="checkbox"
@@ -1016,10 +1059,88 @@ export function LayoutEditor(props: LayoutEditorProps) {
               </fieldset>
               <StyleBox
                 key={`${place.block.id}-${device}`}
-                screen={device}
-                declarations={style[device] ?? {}}
+                screenName={devices.find((d) => d.key === device)!.label.toLowerCase()}
+                declarations={style[device as keyof Style] ?? {}}
                 onSet={(property, value) => setDeclaration(device, property, value)}
               />
+              <fieldset style={{ margin: "0.75rem 0" }}>
+                <legend>
+                  Free position on {devices.find((d) => d.key === device)!.label.toLowerCase()}
+                </legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={freeOn}
+                    onChange={(e) =>
+                      e.target.checked
+                        ? setMany(device, {
+                            position: "absolute",
+                            top: here["top"] ?? "0px",
+                            "inset-inline-start": here["inset-inline-start"] ?? "0px",
+                            width: here["width"] ?? "200px",
+                            height: here["height"] ?? "100px",
+                          })
+                        : setMany(device, {
+                            position: null,
+                            top: null,
+                            bottom: null,
+                            "inset-inline-start": null,
+                            "inset-inline-end": null,
+                          })
+                    }
+                  />{" "}
+                  Place this block freely on this screen size
+                </label>
+                {freeOn
+                  ? (
+                      [
+                        ["top", "From the top"],
+                        ["inset-inline-start", "From the start"],
+                        ["width", "Width"],
+                        ["height", "Height"],
+                      ] as const
+                    ).map(([property, label]) => (
+                      <p
+                        key={`${device}-${property}-${here[property] ?? ""}`}
+                        style={{ margin: "0.5rem 0" }}
+                      >
+                        <label>
+                          {label}{" "}
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            defaultValue={here[property] ?? ""}
+                            style={{ inlineSize: "7rem" }}
+                            onBlur={(e) => {
+                              const raw = e.target.value.trim();
+                              if (raw === "") return;
+                              setMany(device, {
+                                [property]: /^-?\d+(\.\d+)?$/.test(raw) ? `${raw}px` : raw,
+                              });
+                            }}
+                          />
+                        </label>
+                      </p>
+                    ))
+                  : null}
+                {warnings.length > 0 ? (
+                  <ul
+                    aria-label="Warnings about this position"
+                    style={{ margin: "0.5rem 0", paddingInlineStart: "1.25rem" }}
+                  >
+                    {warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {freeOn && place.parent ? (
+                  <p style={{ margin: "0.5rem 0 0" }}>
+                    <Button onPress={makeContainerRelative}>
+                      Make the block it sits in relative
+                    </Button>
+                  </p>
+                ) : null}
+              </fieldset>
               {props.canLock ? (
                 <fieldset style={{ margin: "0.75rem 0" }}>
                   <legend>Design lock</legend>
@@ -1055,17 +1176,16 @@ export function LayoutEditor(props: LayoutEditorProps) {
 
 /** The style of the chosen block on one screen size: the values set, and a way to add one. */
 function StyleBox({
-  screen,
+  screenName,
   declarations,
   onSet,
 }: {
-  screen: string;
+  screenName: string;
   declarations: Record<string, string>;
   onSet: (property: string, value: string | null) => void;
 }) {
   const [property, setProperty] = useState("padding");
   const [value, setValue] = useState("");
-  const screenName = DEVICES.find((d) => d.key === screen)!.label.toLowerCase();
   return (
     <fieldset style={{ margin: "0.75rem 0" }}>
       <legend>Style on {screenName}</legend>

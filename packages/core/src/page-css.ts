@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import type { Block } from "@oks-page/content-safety";
 import { pageCss } from "@oks-page/renderer";
+import { loadScreenSizes } from "./screen-sizes.js";
 import type { SqlRunner } from "@oks-page/db";
 
 export const pageStyleName = (css: string): string =>
@@ -38,7 +39,10 @@ export async function loadPageCss(
   const raw = rows[0]?.["body"];
   if (raw == null) return "";
   try {
-    return pageCssOfBody(typeof raw === "string" ? JSON.parse(raw) : raw);
+    return pageCssOfBody(
+      typeof raw === "string" ? JSON.parse(raw) : raw,
+      await loadScreenSizes(runner, siteId),
+    );
   } catch {
     return "";
   }

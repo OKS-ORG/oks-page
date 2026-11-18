@@ -8,6 +8,7 @@ import { checkBlocks } from "@oks-page/content-safety";
 import { newId, type SqlRunner } from "@oks-page/db";
 import { loadForEdit, type Actor, type ContentResult } from "./content.js";
 import { canonicalJson } from "./revision-parts.js";
+import { loadScreenSizes } from "./screen-sizes.js";
 
 export const LOCK_SECONDS = 90;
 
@@ -45,7 +46,10 @@ export async function saveAutosave(
   const title = String(input.title ?? "")
     .trim()
     .slice(0, 200);
-  const checked = checkBlocks({ version: 1, blocks: input.blocks });
+  const checked = checkBlocks(
+    { version: 1, blocks: input.blocks },
+    { breakpoints: await loadScreenSizes(runner, siteId) },
+  );
   const at = new Date(now());
   const snapshot = {
     title,

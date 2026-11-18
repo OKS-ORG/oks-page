@@ -4,6 +4,7 @@ import {
   pageCssOfBody,
   pageStyleUrl,
   loadReadingRoutes,
+  loadScreenSizes,
   loadSiteIcon,
   loadSiteLanguage,
   type ReadingRoutes,
@@ -196,7 +197,7 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
   const written = String(r["html"]);
   const plain = String(r["plain_text"]);
   // The responsive styles of the blocks come as a file the page links to (spec 06, 4.3).
-  const pageCss = pageCssOfBody(readBody(r["body"]));
+  const pageCss = pageCssOfBody(readBody(r["body"]), await loadScreenSizes(getRunner(), siteId));
   const styleUrl = pageStyleUrl(String(r["id"]), pageCss);
   const link = styleUrl ? `<link rel="stylesheet" href="${styleUrl}">` : "";
   return {

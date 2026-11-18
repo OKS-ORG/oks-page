@@ -33,6 +33,8 @@ export async function startSite(kind: string, db: TestDb, extra: Record<string, 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     OKS_TEST: "1",
+    // The tests never ask YouTube or Vimeo for a picture (PB-94 has its own tests with a fake network).
+    OKS_VIDEO_COVERS: "off",
     PORT: String(port),
     NODE_ENV: "production",
     ...Object.fromEntries(

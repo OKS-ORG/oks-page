@@ -267,6 +267,9 @@ importers:
       '@oks-page/auth':
         specifier: workspace:*
         version: link:../auth
+      '@oks-page/content-safety':
+        specifier: workspace:*
+        version: link:../content-safety
       '@oks-page/core':
         specifier: workspace:*
         version: link:../core

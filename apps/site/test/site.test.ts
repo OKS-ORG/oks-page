@@ -7016,6 +7016,162 @@ describe.skipIf(!findBrowser())(
       }
     });
 
+    test("PB-91: tabs switch, a slider has arrows and dots, and a gallery picture opens larger", async () => {
+      const setup = await signedIn(owner);
+      const made = await layoutPage(
+        setup,
+        "Moving blocks",
+        [
+          b("section", {}, [
+            b("tabs", {}, [
+              b("tab", { title: "Alpha" }, [b("paragraph", {}, [], words("Alpha text"))]),
+              b("tab", { title: "Beta" }, [b("paragraph", {}, [], words("Beta text"))]),
+            ]),
+            b("slider", { label: "News" }, [
+              b("slide", {}, [b("paragraph", {}, [], words("Slide one"))]),
+              b("slide", {}, [b("paragraph", {}, [], words("Slide two"))]),
+              b("slide", {}, [b("paragraph", {}, [], words("Slide three"))]),
+            ]),
+            b("gallery", {
+              columns: 2,
+              images: [
+                { src: "/uploads/none-a.jpg", alt: "Picture A", caption: "Caption A" },
+                { src: "/uploads/none-b.jpg", alt: "Picture B" },
+              ],
+            }),
+          ]),
+        ],
+        true,
+      );
+      await expect.poll(async () => (await fetch(site.base + `/${made.slug}`)).status).toBe(200);
+      // Without script every part is on the page, one under another (the page is complete without the behaviour).
+      const plain = await (await fetch(site.base + `/${made.slug}`)).text();
+      expect(plain).toContain("Alpha text");
+      expect(plain).toContain("Beta text");
+      const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
+      const page = await context.newPage();
+      await page.goto(site.base + `/${made.slug}`);
+      // The behaviour starts after the page is ready.
+      await page.locator(".tabs[data-ready]").waitFor();
+      await page.locator(".slider[data-ready]").waitFor();
+      await page.locator(".gallery[data-ready]").waitFor();
+      // Tabs: the first is shown, the second after a click, and the arrow key moves too.
+      expect(await page.getByText("Alpha text").isVisible()).toBe(true);
+      expect(await page.getByText("Beta text").isVisible()).toBe(false);
+      await page.getByRole("tab", { name: "Beta" }).click();
+      expect(await page.getByText("Beta text").isVisible()).toBe(true);
+      expect(await page.getByText("Alpha text").isVisible()).toBe(false);
+      await page.keyboard.press("ArrowLeft");
+      expect(await page.getByText("Alpha text").isVisible()).toBe(true);
+      // Slider: the next arrow and the dots move to the slide.
+      const slider = page.getByRole("region", { name: "News" });
+      const at = () =>
+        slider.evaluate((el) => Math.round(el.scrollLeft / (el as HTMLElement).clientWidth));
+      expect(await at()).toBe(0);
+      await page.getByRole("button", { name: "Next slide" }).click();
+      await expect.poll(at).toBe(1);
+      await page.getByRole("button", { name: "Slide 3 of 3" }).click();
+      await expect.poll(at).toBe(2);
+      await page.getByRole("button", { name: "Previous slide" }).click();
+      await expect.poll(at).toBe(1);
+      // Gallery: a picture opens in a dialog, with its caption; Escape closes it.
+      await page.getByRole("button", { name: "Enlarge: Picture A" }).click();
+      const dialog = page.locator("dialog.oks-lightbox[open]");
+      await dialog.waitFor();
+      expect(await dialog.innerText()).toContain("Caption A");
+      await dialog.getByRole("button", { name: "Next" }).click();
+      expect(await dialog.locator("img").getAttribute("alt")).toBe("Picture B");
+      await page.keyboard.press("Escape");
+      await page.locator("dialog.oks-lightbox[open]").waitFor({ state: "detached" });
+      await context.close();
+    });
+
+    test("PB-93: a video asks YouTube for nothing before a click, works as a link without script, and loads the player after a click", async () => {
+      const setup = await signedIn(owner);
+      const made = await layoutPage(
+        setup,
+        "A film",
+        [
+          b("section", {}, [
+            b("video", { src: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", caption: "Our film" }),
+          ]),
+        ],
+        true,
+      );
+      await expect.poll(async () => (await fetch(site.base + `/${made.slug}`)).status).toBe(200);
+      // Without script: a link to the video on its own page, and the words say which company it is.
+      // (The page as the server sends it, which is what a visitor without script gets.)
+      const sent = await (await fetch(site.base + `/${made.slug}`)).text();
+      expect(sent).toContain(
+        '<a class="video-open" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" rel="noopener noreferrer">',
+      );
+      expect(sent).toContain("Play the video. It loads from YouTube.");
+      expect(sent).not.toContain("<iframe");
+
+      // With script: nothing is asked of YouTube until the click.
+      const context = await browser.newContext();
+      const asked: string[] = [];
+      await context.route(/youtube|ytimg|ggpht/, (route) => {
+        asked.push(route.request().url());
+        return route.abort();
+      });
+      const page = await context.newPage();
+      await page.goto(site.base + `/${made.slug}`);
+      // The behaviour starts after the page is ready; the video is marked in the same moment.
+      await page.locator(".video-load[data-ready]").waitFor();
+      await page.waitForLoadState("networkidle");
+      expect(asked).toEqual([]);
+      expect(await page.locator("iframe").count()).toBe(0);
+      await page.getByRole("link", { name: /Our film/ }).click();
+      await page.locator(".video-load iframe").waitFor();
+      const src = await page.locator(".video-load iframe").getAttribute("src");
+      expect(src).toBe("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1");
+      expect(await page.locator(".video-load iframe").getAttribute("title")).toBe("Our film");
+      await context.close();
+    });
+
+    test("PB-100: Settings > Screen sizes adds a size to the layout editor; PB-101: free position warns, and one click fixes the container", async () => {
+      const page = await signedIn(owner);
+      const made = await layoutPage(page, "Free place", [
+        b("section", {}, [b("container", {}, [b("paragraph", {}, [], words("Placed text"))])]),
+      ]);
+      try {
+        await page.goto(site.base + "/admin/settings/screens");
+        const laptop = page.getByRole("checkbox", { name: /^Laptop/ });
+        await laptop.waitFor();
+        // The widths follow the list: with phone, tablet and desktop on, the laptop size is off.
+        expect(await page.getByText("Desktop: 1025 px and wider").isVisible()).toBe(true);
+        expect(await page.getByText("Laptop: off").isVisible()).toBe(true);
+        await laptop.check();
+        // Laptop on: it takes the widths from 1025, and the desktop starts right after it, with no gap.
+        expect(await page.getByText("Laptop: 1025 to 1366 px").isVisible()).toBe(true);
+        expect(await page.getByText("Desktop: 1367 px and wider").isVisible()).toBe(true);
+        await page.getByRole("button", { name: "Save screen sizes" }).click();
+        await page.getByText("Screen sizes saved.").waitFor();
+        const saved = await call(page, "GET", "/api/admin/settings/screens");
+        expect(saved.json!["sizes"]).toEqual(["base", "tablet", "laptop", "desktop"]);
+
+        await page.goto(site.base + `/admin/pages/${made.id}`);
+        const blocks = page.getByRole("region", { name: "Blocks on this page" });
+        await blocks.getByRole("button", { name: /^Section/ }).waitFor();
+        await page.getByRole("radio", { name: "Laptop" }).waitFor();
+        // Place the paragraph freely: the container is not set up for it, and the screen says so.
+        await blocks.getByRole("button", { name: /^Paragraph/ }).click();
+        await page.getByRole("checkbox", { name: /Place this block freely/ }).check();
+        const warnings = page.getByRole("list", { name: "Warnings about this position" });
+        await warnings.waitFor();
+        expect(await warnings.innerText()).toMatch(/must be set to a relative position/);
+        await page.getByRole("button", { name: "Make the block it sits in relative" }).click();
+        await page
+          .getByRole("list", { name: "Warnings about this position" })
+          .waitFor({ state: "detached" });
+      } finally {
+        await call(page, "PUT", "/api/admin/settings/screens", {
+          sizes: ["base", "tablet", "desktop"],
+        });
+      }
+    });
+
     test("PB-64: a page with 5,000 blocks opens and stays usable in the layout editor", async () => {
       const page = await signedIn(owner);
       // One section with 4,998 short paragraphs and a heading we can find: 5,000 blocks in all.

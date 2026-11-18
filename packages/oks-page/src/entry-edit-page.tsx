@@ -1,5 +1,11 @@
 // /admin/pages/[id] and /admin/posts/[id]: the edit screen. Anyone who may not edit this entry is sent back to the list.
-import { insertableSections, isSetupDone, loadForEdit, loadGeneralSettings } from "@oks-page/core";
+import {
+  insertableSections,
+  isSetupDone,
+  loadForEdit,
+  loadGeneralSettings,
+  loadScreenSizes,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -27,6 +33,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
   const { entry } = loaded;
   const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
   const savedSections = await insertableSections(getRunner(), member.siteId);
+  const screens = await loadScreenSizes(getRunner(), member.siteId);
   const segment = entry.type === "post" ? "posts" : "pages";
   const canPublish =
     actor.can("content.publish_any", entry.type) ||
@@ -63,6 +70,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         showTerms={entry.type === "post"}
         editor={entry.editor}
         canLock={actor.can("themes.manage")}
+        screens={screens}
         timeZone={timeZone}
         listHref={`/admin/${segment}`}
       />

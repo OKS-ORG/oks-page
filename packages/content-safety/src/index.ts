@@ -12,10 +12,14 @@ import {
 
 export type { Block };
 export { convertOldStyles } from "./blocks.js";
+export { effectiveStyle, positionWarnings } from "./position.js";
 export {
   BREAKPOINTS,
   DEFAULT_BREAKPOINTS,
   breakpointRanges,
+  SCREEN_LABELS,
+  screenSizesOf,
+  type ScreenSize,
   checkStyle,
   convertPhysicalStyle,
   generateCss,

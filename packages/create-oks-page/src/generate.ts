@@ -187,6 +187,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-reading-page")};\n`,
     },
     {
+      path: "app/admin/settings/screens/page.tsx",
+      content: `export { default, metadata } from ${from("settings-screens-page")};\n`,
+    },
+    {
       path: "app/admin/settings/languages/page.tsx",
       content: `export { default, metadata } from ${from("settings-languages-page")};\n`,
     },
@@ -341,6 +345,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/email/route.ts",
       content: `export { DELETE, GET, PUT } from ${from("api-settings-email")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/screens/route.ts",
+      content: `export { GET, PUT } from ${from("api-settings-screens")};\n`,
     },
     {
       path: "app/api/admin/settings/reading/route.ts",

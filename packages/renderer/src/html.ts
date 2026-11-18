@@ -102,23 +102,44 @@ const inlineText = (content: unknown): string =>
 
 // ---- video: only a few hosts, drawn through their privacy-friendly player address ----
 
-function videoPlayer(raw: string): string | null {
+/** A video of an allowed host: the company, the id, the privacy-friendly player address, and the page to watch it on. */
+export interface VideoSource {
+  company: "YouTube" | "Vimeo";
+  id: string;
+  player: string;
+  watch: string;
+}
+
+export function videoOf(raw: string): VideoSource | null {
   if (!isSafeVideoUrl(raw)) return null;
   // eslint-disable-next-line no-control-regex -- the same control characters the address check strips (EC-07)
   const url = new URL(raw.replace(/[\u0000- ]+/g, ""));
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
-  if (host === "youtu.be") {
-    const id = url.pathname.slice(1);
-    return /^[\w-]{6,20}$/.test(id) ? `https://www.youtube-nocookie.com/embed/${id}` : null;
-  }
-  if (host === "youtube.com" || host.endsWith(".youtube.com")) {
-    const id = url.pathname.startsWith("/embed/")
-      ? url.pathname.slice(7)
-      : (url.searchParams.get("v") ?? "");
-    return /^[\w-]{6,20}$/.test(id) ? `https://www.youtube-nocookie.com/embed/${id}` : null;
-  }
+  const youtube = (id: string): VideoSource | null =>
+    /^[\w-]{6,20}$/.test(id)
+      ? {
+          company: "YouTube",
+          id,
+          player: `https://www.youtube-nocookie.com/embed/${id}`,
+          watch: `https://www.youtube.com/watch?v=${id}`,
+        }
+      : null;
+  if (host === "youtu.be") return youtube(url.pathname.slice(1));
+  if (host === "youtube.com" || host.endsWith(".youtube.com"))
+    return youtube(
+      url.pathname.startsWith("/embed/")
+        ? url.pathname.slice(7)
+        : (url.searchParams.get("v") ?? ""),
+    );
   const vimeo = /^\/(?:video\/)?(\d{4,12})$/.exec(url.pathname);
-  return host.endsWith("vimeo.com") && vimeo ? `https://player.vimeo.com/video/${vimeo[1]}` : null;
+  return host.endsWith("vimeo.com") && vimeo
+    ? {
+        company: "Vimeo",
+        id: vimeo[1]!,
+        player: `https://player.vimeo.com/video/${vimeo[1]}`,
+        watch: `https://vimeo.com/${vimeo[1]}`,
+      }
+    : null;
 }
 
 const formatBytes = (size: number): string =>
@@ -200,10 +221,20 @@ function blockHtml(block: Block, ctx: Context): string {
         : `<figure>${img}</figure>`;
     }
     case "video": {
-      const player = videoPlayer(str(p["src"]));
-      if (!player) return "";
+      const video = videoOf(str(p["src"]));
+      if (!video) return "";
       const title = str(p["caption"]) || "Video";
-      return `<iframe src="${escapeHtml(player)}" title="${escapeHtml(title)}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+      // The owner may choose to load the player at once; then the page asks the company the moment it opens.
+      if (p["loadNow"] === true)
+        return `<iframe src="${escapeHtml(video.player)}" title="${escapeHtml(title)}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+      // Otherwise nothing is asked of the company before a click (spec 06, 14.3, D126): a picture stored on this site (when
+      // the server could fetch one) and a link that works without script; the page script swaps in the player on a click.
+      const cover = str(p["cover"]);
+      const picture =
+        /^\/uploads\/[\w./-]{1,200}$/.test(cover) && !cover.includes("..")
+          ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy">`
+          : "";
+      return `<div class="video-load" data-player="${escapeHtml(video.player)}" data-title="${escapeHtml(title)}"><a class="video-open" href="${escapeHtml(video.watch)}" rel="noopener noreferrer">${picture}<span class="video-title">${escapeHtml(title)}</span><span class="video-note">Play the video. It loads from ${video.company}.</span></a></div>`;
     }
     case "embed": {
       const url = str(p["url"]).trim();

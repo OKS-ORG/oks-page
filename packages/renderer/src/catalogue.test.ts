@@ -74,6 +74,35 @@ describe("gallery, audio, icon, social links", () => {
   });
 });
 
+describe("a video before a click (PB-93)", () => {
+  const src = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  test("nothing in the page asks YouTube for anything: a link, a stored picture, and the name of the company", () => {
+    const out = html(
+      block("video", { props: { src, caption: "Our <story>", cover: "/uploads/c.jpg" } }),
+    );
+    expect(out).not.toContain("<iframe");
+    expect(out).not.toContain("<script");
+    // The only picture the page loads by itself is the stored one, on this site.
+    expect(out).toContain('<img src="/uploads/c.jpg" alt="" loading="lazy">');
+    // The link works without script and the words name the company.
+    expect(out).toContain('href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"');
+    expect(out).toContain("It loads from YouTube.");
+    expect(out).toContain("Our &lt;story&gt;");
+  });
+  test("without a stored picture there is a plain placeholder; a cover from another address is not used", () => {
+    expect(html(block("video", { props: { src } }))).not.toContain("<img");
+    const other = html(block("video", { props: { src, cover: "https://evil.test/x.jpg" } }));
+    expect(other).not.toContain("evil.test");
+    expect(html(block("video", { props: { src, cover: "/uploads/../x.jpg" } }))).not.toContain(
+      "<img",
+    );
+  });
+  test("the page style has the rules of the video block only when a video is on the page", () => {
+    expect(pageCss([block("video", { props: { src } })])).toContain(".video-load{");
+    expect(pageCss([block("paragraph")])).not.toContain(".video-load");
+  });
+});
+
 describe("map, accordion, tabs, slider", () => {
   test("PB-93: a map is a link until the visitor follows it, and it names the company it opens", () => {
     const out = html(block("map", { props: { query: "10 Rue de Rivoli, Paris" } }));
