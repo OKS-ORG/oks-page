@@ -1,5 +1,5 @@
-// The stored picture of a video (spec 06, 14.3, PB-94): a video block first shows a picture kept on the site, so the page
-// asks YouTube or Vimeo for nothing until the visitor clicks. The server fetches the picture once, when the block is
+// The stored picture of a video or a map (spec 06, 14.3, PB-94): such a block first shows a picture kept on the site, so the
+// page asks YouTube, Vimeo or a map company for nothing until the visitor clicks. The server fetches the picture once, when the block is
 // saved, and keeps it in Media. How the picture is fetched is decided by the site's server and handed in with
 // `setCoverProvider`; this file only decides which blocks need one and keeps the result in the block. A failure leaves the
 // block without a picture, and the page then shows a plain placeholder.
@@ -17,6 +17,20 @@ export type CoverProvider = (
 
 let provider: CoverProvider | null = null;
 
+/** Gives the address of a stored picture of a place on OpenStreetMap, or null. */
+export type MapCoverProvider = (
+  siteId: string,
+  query: string,
+  actor: Actor,
+) => Promise<string | null>;
+
+let mapProvider: MapCoverProvider | null = null;
+
+/** The way this server fetches map pictures (null: none are fetched). */
+export function setMapCoverProvider(next: MapCoverProvider | null): void {
+  mapProvider = next;
+}
+
 /** The way this server fetches video pictures (null: none are fetched). */
 export function setCoverProvider(next: CoverProvider | null): void {
   provider = next;
@@ -30,7 +44,7 @@ export const MAX_COVERS_PER_SAVE = 5;
  * its current address. A block that already has the picture for the same video is left alone: it is fetched once. Blocks
  * are changed in place; pass the checked copy.
  */
-export async function addVideoCovers(
+export async function addCovers(
   blocks: Block[],
   siteId: string,
   actor: Actor,
@@ -55,6 +69,27 @@ export async function addVideoCovers(
             }
           }
         } else if (!video) {
+          delete props["cover"];
+          delete props["coverFor"];
+        }
+      }
+      if (block.type === "map") {
+        const props = block.props as Record<string, unknown>;
+        const query = typeof props["query"] === "string" ? props["query"].trim().slice(0, 200) : "";
+        // Only OpenStreetMap has a picture that can be fetched without a key.
+        const key = query && props["provider"] !== "google" ? `osm:${query}` : "";
+        if (key && !(props["cover"] && props["coverFor"] === key)) {
+          delete props["cover"];
+          delete props["coverFor"];
+          if (mapProvider && fetched < MAX_COVERS_PER_SAVE) {
+            fetched++;
+            const url = await mapProvider(siteId, query, actor).catch(() => null);
+            if (url) {
+              props["cover"] = url;
+              props["coverFor"] = key;
+            }
+          }
+        } else if (!key) {
           delete props["cover"];
           delete props["coverFor"];
         }

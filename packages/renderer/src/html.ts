@@ -349,7 +349,13 @@ function blockHtml(block: Block, ctx: Context): string {
       const href = google
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
         : `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
-      return `<p class="map"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Show the map: ${escapeHtml(query)}</a> <small>Opens ${google ? "Google Maps" : "OpenStreetMap"}.</small></p>`;
+      // A picture kept on this site, when the server could fetch one; the page still asks no map company for anything.
+      const cover = str(p["cover"]);
+      const picture =
+        !google && /^\/uploads\/[\w./-]{1,200}$/.test(cover) && !cover.includes("..")
+          ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy"><small>&copy; OpenStreetMap contributors</small>`
+          : "";
+      return `<p class="map"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${picture}Show the map: ${escapeHtml(query)}</a> <small>Opens ${google ? "Google Maps" : "OpenStreetMap"}.</small></p>`;
     }
     case "accordion": {
       // One open at a time: the browser's own grouping of details by name.

@@ -9,6 +9,7 @@ import {
   restoreEntry,
   saveContent,
   setCoverProvider,
+  setMapCoverProvider,
   trashEntry,
   type PublishProblem,
 } from "@oks-page/core";
@@ -18,10 +19,11 @@ import { signedInMember } from "./admin-session";
 import { STATUS_OF, isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
 import { refreshEntry } from "./refresh-cache";
-import { videoCoverProvider } from "./video-cover";
+import { mapCoverProvider, videoCoverProvider } from "./video-cover";
 
-// A video block is given the picture it shows before a click when the page is saved (PB-94).
+// A video or map block is given the picture it shows before a click when the page is saved (PB-94).
 setCoverProvider(videoCoverProvider);
+setMapCoverProvider(mapCoverProvider);
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!isSameOrigin(request))

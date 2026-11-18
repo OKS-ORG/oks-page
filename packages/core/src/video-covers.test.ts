@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createDraft, loadForEdit, saveContent, type Actor } from "./content.js";
 import { DEFAULT_ROLES } from "./roles.js";
 import { runSetup } from "./setup.js";
-import { MAX_COVERS_PER_SAVE, setCoverProvider } from "./video-covers.js";
+import { MAX_COVERS_PER_SAVE, setCoverProvider, setMapCoverProvider } from "./video-covers.js";
 
 const T = new Date(1_700_000_000_000);
 const video = (src: string, id = newId(), props: Record<string, unknown> = {}) => ({
@@ -53,6 +53,7 @@ for (const { kind, open, skip } of openers) {
     });
     afterEach(async () => {
       setCoverProvider(null);
+      setMapCoverProvider(null);
       await db.close();
     });
 
@@ -125,6 +126,38 @@ for (const { kind, open, skip } of openers) {
       );
       await save(many);
       expect(calls).toHaveLength(MAX_COVERS_PER_SAVE);
+    });
+
+    const map = (props: Record<string, unknown>, id = newId()) => ({
+      id,
+      type: "map",
+      props,
+      content: null,
+      children: [],
+    });
+
+    test("a map of OpenStreetMap gets its picture once; a map of Google Maps and an empty map get none", async () => {
+      const asked: string[] = [];
+      setMapCoverProvider(async (_site, query) => {
+        asked.push(query);
+        return `/uploads/map-${asked.length}.png`;
+      });
+      const first = await save([
+        map({ query: "  Greenwich  ", provider: "osm" }),
+        map({ query: "Paris", provider: "google" }),
+        map({ query: "", provider: "osm" }),
+      ]);
+      expect(asked).toEqual(["Greenwich"]);
+      const stored = await storedBlocks(first.id);
+      expect(stored[0]!.props["cover"]).toBe("/uploads/map-1.png");
+      expect(stored[1]!.props["cover"]).toBeUndefined();
+      expect(stored[2]!.props["cover"]).toBeUndefined();
+      // Saved again as loaded: not fetched again. Another place: fetched again.
+      const again = await save(stored, first);
+      expect(asked).toEqual(["Greenwich"]);
+      const moved = [{ ...stored[0]!, props: { ...stored[0]!.props, query: "Oxford" } }];
+      await save(moved, again);
+      expect(asked).toEqual(["Greenwich", "Oxford"]);
     });
   });
 }

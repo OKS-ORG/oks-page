@@ -2,7 +2,7 @@
 // and anything unexpected gives no picture instead of an error.
 import type { VideoSource } from "@oks-page/core";
 import { describe, expect, test } from "vitest";
-import { fetchVideoCover } from "./video-cover";
+import { fetchMapCover, fetchVideoCover, tileOf } from "./video-cover";
 
 const youtube: VideoSource = {
   company: "YouTube",
@@ -82,5 +82,62 @@ describe("fetchVideoCover", () => {
       const net = network({ "i.ytimg.com": answer });
       expect(await fetchVideoCover(youtube, net.fetcher), name).toBeNull();
     }
+  });
+});
+
+describe("fetchMapCover", () => {
+  // The centre of a tile, by the inverse formula of the OpenStreetMap wiki.
+  const back = (x: number, y: number, z = 15) => {
+    const n = 2 ** z;
+    const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 0.5)) / n))) * 180) / Math.PI;
+    return { lat, lon: ((x + 0.5) / n) * 360 - 180 };
+  };
+
+  test("the tile numbers are the ones OpenStreetMap uses", () => {
+    // The point 0,0 is the middle of the map; east and north move the numbers the right way; and a tile's own centre
+    // lands in the same tile.
+    expect(tileOf(0, 0)).toEqual({ x: 16384, y: 16384 });
+    expect(tileOf(0, 90).x).toBe(24576);
+    expect(tileOf(60, 0).y).toBeLessThan(16384);
+    for (const [x, y] of [
+      [16383, 10894],
+      [5000, 12000],
+      [30000, 9000],
+    ] as const) {
+      const { lat, lon } = back(x, y);
+      expect(tileOf(lat, lon)).toEqual({ x, y });
+    }
+  });
+
+  test("a place is looked up once, then one picture of its tile is asked for, from OpenStreetMap only", async () => {
+    const centre = back(16383, 10894);
+    const net = network({
+      "nominatim.openstreetmap.org": () =>
+        json([{ lat: String(centre.lat), lon: String(centre.lon) }]),
+      "tile.openstreetmap.org": () => picture("image/png"),
+    });
+    const got = await fetchMapCover("Royal Observatory, Greenwich", net.fetcher);
+    expect(got?.extension).toBe("png");
+    expect(net.asked).toEqual([
+      "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=Royal%20Observatory%2C%20Greenwich",
+      "https://tile.openstreetmap.org/15/16383/10894.png",
+    ]);
+  });
+
+  test("a place that is not found, a strange answer or a failed picture gives no picture", async () => {
+    const none = network({ "nominatim.openstreetmap.org": () => json([]) });
+    expect(await fetchMapCover("nowhere", none.fetcher)).toBeNull();
+    expect(none.asked).toHaveLength(1);
+    const odd = network({ "nominatim.openstreetmap.org": () => json([{ lat: "x", lon: "2" }]) });
+    expect(await fetchMapCover("odd", odd.fetcher)).toBeNull();
+    const pole = network({
+      "nominatim.openstreetmap.org": () => json([{ lat: "89.9", lon: "2" }]),
+    });
+    expect(await fetchMapCover("pole", pole.fetcher)).toBeNull();
+    const html = network({
+      "nominatim.openstreetmap.org": () => json([{ lat: "1", lon: "2" }]),
+      "tile.openstreetmap.org": () => picture("text/html"),
+    });
+    expect(await fetchMapCover("x", html.fetcher)).toBeNull();
   });
 });

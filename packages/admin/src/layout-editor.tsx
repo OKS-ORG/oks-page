@@ -84,6 +84,7 @@ const CATALOGUE: { type: string; label: string; make: () => Block }[] = [
     make: () => block("socialLinks", { items: [] }),
   },
   { type: "map", label: "Map", make: () => block("map", { query: "", provider: "osm" }) },
+  { type: "video", label: "Video", make: () => block("video", { src: "", caption: "" }) },
   {
     type: "accordion",
     label: "Accordion",
@@ -175,6 +176,7 @@ const wordsOf = (b: Block): string => {
   if (b.type === "image") return String(b.props["alt"] ?? "");
   if (b.type === "tab" || b.type === "audio") return String(b.props["title"] ?? "");
   if (b.type === "map") return String(b.props["query"] ?? "");
+  if (b.type === "video") return String(b.props["caption"] ?? b.props["src"] ?? "");
   if (b.type === "icon") return String(b.props["name"] ?? "");
   return Array.isArray(b.content)
     ? b.content.map((r) => String((r as { text?: unknown }).text ?? "")).join("")
@@ -826,6 +828,47 @@ export function LayoutEditor(props: LayoutEditorProps) {
             )
           }
         />
+      ) : null}
+      {place.block.type === "video" ? (
+        <>
+          {field(
+            "Video address (YouTube or Vimeo)",
+            <input
+              style={{ width: "100%" }}
+              value={String(place.block.props["src"] ?? "")}
+              onChange={(e) => setProp("src", e.target.value)}
+            />,
+          )}
+          {field(
+            "Title",
+            <input
+              style={{ width: "100%" }}
+              value={String(place.block.props["caption"] ?? "")}
+              onChange={(e) => setProp("caption", e.target.value)}
+            />,
+          )}
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                checked={place.block.props["loadNow"] === true}
+                onChange={(e) => setProp("loadNow", e.target.checked)}
+              />{" "}
+              Load the player at once
+            </label>
+          </p>
+          {place.block.props["loadNow"] === true ? (
+            <p role="note">
+              Visitors&rsquo; browsers contact the video company the moment the page opens. Your
+              visitors may have to agree to that first, depending on where they live.
+            </p>
+          ) : (
+            <p role="note">
+              The page shows a picture first and loads the player only after a click, so nothing is
+              sent to the video company before that.
+            </p>
+          )}
+        </>
       ) : null}
       {place.block.type === "map" ? (
         <>

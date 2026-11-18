@@ -81,6 +81,7 @@ export function ContentList({
 }: ContentListProps) {
   const when = (iso: string) => formatWhen(iso, timeZone);
   const [title, setTitle] = useState("");
+  const [editor, setEditor] = useState("layout");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<TrashedEntry | null>(null);
@@ -160,7 +161,7 @@ export function ContentList({
       const response = await fetch("/api/admin/entries", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type, title }),
+        body: JSON.stringify({ type, title, editor }),
       });
       const body = (await response.json()) as { id?: string; error?: { message: string } };
       if (response.ok && body.id) {
@@ -319,6 +320,17 @@ export function ContentList({
             value={title}
             onChange={setTitle}
           />
+          {type === "page" ? (
+            <p>
+              <label>
+                Start in{" "}
+                <select value={editor} onChange={(e) => setEditor(e.target.value)}>
+                  <option value="layout">Layout editor (sections, columns, buttons)</option>
+                  <option value="writing">Writing editor (words and pictures)</option>
+                </select>
+              </label>
+            </p>
+          ) : null}
           <Button type="submit" color="primary" isDisabled={busy}>
             Add new
           </Button>

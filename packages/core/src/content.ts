@@ -14,7 +14,7 @@ import { recordSlugChange } from "./redirects.js";
 import { sectionsForContent, writeContentBlocks } from "./saved-sections.js";
 import { canonicalJson, pruneRevisions, summarise } from "./revision-parts.js";
 import { loadScreenSizes } from "./screen-sizes.js";
-import { addVideoCovers } from "./video-covers.js";
+import { addCovers } from "./video-covers.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
 export interface Actor {
@@ -194,7 +194,7 @@ export async function createDraft(
   runner: SqlRunner,
   actor: Actor,
   siteId: string,
-  input: { type: string; title: string },
+  input: { type: string; title: string; editor?: "writing" | "layout" },
   now: () => number = Date.now,
 ): Promise<ContentResult<{ id: string; slug: string; revision: number }>> {
   if (!actor.can("content.create", input.type))
@@ -227,7 +227,11 @@ export async function createDraft(
       prefix + part,
       actor.userId,
       JSON.stringify({ version: 1, blocks: [] }),
-      JSON.stringify(defaults.layout ? { layout: defaults.layout } : {}),
+      // Which editor opens it is chosen by the caller (the screen that adds an entry); without a choice it is the writing editor.
+      JSON.stringify({
+        ...(defaults.layout ? { layout: defaults.layout } : {}),
+        ...(input.editor === "layout" ? { editor: "layout" } : {}),
+      }),
       at,
       at,
     ],
@@ -423,7 +427,7 @@ export async function saveContent(
     { breakpoints: await loadScreenSizes(runner, siteId) },
   );
   // A video block gets the picture it shows before a click (fetched once, kept in Media); a failure only leaves it out.
-  await addVideoCovers(checked.body.blocks, siteId, actor);
+  await addCovers(checked.body.blocks, siteId, actor);
   // A saved section linked in the page is put in place before the HTML and the text are written.
   const linked = await sectionsForContent(runner, siteId, checked.body.blocks);
   if (!linked.ok) return fail("invalid", linked.message, { field: "blocks" });

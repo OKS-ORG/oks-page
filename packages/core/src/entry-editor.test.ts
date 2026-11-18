@@ -98,6 +98,18 @@ for (const { kind, open, skip } of openers) {
       expect((await blocksOf(laid.id)).editor).toBe("layout");
     });
 
+    test("PB-80: the screen that adds an entry chooses the editor; without a choice it is the writing editor", async () => {
+      const make = async (input: { type: string; editor?: "writing" | "layout" }) => {
+        const made = await createDraft(db.runner, anna, siteId, { title: "New one", ...input });
+        if (!made.ok) throw new Error(made.message);
+        return (await blocksOf(made.id)).editor;
+      };
+      expect(await make({ type: "page", editor: "layout" })).toBe("layout");
+      expect(await make({ type: "page", editor: "writing" })).toBe("writing");
+      expect(await make({ type: "page" })).toBe("writing");
+      expect(await make({ type: "post" })).toBe("writing");
+    });
+
     test("PB-81: writing to layout keeps every block, its order and its text, and saves a revision first", async () => {
       const made = await page([para("one"), para("two"), para("three")]);
       const before = await revisionsOf(made.id);

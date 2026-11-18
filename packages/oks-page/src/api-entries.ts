@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     return reply({ code: "forbidden", message: "This request came from another address." }, 403);
   const member = await signedInMember();
   if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
-  let input: { type?: unknown; title?: unknown };
+  let input: { type?: unknown; title?: unknown; editor?: unknown };
   try {
     input = (await request.json()) as typeof input;
   } catch {
@@ -38,6 +38,9 @@ export async function POST(request: Request) {
   const result = await createDraft(getRunner(), await actorOf(member), member.siteId, {
     type: String(input.type ?? ""),
     title: String(input.title ?? ""),
+    // A new page opens in the layout editor unless the writing editor is asked for; a post in the writing editor
+    // (spec 06, 13.1, PB-80).
+    editor: input.editor === "writing" || input.type !== "page" ? "writing" : "layout",
   });
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   return NextResponse.json({ id: result.id, slug: result.slug, revision: result.revision });

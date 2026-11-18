@@ -1113,6 +1113,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await signIn(page);
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill("My new page");
+    await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
     await page.getByRole("heading", { name: "Edit: My new page", level: 1 }).waitFor();
     expect(await page.getByLabel(/^Address/).inputValue()).toBe("my-new-page");
@@ -1176,6 +1177,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.goto(site.base + "/admin/pages");
     expect(await page.getByRole("link", { name: "About", exact: true }).count()).toBe(0); // only her own
     await page.getByLabel(/^Title of the new page/).fill("Cara's draft");
+    await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
     await page.getByRole("heading", { name: "Edit: Cara's draft", level: 1 }).waitFor();
     await page.getByText("An editor publishes it.").waitFor();
@@ -1216,7 +1218,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     const add = await fetch(site.base + "/api/admin/entries", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "page", title: "x" }),
+      body: JSON.stringify({ type: "page", editor: "writing", title: "x" }),
     });
     expect(add.status).toBe(401);
     const save = await fetch(site.base + "/api/admin/entries/anything", {
@@ -2069,6 +2071,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
     await page.getByLabel(/^Title of the new page/).fill(title);
+    await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
     await page.getByRole("heading", { name: `Edit: ${title}`, level: 1 }).waitFor();
   };
@@ -2806,7 +2809,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     let entryId = entry;
     if (!entryId) {
       const created = await ownerApi.post(site.base + "/api/admin/entries", {
-        data: { type: "page", title: "Uses a picture" },
+        data: { type: "page", editor: "writing", title: "Uses a picture" },
       });
       entryId = ((await created.json()) as { id: string }).id;
     }
@@ -3007,7 +3010,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     const doomed = await uploadVia("Doomed.png");
     const busy = await uploadVia("Busy.png", "#00c");
     const created = await ownerApi.post(site.base + "/api/admin/entries", {
-      data: { type: "page", title: "Uses Busy" },
+      data: { type: "page", editor: "writing", title: "Uses Busy" },
     });
     const pageId = ((await created.json()) as { id: string }).id;
     await db.run("insert into entry_media (entry_id, media_id, field) values (?, ?, ?)", [
@@ -3097,7 +3100,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
   test("in the editor: insert an image from the library, upload one in the same window, save, publish, and the public page shows both", async () => {
     const first = await uploadVia("Gallery one.png", "#808");
     const created = await ownerApi.post(site.base + "/api/admin/entries", {
-      data: { type: "page", title: "Gallery page" },
+      data: { type: "page", editor: "writing", title: "Gallery page" },
     });
     const pageId = ((await created.json()) as { id: string }).id;
     const page = await ownerPage();
@@ -3156,7 +3159,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
   test("a public page uses the image sizes and the blur, as soon as the sizes exist, and every size can be fetched", async () => {
     const shot = await uploadVia("Responsive shot.png", "#a50");
     const created = await ownerApi.post(site.base + "/api/admin/entries", {
-      data: { type: "page", title: "Responsive page" },
+      data: { type: "page", editor: "writing", title: "Responsive page" },
     });
     const pageId = ((await created.json()) as { id: string }).id;
     const saved = await ownerApi.put(site.base + `/api/admin/entries/${pageId}`, {
@@ -3206,7 +3209,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
 
   test("in the editor: a file chosen in the image block is stored in the library", async () => {
     const created = await ownerApi.post(site.base + "/api/admin/entries", {
-      data: { type: "page", title: "Block upload" },
+      data: { type: "page", editor: "writing", title: "Block upload" },
     });
     const pageId = ((await created.json()) as { id: string }).id;
     const page = await ownerPage();
@@ -3243,7 +3246,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
       expect(await violations(page), `library ${width}px`).toEqual([]);
 
       const created = await ownerApi.post(site.base + "/api/admin/entries", {
-        data: { type: "page", title: `Axe page ${width}` },
+        data: { type: "page", editor: "writing", title: `Axe page ${width}` },
       });
       const pageId = ((await created.json()) as { id: string }).id;
       await page.goto(site.base + `/admin/pages/${pageId}`);
@@ -4495,6 +4498,7 @@ describe.skipIf(!findBrowser())(
       await page
         .getByLabel(new RegExp(`^Title of the new ${kind === "posts" ? "post" : "page"}`))
         .fill(title);
+      if (kind === "pages") await page.getByLabel("Start in").selectOption("writing");
       await page.getByRole("button", { name: "Add new", exact: true }).click();
       await page.getByRole("heading", { name: `Edit: ${title}`, level: 1 }).waitFor();
     };
@@ -5954,7 +5958,11 @@ describe.skipIf(!findBrowser())(
     test("trying a theme with my content (TH-55, TH-62): the preview draws a real page with the theme's file while the site keeps its look; widths change the frame; a visitor and an editor are turned away", async () => {
       const page = await signedIn(owner);
       const made = (
-        await call(page, "POST", "/api/admin/entries", { type: "page", title: "Try page" })
+        await call(page, "POST", "/api/admin/entries", {
+          type: "page",
+          editor: "writing",
+          title: "Try page",
+        })
       ).json as { id: string; slug: string; revision: number };
       const saved = await call(page, "PUT", `/api/admin/entries/${made.id}`, {
         title: "Try page",
@@ -6111,6 +6119,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Scheduled page",
       });
       const e = made.json as { id: string; slug: string; revision: number };
@@ -6160,7 +6169,11 @@ describe.skipIf(!findBrowser())(
     test("publish check: going live with no content or a picture with no description is refused with a list; an administrator may go on anyway and it is logged; an editor may not", async () => {
       const page = await signedIn(owner);
       const make = async (title: string) => {
-        const made = await call(page, "POST", "/api/admin/entries", { type: "page", title });
+        const made = await call(page, "POST", "/api/admin/entries", {
+          type: "page",
+          editor: "writing",
+          title,
+        });
         return made.json as { id: string; slug: string; revision: number };
       };
       const para = [
@@ -6268,6 +6281,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Check me",
       });
       const info = made.json as { id: string; slug: string; revision: number };
@@ -6349,6 +6363,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Decor page",
       });
       const info = made.json as { id: string; slug: string; revision: number };
@@ -6434,6 +6449,7 @@ describe.skipIf(!findBrowser())(
       const sectionId = (made.json as { section: { id: string } }).section.id;
       const created = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Visit us",
       });
       const pageId = (created.json as { id: string }).id;
@@ -6619,6 +6635,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Styled page",
       });
       expect(made.status).toBe(200);
@@ -6679,6 +6696,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Built page",
       });
       expect(made.status).toBe(200);
@@ -6753,6 +6771,7 @@ describe.skipIf(!findBrowser())(
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
         title: "Catalogue page",
+        editor: "writing",
       });
       expect(made.status).toBe(200);
       const id = String(made.json!["id"]);
@@ -6823,6 +6842,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {
         type: "page",
+        editor: "writing",
         title: "Dragged page",
       });
       expect(made.status).toBe(200);
@@ -7084,6 +7104,52 @@ describe.skipIf(!findBrowser())(
       await page.keyboard.press("Escape");
       await page.locator("dialog.oks-lightbox[open]").waitFor({ state: "detached" });
       await context.close();
+    });
+
+    test("PB-80: a new page opens in the layout editor unless the writing editor is chosen; a new post opens in the writing editor", async () => {
+      const page = await signedIn(owner);
+      const add = async (kind: "pages" | "posts", title: string, start?: string) => {
+        await page.goto(`${site.base}/admin/${kind}`);
+        const word = kind === "pages" ? "page" : "post";
+        await page.getByLabel(new RegExp(`^Title of the new ${word}`)).fill(title);
+        if (start) await page.getByLabel("Start in").selectOption(start);
+        await page.getByRole("button", { name: "Add new", exact: true }).click();
+        await page.getByRole("heading", { name: `Edit: ${title}`, level: 1 }).waitFor();
+      };
+      const layout = page.getByRole("region", { name: "Blocks on this page" });
+      await add("pages", "Default editor page");
+      await layout.waitFor();
+      await add("pages", "Writing editor page", "writing");
+      await page.locator("[contenteditable=true]").first().waitFor();
+      expect(await layout.count()).toBe(0);
+      await add("posts", "Default editor post");
+      await page.locator("[contenteditable=true]").first().waitFor();
+      expect(await layout.count()).toBe(0);
+      expect(await page.getByLabel("Start in").count()).toBe(0);
+    });
+
+    test('PB-93: the video block in the layout editor says what "load at once" means', async () => {
+      const page = await signedIn(owner);
+      const made = await layoutPage(page, "Video settings", [b("section")]);
+      await page.goto(site.base + `/admin/pages/${made.id}`);
+      const tools = page.getByRole("toolbar", { name: "Layout tools" });
+      await tools.waitFor();
+      const blocks = page.getByRole("region", { name: "Blocks on this page" });
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await page.getByLabel("Add a block").selectOption({ label: "Video" });
+      await tools.getByRole("button", { name: "Add", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await page
+        .getByLabel("Video address (YouTube or Vimeo)")
+        .fill("https://youtu.be/dQw4w9WgXcQ");
+      const note = page.getByRole("note");
+      expect(await note.innerText()).toContain("only after a click");
+      await page.getByLabel("Load the player at once").check();
+      expect(await note.innerText()).toContain(
+        "contact the video company the moment the page opens",
+      );
+      await page.getByLabel("Load the player at once").uncheck();
+      expect(await note.innerText()).toContain("only after a click");
     });
 
     test("PB-93: a video asks YouTube for nothing before a click, works as a link without script, and loads the player after a click", async () => {
@@ -7351,7 +7417,7 @@ describe.skipIf(!findBrowser())(
         const r = await fetch("/api/admin/entries", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "page", title: "Searchable zebra page" }),
+          body: JSON.stringify({ type: "page", editor: "writing", title: "Searchable zebra page" }),
         });
         return r.status;
       });

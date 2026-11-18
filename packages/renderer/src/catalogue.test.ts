@@ -103,6 +103,27 @@ describe("a video before a click (PB-93)", () => {
   });
 });
 
+describe("a map before a click (PB-94)", () => {
+  const props = { query: "Greenwich", provider: "osm", cover: "/uploads/map-1.png" };
+  test("a stored picture of the place is drawn, with the credit, and the page asks no map company for anything", () => {
+    const out = html(block("map", { props }));
+    expect(out).toContain('<img src="/uploads/map-1.png" alt="" loading="lazy">');
+    expect(out).toContain("&copy; OpenStreetMap contributors");
+    expect(out).toContain("Show the map: Greenwich");
+    // The only addresses in the block are the link the visitor may follow and the stored picture.
+    expect(out.match(/(?:src|href)="[^"]*"/g)).toEqual([
+      'href="https://www.openstreetmap.org/search?query=Greenwich"',
+      'src="/uploads/map-1.png"',
+    ]);
+  });
+  test("a Google map has no picture, and a cover from another address is not used", () => {
+    expect(html(block("map", { props: { ...props, provider: "google" } }))).not.toContain("<img");
+    expect(
+      html(block("map", { props: { ...props, cover: "https://evil.test/x.png" } })),
+    ).not.toContain("<img");
+  });
+});
+
 describe("map, accordion, tabs, slider", () => {
   test("PB-93: a map is a link until the visitor follows it, and it names the company it opens", () => {
     const out = html(block("map", { props: { query: "10 Rue de Rivoli, Paris" } }));
