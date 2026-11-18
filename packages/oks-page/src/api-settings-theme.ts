@@ -30,6 +30,7 @@ export async function PUT(request: Request) {
     mainColor?: string | null;
     logoMediaId?: string | null;
     customCss?: string;
+    customCssOn?: boolean;
     bodyFont?: string;
     headingFont?: string;
     colorMode?: string;
@@ -38,6 +39,7 @@ export async function PUT(request: Request) {
   if ("mainColor" in input) patch.mainColor = input["mainColor"] as string | null;
   if ("logoMediaId" in input) patch.logoMediaId = input["logoMediaId"] as string | null;
   if ("customCss" in input) patch.customCss = input["customCss"] as string;
+  if ("customCssOn" in input) patch.customCssOn = input["customCssOn"] as boolean;
   if ("bodyFont" in input) patch.bodyFont = input["bodyFont"] as string;
   if ("headingFont" in input) patch.headingFont = input["headingFont"] as string;
   if ("colorMode" in input) patch.colorMode = input["colorMode"] as string;

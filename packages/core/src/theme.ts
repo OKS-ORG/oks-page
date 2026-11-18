@@ -322,6 +322,8 @@ export interface ThemeStyles {
   logoMediaId: string | null;
   /** The developer's own CSS (already checked and without comments), or an empty text. Written after the look. */
   customCss: string;
+  /** False after the theme was changed: the CSS is kept, not written, until the owner switches it on again (TH-66). */
+  customCssOn?: boolean;
   /** A system font ("system-sans") or a font of the built-in library ("inter"). */
   bodyFont: string;
   headingFont: string;
@@ -335,6 +337,7 @@ export const DEFAULT_THEME_STYLES: ThemeStyles = {
   mainColor: null,
   logoMediaId: null,
   customCss: "",
+  customCssOn: true,
   bodyFont: "system-sans",
   headingFont: "system-sans",
   // The founder's decision (D68): follow the visitor's device, with a switch.
@@ -377,6 +380,7 @@ export function stylesToCss(styles: ThemeStyles): string {
   const mode = colorModeCss(styles.colorMode, styles.modeSwitch);
   const look = [faces, colors, mode].filter(Boolean).join("\n");
   // The custom CSS is checked again here, so only checked text is ever written, whatever was stored.
-  const custom = styles.customCss ? checkThemeCss(styles.customCss) : null;
+  const custom =
+    styles.customCss && styles.customCssOn !== false ? checkThemeCss(styles.customCss) : null;
   return custom?.ok && custom.css ? (look ? `${look}\n${custom.css}` : custom.css) : look;
 }

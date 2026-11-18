@@ -18,6 +18,7 @@ import {
   type ThemeLayout,
   type ThemePreset,
 } from "./theme-package.js";
+import { switchOffCustomCss } from "./theme-settings.js";
 import { addStarterPages } from "./theme-starter.js";
 
 /** The biggest theme file that may be uploaded (the packed .tgz; the unpacked limit is checked while reading it). */
@@ -427,8 +428,15 @@ export async function useTheme(
   options: { starter?: boolean } = {},
 ): Promise<ThemeActionResult<{ active: InstalledTheme | null; starterAdded: number }>> {
   if (!actor.can("themes.manage")) return forbidden;
+  const wasActive = await runner.all(
+    `select "id" from "themes" where "site_id" = ? and "is_active" = ? and "source" = 'runtime'`,
+    [siteId, true],
+  );
+  const before = wasActive[0] ? String(wasActive[0]["id"]) : null;
   if (id === null) {
     await runner.all(`update "themes" set "is_active" = ? where "site_id" = ?`, [false, siteId]);
+    // The owner's own CSS is kept and switched off, because it was written for the theme that was in use (TH-66).
+    if (before !== null) await switchOffCustomCss(runner, siteId);
     return { ok: true, active: null, starterAdded: 0 };
   }
   const found = await findTheme(runner, siteId, id);
@@ -441,6 +449,7 @@ export async function useTheme(
     ]);
     await tx.all(`update "themes" set "is_active" = ? where "id" = ?`, [true, id]);
   });
+  if (before !== id) await switchOffCustomCss(runner, siteId);
   const starterAdded = options.starter
     ? await addStarterPages(runner, actor, siteId, found.stored.current.starter ?? [])
     : 0;

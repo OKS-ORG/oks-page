@@ -53,6 +53,7 @@ export function readThemeStyles(raw: unknown): ThemeStyles {
         : null,
     bodyFont: isFont(saved["bodyFont"]) ? saved["bodyFont"] : DEFAULT_THEME_STYLES.bodyFont,
     customCss: readCustomCss(saved["customCss"]),
+    customCssOn: saved["customCssOn"] !== false,
     headingFont: isFont(saved["headingFont"])
       ? saved["headingFont"]
       : DEFAULT_THEME_STYLES.headingFont,
@@ -107,6 +108,7 @@ export async function saveThemeStyles(
     mainColor: string | null;
     logoMediaId: string | null;
     customCss: string;
+    customCssOn: boolean;
     bodyFont: string;
     headingFont: string;
     colorMode: string;
@@ -150,6 +152,12 @@ export async function saveThemeStyles(
     if (!checked.ok) return bad("customCss", describeCssProblems(checked.errors));
     customCss = checked.css;
   }
+  let customCssOn = current.customCssOn !== false;
+  if (input.customCssOn !== undefined) {
+    if (typeof input.customCssOn !== "boolean")
+      return bad("customCssOn", "Say whether your own CSS is on.");
+    customCssOn = input.customCssOn;
+  }
   let bodyFont = current.bodyFont;
   if (input.bodyFont !== undefined) {
     if (!isFont(input.bodyFont) || !(await mayUseFont(runner, siteId, input.bodyFont)))
@@ -180,6 +188,7 @@ export async function saveThemeStyles(
     mainColor,
     logoMediaId,
     customCss,
+    customCssOn,
     bodyFont,
     headingFont,
     colorMode,
@@ -191,4 +200,19 @@ export async function saveThemeStyles(
     [siteId, THEME_SETTINGS_KEY, JSON.stringify(styles), new Date()],
   );
   return { ok: true, styles };
+}
+
+/**
+ * Switches the owner's own CSS off, keeping it (TH-66). Called when the theme in use changes: CSS written for one theme can
+ * break another. Returns true when there was CSS that was on.
+ */
+export async function switchOffCustomCss(runner: SqlRunner, siteId: string): Promise<boolean> {
+  const current = await loadThemeStyles(runner, siteId);
+  if (!current.customCss || current.customCssOn === false) return false;
+  await runner.all(
+    `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
+     on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,
+    [siteId, THEME_SETTINGS_KEY, JSON.stringify({ ...current, customCssOn: false }), new Date()],
+  );
+  return true;
 }

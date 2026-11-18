@@ -2,7 +2,7 @@
 import {
   isSetupDone,
   listThemes,
-  loadContrastWarnings,
+  loadActiveThemeVersion,
   loadOwnerFonts,
   loadThemeStyles,
 } from "@oks-page/core";
@@ -28,7 +28,7 @@ export default async function LookSettingsPage() {
   const actor = await actorOf(member);
   if (!actor.can("settings.manage")) redirect("/admin");
   const styles = await loadThemeStyles(getRunner(), member.siteId);
-  const warnings = await loadContrastWarnings(getRunner(), member.siteId);
+  const themeTokens = (await loadActiveThemeVersion(getRunner(), member.siteId))?.tokens ?? null;
   const activeTheme = (await listThemes(getRunner(), member.siteId)).find((t) => t.isActive);
   const ownerFonts = (await loadOwnerFonts(getRunner(), member.siteId)).map(
     ({ key, name, kind, weight, bytes }) => ({ key, name, kind, weight, bytes }),
@@ -59,7 +59,7 @@ export default async function LookSettingsPage() {
       <LookForm
         initial={styles}
         logo={logo}
-        warnings={warnings}
+        themeTokens={themeTokens}
         ownerFonts={ownerFonts}
         presets={activeTheme?.presets ?? []}
         themeName={activeTheme?.name ?? ""}

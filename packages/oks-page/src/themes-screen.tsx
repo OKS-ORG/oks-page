@@ -53,7 +53,14 @@ function whatIsInside(theme: InstalledTheme): string {
 /** Two lines that open more sit one under the other; each is a 24 px target (WCAG 2.2, target size). */
 const SUMMARY = { minBlockSize: "24px", lineHeight: "24px" } as const;
 
-export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
+export function ThemesScreen({
+  initial,
+  rtlSite = false,
+}: {
+  initial: InstalledTheme[];
+  /** The site is written right to left (Settings, Languages). */
+  rtlSite?: boolean;
+}) {
   const [themes, setThemes] = useState(initial);
   // The file is read from the field when the form is sent, so a file chosen while the page was still loading counts.
   const fileField = useRef<HTMLInputElement>(null);
@@ -269,6 +276,13 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
                   ? "Tested for right-to-left languages."
                   : "Not tested for right-to-left languages."}
               </p>
+              {rtlSite && theme.rtl !== "supported" ? (
+                <Alert
+                  color="warning"
+                  title="Check this theme first"
+                  description={`Your site is written from right to left, and ${theme.name} was not tested for that. Use "Try ${theme.name} with my content" to look at your pages before you use it.`}
+                />
+              ) : null}
               <p>{whatIsInside(theme)}.</p>
               {theme.presets.length > 0 || theme.starterPages > 0 ? (
                 <p>

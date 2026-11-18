@@ -69,6 +69,53 @@ describe("the scale made from one color", () => {
     }
   });
 
+  test("TH-59: for 20 brand colors the main color stays recognisable and step 700 holds 4.5:1 in both modes", () => {
+    const brands = [
+      "#e11d48",
+      "#dc2626",
+      "#ea580c",
+      "#d97706",
+      "#ca8a04",
+      "#65a30d",
+      "#16a34a",
+      "#059669",
+      "#0d9488",
+      "#0891b2",
+      "#0284c7",
+      "#2563eb",
+      "#4f46e5",
+      "#7c3aed",
+      "#9333ea",
+      "#c026d3",
+      "#db2777",
+      "#2a6f4f",
+      "#b45309",
+      "#1e3a5f",
+    ];
+    expect(brands).toHaveLength(20);
+    const hueOf = (hex: string): number => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [
+        number,
+        number,
+        number,
+      ];
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    const apart = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+    for (const seed of brands) {
+      const light = colorScale(seed, "light")!;
+      const dark = colorScale(seed, "dark")!;
+      expect(contrastRatio(light[700], "#ffffff"), `${seed} light`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(dark[700], "#000000"), `${seed} dark`).toBeGreaterThanOrEqual(4.5);
+      // The middle of the scale keeps the color's hue (within 20 degrees) in both modes.
+      for (const scale of [light, dark])
+        expect(apart(hueOf(scale[500]), hueOf(seed)), `${seed} hue`).toBeLessThanOrEqual(20);
+    }
+  });
+
   test("handles greys, white, black and bright yellow without breaking", () => {
     for (const seed of ["#808080", "#ffffff", "#000000", "#ffff00", "#00ffff"]) {
       const scale = colorScale(seed)!;

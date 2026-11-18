@@ -5632,6 +5632,7 @@ describe.skipIf(!findBrowser())(
           mainColor: null,
           logoMediaId: null,
           customCss: "",
+          customCssOn: true,
           bodyFont: "system-sans",
           headingFont: "system-sans",
           colorMode: "system",
@@ -6619,6 +6620,8 @@ describe.skipIf(!findBrowser())(
       const saved = await call(page, "PUT", "/api/admin/settings/theme", {
         mainColor: "#2a6f4f",
         customCss: "h1 { letter-spacing: 0.4em }",
+        // An earlier test that changed the theme switched the CSS off (TH-66): this test needs it on.
+        customCssOn: true,
       });
       expect(saved.status).toBe(200);
       const html = await (await fetch(site.base + "/")).text();
@@ -6854,6 +6857,218 @@ describe.skipIf(!findBrowser())(
       await page.goto(site.base + "/admin/settings/look");
       await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
       expect(await page.getByText("Hard to read").count()).toBe(0);
+    });
+
+    test("TH-56: the contrast warnings follow the colors as they are picked, before anything is saved", async () => {
+      const page = await signedIn(owner);
+      // Earlier tests may have saved a main color, which would hide the theme's own: start with none, put it back at the end.
+      const saved = (
+        (await call(page, "GET", "/api/admin/settings/theme")).json as {
+          styles: { mainColor: string | null };
+        }
+      ).styles.mainColor;
+      expect(
+        (await call(page, "PUT", "/api/admin/settings/theme", { mainColor: null })).status,
+      ).toBe(200);
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "sun-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: tgz({
+          "theme.json": JSON.stringify({
+            key: "sun",
+            name: "Sun",
+            version: "1.0.0",
+            options: ["mainColor"],
+            tokens: { color: { "primary-700": "#ffee00" } },
+          }),
+        }),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByRole("button", { name: "Use Sun" }).waitFor();
+      await page.getByRole("button", { name: "Use Sun" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Sun" }).click();
+      await page.getByText("Your site uses Sun now.").waitFor();
+
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
+      const weakButton = page
+        .getByText(/the text on the main-color button is hard to read/)
+        .first();
+      await weakButton.waitFor();
+      // Picking a dark main color takes the warning away at once; the saved look is not touched.
+      await page.locator("#look-color").fill("#2a6f4f");
+      await weakButton.waitFor({ state: "detached" });
+      expect(await page.getByText("Hard to read").count()).toBe(0);
+      await page.reload();
+      await weakButton.waitFor();
+      // Put the site back as it was.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      await page.getByRole("button", { name: "Remove Sun" }).click();
+      await page.getByRole("button", { name: "Yes, remove Sun" }).click();
+      await page.getByText("Sun is removed.").waitFor();
+      expect(
+        (await call(page, "PUT", "/api/admin/settings/theme", { mainColor: saved })).status,
+      ).toBe(200);
+    });
+
+    test("TH-61: on a right-to-left site a theme that was not tested for it carries a notice; a tested theme does not", async () => {
+      const page = await signedIn(owner);
+      const pack = (key: string, rtl: string) =>
+        tgz({
+          "theme.json": JSON.stringify({ key, name: key.toUpperCase(), version: "1.0.0", rtl }),
+        });
+      await page.goto(site.base + "/admin/settings/themes");
+      for (const [key, rtl] of [
+        ["rtla", "untested"],
+        ["rtlb", "supported"],
+      ] as const) {
+        await page.getByLabel("Theme file (.tgz)").setInputFiles({
+          name: `${key}.tgz`,
+          mimeType: "application/gzip",
+          buffer: pack(key, rtl),
+        });
+        await page.getByRole("button", { name: "Upload and check" }).click();
+        await page.getByRole("button", { name: `Use ${key.toUpperCase()}` }).waitFor();
+      }
+      // A left-to-right site: no notice.
+      const card = (name: string) =>
+        page.locator("li", { has: page.getByRole("heading", { name: new RegExp(name) }) });
+      expect(await card("RTLA").getByText("Check this theme first").count()).toBe(0);
+      const set = (tag: string) =>
+        page.evaluate(
+          async (t) =>
+            (
+              await fetch("/api/admin/settings/language", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ tag: t, direction: "auto" }),
+              })
+            ).status,
+          tag,
+        );
+      expect(await set("ar")).toBe(200);
+      await page.reload();
+      await card("RTLA").getByText("Check this theme first").waitFor();
+      expect(await card("RTLB").getByText("Check this theme first").count()).toBe(0);
+      await page.getByText(/RTLA was not tested for that/).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      expect(await set("en")).toBe(200);
+      for (const key of ["RTLA", "RTLB"]) {
+        await page.reload();
+        await page.getByRole("button", { name: `Remove ${key}` }).click();
+        await page.getByRole("button", { name: `Yes, remove ${key}` }).click();
+        await page.getByText(`${key} is removed.`).waitFor();
+      }
+    });
+
+    test("TH-58: the default theme's sample pages have no accessibility violation in light and dark mode", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/pages");
+      await page.getByText("Import from Markdown files").click();
+      await page.locator("#import-md").setInputFiles({
+        name: "sample-th58.md",
+        mimeType: "text/markdown",
+        buffer: Buffer.from(
+          [
+            "---",
+            "status: published",
+            "slug: sample-th58",
+            "---",
+            "# A sample page",
+            "",
+            "Some **bold** words, some *italic* words and a [link](https://example.com/a).",
+            "",
+            "## A list and a quote",
+            "",
+            "- first item",
+            "- second item",
+            "",
+            "1. one",
+            "2. two",
+            "",
+            "> A quote that says something.",
+            "",
+            "```js",
+            "const answer = 42;",
+            "```",
+            "",
+            "---",
+            "",
+            "### The end",
+            "",
+            "Last paragraph.",
+            "",
+          ].join("\n"),
+        ),
+      });
+      await page.getByRole("button", { name: "Import the files" }).click();
+      await page
+        .getByRole("region", { name: "Import report" })
+        .getByText(/1 added \(1 published/)
+        .waitFor();
+      expect((await fetch(site.base + "/sample-th58")).status).toBe(200);
+      for (const scheme of ["light", "dark"] as const) {
+        const visitor = await (await browser.newContext({ colorScheme: scheme })).newPage();
+        for (const path of ["/", "/sample-th58"])
+          for (const width of [1280, 390]) {
+            await visitor.setViewportSize({ width, height: 900 });
+            await visitor.goto(site.base + path);
+            expect(await visitor.evaluate(() => document.documentElement.dataset["theme"])).toBe(
+              scheme,
+            );
+            expect(await axeViolations(visitor), `${scheme} ${path} ${width}px`).toEqual([]);
+          }
+        await visitor.context().close();
+      }
+    });
+
+    test("TH-67: the design screens use plain words: no screen says template, part, pattern, override or token", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "maple-th67.tgz",
+        mimeType: "application/gzip",
+        buffer: maple("1.0.0", "1px"),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByRole("button", { name: "Use Maple" }).waitFor();
+      await page.getByRole("button", { name: "Use Maple" }).click();
+      await page.getByRole("button", { name: "Yes, switch to Maple" }).click();
+      await page.getByText("Your site uses Maple now.").waitFor();
+      const forbidden = /\b(templates?|parts?|patterns?|overrides?|tokens?)\b/i;
+      const themeId = (
+        (await call(page, "GET", "/api/admin/themes")).json as {
+          themes: { id: string; name: string }[];
+        }
+      ).themes.find((t) => t.name === "Maple")!.id;
+      for (const path of [
+        "/admin/settings/themes",
+        `/admin/themes/${themeId}/preview`,
+        "/admin/settings/look",
+        "/admin/settings/site-editor",
+      ]) {
+        await page.goto(site.base + path);
+        await page.getByRole("heading", { level: 1 }).waitFor();
+        await page.waitForLoadState("networkidle");
+        // The page's own words: what a person can read (headings, text, buttons, labels), without the site's own pages.
+        const words = await page.locator("main").evaluate((el) => (el as HTMLElement).innerText);
+        const found = forbidden.exec(words);
+        expect(
+          found?.[0] ?? null,
+          `${path}: ${found ? words.slice(Math.max(0, found.index - 40), found.index + 60) : ""}`,
+        ).toBeNull();
+      }
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      await page.getByRole("button", { name: "Remove Maple" }).click();
+      await page.getByRole("button", { name: "Yes, remove Maple" }).click();
+      await page.getByText("Maple is removed.").waitFor();
     });
 
     test("theme layouts: public pages are drawn from the layouts of the theme in use, with live data, and the built-in pages come back when it is not", async () => {

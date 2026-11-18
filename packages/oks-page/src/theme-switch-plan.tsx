@@ -18,7 +18,7 @@ export function SwitchPlan({ plan }: { plan: ThemeSwitchPlan }) {
   ];
   if (kept.customCss)
     keptLines.push(
-      "Your own CSS. It stays switched on, so look at the site afterwards to check that it still fits.",
+      "Your own CSS. It is kept and switched off, because it was written for the theme you use now. You can switch it on again on the Look screen once you have looked at the new theme.",
     );
   const nothingStays = stays.changedLayouts.length === 0 && stays.ownerLayouts.length === 0;
   return (

@@ -17,7 +17,8 @@ import {
   type LibraryFont,
   type ThemeStyles,
 } from "@oks-page/core/theme";
-import type { ContrastWarning } from "@oks-page/core";
+import { contrastWarnings } from "@oks-page/core/contrast";
+import type { ThemeTokens } from "@oks-page/core/theme";
 import { Alert, Button } from "oks-ui";
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { MediaPicker } from "./media-picker";
@@ -67,14 +68,15 @@ const failure = (body: unknown, fallback: string): string =>
 export function LookForm({
   initial,
   logo,
-  warnings = [],
+  themeTokens = null,
   ownerFonts: ownerFontsAtStart = [],
   presets = [],
   themeName = "",
 }: {
   initial: ThemeStyles;
   logo: LogoPreview | null;
-  warnings?: ContrastWarning[];
+  /** The design values of the theme in use: the contrast warnings are worked out from them as the owner picks. */
+  themeTokens?: ThemeTokens | null;
   ownerFonts?: OwnerFontView[];
   /** The looks the theme in use offers to start from. */
   presets?: {
@@ -139,6 +141,7 @@ export function LookForm({
   const [colorMode, setColorMode] = useState<ColorMode>(initial.colorMode);
   const [modeSwitch, setModeSwitch] = useState(initial.modeSwitch);
   const [customCss, setCustomCss] = useState(initial.customCss);
+  const [customCssOn, setCustomCssOn] = useState(initial.customCssOn !== false);
   const [logoId, setLogoId] = useState<string | null>(initial.logoMediaId);
   const [logoShown, setLogoShown] = useState<LogoPreview | null>(logo);
   const [picking, setPicking] = useState(false);
@@ -157,6 +160,7 @@ export function LookForm({
           mainColor: color,
           logoMediaId: logoId,
           customCss,
+          customCssOn,
           bodyFont,
           headingFont,
           colorMode,
@@ -328,7 +332,7 @@ export function LookForm({
               Show visitors a switch to choose light or dark for themselves
             </label>
           </p>
-          {warnings
+          {contrastWarnings(themeTokens, { mainColor: color, colorMode: "system" })
             .filter((w) => colorMode === "system" || w.mode === (colorMode as string))
             .map((w) => (
               <Alert
@@ -405,6 +409,25 @@ export function LookForm({
               onChange={(event) => setCustomCss(event.target.value)}
             />
           </p>
+          {customCss.length > 0 ? (
+            <p>
+              <label style={{ display: "inline-block", minBlockSize: "24px" }}>
+                <input
+                  type="checkbox"
+                  checked={customCssOn}
+                  onChange={(event) => setCustomCssOn(event.target.checked)}
+                />{" "}
+                Use my own CSS on the public pages
+              </label>
+              <br />
+              {customCssOn ? null : (
+                <small>
+                  It is switched off and kept. It switches off when the theme changes, because it
+                  was written for the theme before. Look at the site, then tick this and save.
+                </small>
+              )}
+            </p>
+          ) : null}
           <p id="look-css-hint">
             It is checked when you save, and comes after the look above. Up to 50 KB. These are not
             allowed: @import, addresses of other sites, scripts, and anything that could break out

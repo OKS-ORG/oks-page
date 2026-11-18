@@ -1,6 +1,6 @@
 // Settings > Themes, for a signed-in member who may change the design: upload a theme file and read its report, use a
 // theme, go back to the version before, remove one, or go back to the built-in design.
-import { isSetupDone, listThemes } from "@oks-page/core";
+import { directionOf, isSetupDone, listThemes, loadSiteLanguage } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -22,6 +22,7 @@ export default async function ThemesSettingsPage() {
   const actor = await actorOf(member);
   if (!actor.can("themes.manage")) redirect("/admin");
   const themes = await listThemes(getRunner(), member.siteId);
+  const rtlSite = directionOf(await loadSiteLanguage(getRunner(), member.siteId)) === "rtl";
   return (
     <AdminFrame
       nav={navFor((c) => actor.can(c))}
@@ -33,7 +34,7 @@ export default async function ThemesSettingsPage() {
       breadcrumbs={[{ label: "Settings" }, { label: "Themes" }]}
     >
       <SettingsLinks current="themes" />
-      <ThemesScreen initial={themes} />
+      <ThemesScreen initial={themes} rtlSite={rtlSite} />
     </AdminFrame>
   );
 }

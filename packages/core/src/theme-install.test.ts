@@ -21,6 +21,8 @@ import {
   useTheme,
 } from "./theme-install.js";
 import { createDraft } from "./content.js";
+import { stylesToCss } from "./theme.js";
+import { loadThemeStyles, saveThemeStyles } from "./theme-settings.js";
 import { loadActiveThemeLayouts } from "./theme-layouts.js";
 
 // ----- a tiny tar writer (plain files only)
@@ -81,6 +83,8 @@ const maple = (version = "1.0.0", css = "body{background:url(assets/bg.png)}", b
     "patterns/hero.json": JSON.stringify({ blocks: [block("heading")] }),
   });
 
+const birch = () =>
+  tgz({ "theme.json": JSON.stringify({ key: "birch", name: "Birch", version: "1.0.0" }) });
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
 const T = new Date(1_700_000_000_000);
 const actorOf = (userId: string, role: string): Actor => {
@@ -304,6 +308,67 @@ for (const { kind, open, skip } of openers) {
         ok: false,
         code: "forbidden",
       });
+    });
+
+    test("TH-54: switching themes changes no page, post or file, and never anything of the content", async () => {
+      const made = await createDraft(db.runner, admin, siteId, { type: "page", title: "Keep me" });
+      if (!made.ok) throw new Error(made.message);
+      const snapshot = async () =>
+        JSON.stringify([
+          await db.run(`select * from entries order by id`),
+          await db.run(`select * from media order by id`),
+          await db.run(`select * from menus order by id`),
+        ]);
+      const before = await snapshot();
+      const a = await installTheme(db.runner, storage, admin, siteId, maple("1.0.0"));
+      const b = await installTheme(db.runner, storage, admin, siteId, birch());
+      if (!a.ok || !b.ok) throw new Error("install");
+      await useTheme(db.runner, admin, siteId, a.theme.id);
+      await useTheme(db.runner, admin, siteId, b.theme.id);
+      await useTheme(db.runner, admin, siteId, null);
+      expect(await snapshot()).toBe(before);
+    });
+
+    test("TH-66: the owner's own CSS is kept and switched off when the theme changes, and the owner switches it on again", async () => {
+      const css = "h1{letter-spacing:.1em}";
+      expect(await saveThemeStyles(db.runner, admin, siteId, { customCss: css })).toMatchObject({
+        ok: true,
+      });
+      const on = async () => (await loadThemeStyles(db.runner, siteId)).customCssOn;
+      await expect(on()).resolves.toBe(true);
+      const a = await installTheme(db.runner, storage, admin, siteId, maple("1.0.0"));
+      const b = await installTheme(db.runner, storage, admin, siteId, birch());
+      if (!a.ok || !b.ok) throw new Error("install");
+      // Using a theme from the built-in design is a switch: the CSS is kept and off.
+      await useTheme(db.runner, admin, siteId, a.theme.id);
+      const afterFirst = await loadThemeStyles(db.runner, siteId);
+      expect(afterFirst).toMatchObject({ customCssOn: false });
+      expect(afterFirst.customCss).toContain("letter-spacing");
+      expect(stylesToCss(afterFirst)).not.toContain("letter-spacing");
+      // The owner switches it on; using the same theme again is not a switch and leaves it on.
+      await saveThemeStyles(db.runner, admin, siteId, { customCssOn: true });
+      expect(stylesToCss(await loadThemeStyles(db.runner, siteId))).toContain("letter-spacing");
+      await useTheme(db.runner, admin, siteId, a.theme.id);
+      await expect(on()).resolves.toBe(true);
+      // Another theme, and the built-in design, each switch it off again.
+      await useTheme(db.runner, admin, siteId, b.theme.id);
+      await expect(on()).resolves.toBe(false);
+      await saveThemeStyles(db.runner, admin, siteId, { customCssOn: true });
+      await useTheme(db.runner, admin, siteId, null);
+      await expect(on()).resolves.toBe(false);
+      // Going back to a theme by rolling back or updating it is not a switch (an update keeps the choice).
+      await saveThemeStyles(db.runner, admin, siteId, { customCssOn: true });
+      await useTheme(db.runner, admin, siteId, null);
+      await expect(on()).resolves.toBe(true);
+      // A value that is not a yes or a no is refused; too much CSS is refused (50 KB).
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, {
+          customCssOn: "yes" as unknown as boolean,
+        }),
+      ).toMatchObject({ ok: false, field: "customCssOn" });
+      expect(
+        await saveThemeStyles(db.runner, admin, siteId, { customCss: "a{color:red}".repeat(5000) }),
+      ).toMatchObject({ ok: false, field: "customCss" });
     });
 
     test("an update keeps the old version; roll back restores it and rolling back again goes forward (TH-57)", async () => {
