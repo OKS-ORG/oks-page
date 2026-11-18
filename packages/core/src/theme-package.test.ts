@@ -175,6 +175,121 @@ describe("a good package", () => {
   });
 });
 
+describe("presets and sample pages (TH-64, TH-65)", () => {
+  const withManifest = (extra: Record<string, unknown>, more: Item[] = []): Buffer =>
+    tgz([
+      { path: "theme.json", data: JSON.stringify({ ...manifest, ...extra }) },
+      ...good().filter((i) => i.path !== "theme.json"),
+      ...more,
+    ]);
+  const choices = ["mainColor", "bodyFont", "headingFont"];
+  const story = (type: string) => ({
+    path: `starter/${type}-story.json`,
+    data: JSON.stringify({ title: "Our story", type, blocks: [block("paragraph")] }),
+  });
+
+  test("TH-65: presets are read, with their values, and the report says so", () => {
+    const check = checkThemePackage(
+      withManifest({
+        options: choices,
+        presets: [
+          { name: "Warm", values: { mainColor: "#B45309", headingFont: "system-serif" } },
+          { name: "Calm", values: { mainColor: "#2A6F4F", bodyFont: "system-sans" } },
+        ],
+      }),
+    );
+    expect(check.ok, JSON.stringify(check.report)).toBe(true);
+    if (!check.ok) return;
+    expect(check.theme.presets).toEqual([
+      { name: "Warm", values: { mainColor: "#b45309", headingFont: "system-serif" } },
+      { name: "Calm", values: { mainColor: "#2a6f4f", bodyFont: "system-sans" } },
+    ]);
+    expect(check.report.passed.join(" ")).toContain("2 presets");
+  });
+
+  test("TH-65: a preset that sets what the theme does not offer, a bad color or font, a name twice, no values or too many presets is refused", () => {
+    const refused = (presets: unknown, options = choices) =>
+      checkThemePackage(withManifest({ options, presets }));
+    refusedWith(
+      refused([{ name: "A", values: { mainColor: "#112233" } }], ["bodyFont"]),
+      /does not let owners change it/,
+    );
+    refusedWith(refused([{ name: "A", values: { logo: "x" } }]), /cannot change/);
+    refusedWith(refused([{ name: "A", values: { mainColor: "red" } }]), /must look like/);
+    refusedWith(refused([{ name: "A", values: { mainColor: "#12345g" } }]), /must look like/);
+    refusedWith(refused([{ name: "A", values: { bodyFont: "Comic Sans" } }]), /system font/);
+    refusedWith(
+      refused([{ name: "A", values: { bodyFont: "own-sans-400-0123456789abcdef" } }]),
+      /system font/,
+    );
+    refusedWith(
+      refused([
+        { name: "A", values: { mainColor: "#112233" } },
+        { name: "A", values: { mainColor: "#223344" } },
+      ]),
+      /two presets are called "A"/,
+    );
+    refusedWith(refused([{ name: "A", values: {} }]), /needs "values"/);
+    refusedWith(refused([{ values: { mainColor: "#112233" } }]), /needs a name/);
+    refusedWith(refused("Warm"), /list of at most 8/);
+    const nine = Array.from({ length: 9 }, (_, i) => ({
+      name: `P${i}`,
+      values: { mainColor: "#112233" },
+    }));
+    refusedWith(refused(nine), /at most 8/);
+    expect(refused(nine.slice(0, 8)).ok).toBe(true);
+  });
+
+  test("TH-64: sample pages in starter/ are read as pages or posts, and the report says so", () => {
+    const check = checkThemePackage(withManifest({}, [story("page"), story("post")]));
+    expect(check.ok, JSON.stringify(check.report)).toBe(true);
+    if (!check.ok) return;
+    expect(check.theme.starter.map((s) => [s.name, s.title, s.type])).toEqual([
+      ["page-story", "Our story", "page"],
+      ["post-story", "Our story", "post"],
+    ]);
+    expect(check.report.passed.join(" ")).toContain("2 sample pages");
+  });
+
+  test("TH-64: sample pages go through the block checks, a bad file is refused, and more than 12 are refused", () => {
+    const unsafe = withManifest({}, [
+      {
+        path: "starter/link.json",
+        data: JSON.stringify({
+          title: "Link",
+          blocks: [
+            {
+              id: "l1",
+              type: "paragraph",
+              props: {},
+              content: [
+                {
+                  type: "link",
+                  href: "javascript:alert(1)",
+                  content: [{ type: "text", text: "x", styles: {} }],
+                },
+              ],
+              children: [],
+            },
+          ],
+        }),
+      },
+    ]);
+    const checked = checkThemePackage(unsafe);
+    expect(checked.ok).toBe(true);
+    expect(checked.report.warnings.join(" ")).toMatch(/starter\/link\.json.*repaired/);
+    refusedWith(
+      checkThemePackage(withManifest({}, [{ path: "starter/bad.json", data: "{not json" }])),
+      /starter\/bad\.json/,
+    );
+    const many = Array.from({ length: 13 }, (_, i) => ({
+      path: `starter/p${i}.json`,
+      data: JSON.stringify({ title: `P${i}`, blocks: [block("paragraph")] }),
+    }));
+    refusedWith(checkThemePackage(withManifest({}, many)), /at most 12 sample pages/);
+  });
+});
+
 describe("a package that is not safe (TH-19 to TH-32)", () => {
   const withExtra = (...extra: Item[]) => tgz([...good(), ...extra]);
 

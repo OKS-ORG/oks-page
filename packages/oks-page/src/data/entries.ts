@@ -12,6 +12,7 @@ import {
   loadGeneralSettings,
   loadPublicMenu,
   loadActiveThemeCssKey,
+  loadThemeVersion,
   loadActiveThemeLayouts,
   loadFeedPosts,
   type FeedItem,
@@ -29,9 +30,10 @@ import type { EntryView, Look, PostsPage, SiteInfo, TermArchive } from "./types"
 
 /**
  * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
- * the owner's choices win), and the logo (its address and size) when one is chosen.
+ * the owner's choices win), and the logo (its address and size) when one is chosen. With `themeId` it is the look the
+ * site would have with that installed theme (the preview of a theme that is not in use).
  */
-export async function loadLook(): Promise<Look> {
+export async function loadLook(themeId?: string): Promise<Look> {
   const runner = getRunner();
   const siteId = await getSiteId();
   const styles = await loadThemeStyles(runner, siteId);
@@ -53,7 +55,9 @@ export async function loadLook(): Promise<Look> {
       };
     }
   }
-  const themeCssKey = await loadActiveThemeCssKey(runner, siteId);
+  const themeCssKey = themeId
+    ? ((await loadThemeVersion(runner, siteId, themeId))?.version.cssKey ?? null)
+    : await loadActiveThemeCssKey(runner, siteId);
   const css = stylesToCss(styles);
   return {
     themeCssUrl: themeCssKey ? mediaContext().storage.publicUrl(themeCssKey) : null,

@@ -34,7 +34,7 @@ export async function POST(request: Request, context: Context) {
   const member = await signedInMember();
   if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
   const { id } = await context.params;
-  let input: { action?: unknown };
+  let input: { action?: unknown; starter?: unknown };
   try {
     input = (await request.json()) as typeof input;
   } catch {
@@ -42,11 +42,17 @@ export async function POST(request: Request, context: Context) {
   }
   const actor = await actorOf(member);
   if (input.action === "use") {
-    const result = await useTheme(getRunner(), actor, member.siteId, id === "default" ? null : id);
+    const result = await useTheme(getRunner(), actor, member.siteId, id === "default" ? null : id, {
+      starter: input.starter === true,
+    });
     if (!result.ok) return reply(result, STATUS[result.code]);
     // Every public page carries the theme, so all of them are written again at the next request.
     revalidateTag("theme", { expire: 0 });
-    return NextResponse.json({ ok: true, active: result.active });
+    return NextResponse.json({
+      ok: true,
+      active: result.active,
+      starterAdded: result.starterAdded,
+    });
   }
   if (input.action === "roll-back") {
     const result = await rollBackTheme(getRunner(), actor, member.siteId, id);

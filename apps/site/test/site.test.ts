@@ -5950,6 +5950,162 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + "/api/admin/themes")).status).toBe(401);
     });
 
+    test("trying a theme with my content (TH-55, TH-62): the preview draws a real page with the theme's file while the site keeps its look; widths change the frame; a visitor and an editor are turned away", async () => {
+      const page = await signedIn(owner);
+      const made = (
+        await call(page, "POST", "/api/admin/entries", { type: "page", title: "Try page" })
+      ).json as { id: string; slug: string; revision: number };
+      const saved = await call(page, "PUT", `/api/admin/entries/${made.id}`, {
+        title: "Try page",
+        slugPart: made.slug,
+        status: "published",
+        blocks: [
+          {
+            id: "p1",
+            type: "paragraph",
+            props: {},
+            content: [{ type: "text", text: "Words for the try-out.", styles: {} }],
+            children: [],
+          },
+        ],
+        revision: made.revision,
+      });
+      expect(saved.status).toBe(200);
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "maple-try.tgz",
+        mimeType: "application/gzip",
+        buffer: maple("1.0.0", "4px"),
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByRole("button", { name: "Use Maple" }).waitFor();
+      const before = await (await fetch(site.base + "/" + made.slug)).text();
+      expect(before).not.toContain("/uploads/themes/");
+
+      // The link on the theme opens the preview; nothing is in use afterwards.
+      await page.getByRole("link", { name: "Try Maple with my content" }).click();
+      await page.waitForURL(/\/admin\/themes\/[0-9A-Za-z]+\/preview$/);
+      await page.getByText(/Your site does not change: Maple is not in use\./).waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      const frame = page.frameLocator("iframe");
+      await page.getByLabel("Page to look at").selectOption(made.slug);
+      await frame.getByText("Words for the try-out.").waitFor();
+      const frameElement = await page.locator("iframe").elementHandle();
+      const inner = await frameElement!.contentFrame();
+      const link = await inner!.evaluate(
+        () =>
+          document
+            .querySelector('link[rel="stylesheet"][href^="/uploads/themes/"]')
+            ?.getAttribute("href") ?? null,
+      );
+      expect(link).toMatch(/^\/uploads\/themes\/[0-9a-f]{64}\.css$/);
+      expect(await inner!.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("4px");
+      // The widths change the frame.
+      await page.getByRole("button", { name: "Phone" }).click();
+      expect(await page.locator("iframe").evaluate((el) => el.getBoundingClientRect().width)).toBe(
+        390,
+      );
+      await page.getByRole("button", { name: "Tablet" }).click();
+      expect(await page.locator("iframe").evaluate((el) => el.getBoundingClientRect().width)).toBe(
+        768,
+      );
+      // The site itself did not change.
+      const after = await (await fetch(site.base + "/" + made.slug)).text();
+      expect(after).not.toContain("/uploads/themes/");
+
+      // Only people who may change the design see the frame; a bad id is not found.
+      const id = /\/admin\/themes\/([0-9A-Za-z]+)\/preview/.exec(page.url())![1]!;
+      const signedOut = await fetch(site.base + `/admin/themes/${id}/preview/frame`);
+      expect(await signedOut.text()).not.toContain("Words for the try-out.");
+      const editor = await signedIn(cara);
+      // The page starts streaming before it can say "not found", so the status can be 200; what matters is that no page shows.
+      const asEditor = await editor.request.get(site.base + `/admin/themes/${id}/preview/frame`);
+      expect(await asEditor.text()).not.toContain("Words for the try-out.");
+      const missing = await page.request.get(
+        site.base + `/admin/themes/${"0".repeat(26)}/preview/frame`,
+      );
+      expect(await missing.text()).not.toContain("Words for the try-out.");
+
+      // Remove the theme again so the other tests start as before.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Remove Maple" }).click();
+      await page.getByRole("button", { name: "Yes, remove Maple" }).click();
+      await page.getByText("Maple is removed.").waitFor();
+    });
+
+    test("presets and sample pages (TH-64, TH-65): the theme lists them, a preset fills the look form without saving, sample pages are added as drafts only when ticked", async () => {
+      const page = await signedIn(owner);
+      const story = tgz({
+        "theme.json": JSON.stringify({
+          key: "story",
+          name: "Story",
+          version: "1.0.0",
+          options: ["mainColor", "bodyFont"],
+          presets: [
+            { name: "Warm", values: { mainColor: "#b45309", bodyFont: "system-serif" } },
+            { name: "Calm", values: { mainColor: "#2a6f4f" } },
+          ],
+        }),
+        "starter/about.json": JSON.stringify({
+          title: "About the sample",
+          blocks: [
+            {
+              id: "s1",
+              type: "paragraph",
+              props: {},
+              content: [{ type: "text", text: "A sample paragraph.", styles: {} }],
+              children: [],
+            },
+          ],
+        }),
+      });
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByLabel("Theme file (.tgz)").setInputFiles({
+        name: "story-1.0.0.tgz",
+        mimeType: "application/gzip",
+        buffer: story,
+      });
+      await page.getByRole("button", { name: "Upload and check" }).click();
+      await page.getByRole("button", { name: "Use Story" }).waitFor();
+      await page.getByText("Looks to start from: Warm, Calm.").waitFor();
+      await page.getByText("1 sample page you can add as drafts.").waitFor();
+
+      // Using it without the tick adds nothing; the tick adds one draft.
+      await page.getByRole("button", { name: "Use Story" }).click();
+      const tick = page.getByLabel("Add the 1 sample page as drafts");
+      await tick.waitFor();
+      expect(await tick.isChecked()).toBe(false);
+      expect(await axeViolations(page)).toEqual([]);
+      await tick.check();
+      await page.getByRole("button", { name: "Yes, switch to Story" }).click();
+      await page
+        .getByText("Your site uses Story now. 1 sample page was added as drafts.")
+        .waitFor();
+      await page.goto(site.base + "/admin/pages");
+      await page.getByRole("link", { name: "About the sample" }).waitFor();
+      expect((await fetch(site.base + "/about-the-sample")).status).toBe(404);
+
+      // A preset fills the look form; nothing is saved until the owner saves.
+      await page.goto(site.base + "/admin/settings/look");
+      await page.getByText("Start from a look of Story").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.getByRole("button", { name: "Warm" }).click();
+      await page.getByText(/The look "Warm" is filled in below/).waitFor();
+      await page.getByText("#b45309").waitFor();
+      expect(await page.getByLabel("Font for text").inputValue()).toBe("system-serif");
+      await page.reload();
+      expect(await page.getByText("#b45309").count()).toBe(0);
+
+      // Put the site back as it was.
+      await page.goto(site.base + "/admin/settings/themes");
+      await page.getByRole("button", { name: "Use the built-in design" }).click();
+      await page.getByRole("button", { name: "Yes, switch to the built-in design" }).click();
+      await page.getByText("Your site uses the built-in design now.").waitFor();
+      await page.getByRole("button", { name: "Remove Story" }).click();
+      await page.getByRole("button", { name: "Yes, remove Story" }).click();
+      await page.getByText("Story is removed.").waitFor();
+    });
+
     test("publish check: a scheduled page is checked when it is scheduled and every time it is saved again; the administrator's set-aside is remembered for the job", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

@@ -5,7 +5,7 @@
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { checkThemeCss, describeCssProblems, THEME_CSS_MAX_BYTES } from "./css-check.js";
 import { readTarGz } from "./tar.js";
-import { checkTokens, type ThemeTokens } from "./theme.js";
+import { FONT_CHOICES, checkTokens, isLibraryFont, parseHex, type ThemeTokens } from "./theme.js";
 
 export const PACKAGE_MAX_FILES = 500;
 export const PACKAGE_MAX_UNPACKED_BYTES = 20 * 1024 * 1024;
@@ -114,10 +114,22 @@ export interface ThemeFont {
   file: string;
 }
 
+/** A named set of option values ("Warm", "Bold"): picking it fills the owner's look, which the owner can still change. */
+export interface ThemePreset {
+  name: string;
+  values: { mainColor?: string; bodyFont?: string; headingFont?: string };
+}
+
+export const MAX_PRESETS = 8;
+export const MAX_STARTER_PAGES = 12;
+const PRESET_OPTIONS = ["mainColor", "bodyFont", "headingFont"] as const;
+
 export interface ThemeLayout {
   name: string;
   title: string;
   blocks: Block[];
+  /** For a starter page: a page or a post. */
+  type?: "page" | "post";
   /** For a ready-made section (a pattern): its group in the section library. */
   group?: SectionGroup;
 }
@@ -134,6 +146,10 @@ export interface CheckedTheme {
   fonts: ThemeFont[];
   /** What an owner may change of this theme: "mainColor", "bodyFont", "headingFont", "logo". */
   options: string[];
+  /** Named sets of option values the owner can start from. */
+  presets: ThemePreset[];
+  /** Sample pages the owner may add as drafts when using the theme. */
+  starter: ThemeLayout[];
   /** The checked CSS, without comments (empty when the theme has none). */
   css: string;
   templates: ThemeLayout[];
@@ -327,6 +343,58 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
       }
   }
 
+  const presets: ThemePreset[] = [];
+  if (manifest["presets"] !== undefined) {
+    if (!Array.isArray(manifest["presets"]) || manifest["presets"].length > MAX_PRESETS)
+      refuse(`theme.json: "presets" must be a list of at most ${MAX_PRESETS}.`);
+    else
+      for (const raw of manifest["presets"] as unknown[]) {
+        const presetName =
+          isRecord(raw) && typeof raw["name"] === "string" ? raw["name"].trim() : "";
+        if (!isRecord(raw) || !presetName || presetName.length > 40) {
+          refuse("theme.json: each preset needs a name of at most 40 characters.");
+          continue;
+        }
+        if (presets.some((p) => p.name === presetName)) {
+          refuse(`theme.json: two presets are called "${presetName}".`);
+          continue;
+        }
+        const given = isRecord(raw["values"]) ? raw["values"] : null;
+        if (!given || Object.keys(given).length === 0) {
+          refuse(`theme.json: the preset "${presetName}" needs "values".`);
+          continue;
+        }
+        const values: ThemePreset["values"] = {};
+        for (const [option, value] of Object.entries(given)) {
+          if (!(PRESET_OPTIONS as readonly string[]).includes(option))
+            refuse(
+              `theme.json: the preset "${presetName}" sets "${option.slice(0, 40)}", which a preset cannot change (${PRESET_OPTIONS.join(", ")}).`,
+            );
+          else if (!options.includes(option))
+            refuse(
+              `theme.json: the preset "${presetName}" sets ${option}, but the theme does not let owners change it ("options").`,
+            );
+          else if (option === "mainColor") {
+            if (typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) && parseHex(value))
+              values.mainColor = value.toLowerCase();
+            else
+              refuse(
+                `theme.json: the main color of the preset "${presetName}" must look like #2a6f4f.`,
+              );
+          } else if (
+            typeof value === "string" &&
+            ((FONT_CHOICES as string[]).includes(value) || isLibraryFont(value))
+          )
+            values[option as "bodyFont" | "headingFont"] = value;
+          else
+            refuse(
+              `theme.json: the ${option} of the preset "${presetName}" must be a system font or a font of the library.`,
+            );
+        }
+        presets.push({ name: presetName, values });
+      }
+  }
+
   const fonts: ThemeFont[] = [];
   if (manifest["fonts"] !== undefined) {
     if (!Array.isArray(manifest["fonts"]) || manifest["fonts"].length > 20)
@@ -369,6 +437,7 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
     "rtl",
     "tokens",
     "options",
+    "presets",
     "fonts",
   ]);
   for (const k of Object.keys(manifest))
@@ -438,6 +507,15 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
           `${path}: ${checked.repairs.length} thing${checked.repairs.length === 1 ? " was" : "s were"} repaired by the block checks (unsafe links, bad names or sizes).`,
         );
       const title = typeof raw["title"] === "string" ? raw["title"].slice(0, 100) : layoutName;
+      if (folder === "starter") {
+        out.push({
+          name: layoutName,
+          title,
+          blocks: checked.body.blocks,
+          type: raw["type"] === "post" ? "post" : "page",
+        });
+        continue;
+      }
       if (folder !== "patterns") {
         out.push({ name: layoutName, title, blocks: checked.body.blocks });
         continue;
@@ -454,11 +532,22 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
   const templates = layouts("templates");
   const parts = layouts("parts");
   const patterns = layouts("patterns");
+  const starter = layouts("starter");
+  if (starter.length > MAX_STARTER_PAGES)
+    refuse(`starter: a theme may bring at most ${MAX_STARTER_PAGES} sample pages.`);
   checkParts(templates, parts, refuse);
   if (report.refused.length > 0) return fail();
   if (templates.length + parts.length + patterns.length > 0)
     report.passed.push(
       `${templates.length} layouts, ${parts.length} header and footer parts and ${patterns.length} sections passed the block checks; every part exists and none includes itself.`,
+    );
+  if (presets.length > 0)
+    report.passed.push(
+      `${presets.length} preset${presets.length === 1 ? "" : "s"} set only options the theme lets owners change, with colors and fonts that are allowed.`,
+    );
+  if (starter.length > 0)
+    report.passed.push(
+      `${starter.length} sample page${starter.length === 1 ? "" : "s"} passed the block checks. They are added only when the owner asks, and only as drafts.`,
     );
   let unknownBlocks = 0;
   const countUnknown = (blocks: Block[]) => {
@@ -491,6 +580,8 @@ export function checkThemePackage(archive: Buffer): PackageCheck {
       tokens,
       fonts,
       options,
+      presets,
+      starter,
       css,
       templates,
       parts,

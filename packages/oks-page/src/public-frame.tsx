@@ -58,12 +58,15 @@ export async function PublicFrame({
   header,
   footer,
   children,
+  look: given,
 }: {
   header: PublicMenuItem[];
   footer: PublicMenuItem[];
   children: ReactNode;
+  /** A look chosen by the caller (the preview of a theme); the site's own look when left out. */
+  look?: Look;
 }) {
-  const [look, site] = await Promise.all([getLook(), getSiteInfo()]);
+  const [look, site] = await Promise.all([given ?? getLook(), getSiteInfo()]);
   const { logo } = look;
   // The site's language and writing direction (Settings > Languages) on everything the visitor reads.
   return (

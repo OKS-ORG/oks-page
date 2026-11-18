@@ -69,11 +69,19 @@ export function LookForm({
   logo,
   warnings = [],
   ownerFonts: ownerFontsAtStart = [],
+  presets = [],
+  themeName = "",
 }: {
   initial: ThemeStyles;
   logo: LogoPreview | null;
   warnings?: ContrastWarning[];
   ownerFonts?: OwnerFontView[];
+  /** The looks the theme in use offers to start from. */
+  presets?: {
+    name: string;
+    values: { mainColor?: string; bodyFont?: string; headingFont?: string };
+  }[];
+  themeName?: string;
 }) {
   const [ownFonts, setOwnFonts] = useState<OwnerFontView[]>(ownerFontsAtStart);
   const [fontNote, setFontNote] = useState("");
@@ -179,10 +187,30 @@ export function LookForm({
     .filter((font): font is LibraryFont => font !== undefined);
   const fontFaces = fontFaceCss([bodyFont, headingFont]);
 
+  function applyPreset(preset: NonNullable<typeof presets>[number]) {
+    if (preset.values.mainColor) setColor(preset.values.mainColor);
+    if (preset.values.bodyFont) setBodyFont(preset.values.bodyFont);
+    if (preset.values.headingFont) setHeadingFont(preset.values.headingFont);
+    setProblem(null);
+    setNote(`The look "${preset.name}" is filled in below. Change what you like, then save.`);
+  }
+
   return (
     <>
       <form className="oks-look" onSubmit={(event) => void save(event)}>
         {fontFaces ? <style>{fontFaces}</style> : null}
+        {presets.length > 0 ? (
+          <fieldset style={{ border: 0, padding: 0 }}>
+            <legend>{themeName ? `Start from a look of ${themeName}` : "Start from a look"}</legend>
+            <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              {presets.map((preset) => (
+                <Button key={preset.name} onPress={() => applyPreset(preset)}>
+                  {preset.name}
+                </Button>
+              ))}
+            </p>
+          </fieldset>
+        ) : null}
         <fieldset style={{ border: 0, padding: 0 }}>
           <legend>Main color</legend>
           <p>

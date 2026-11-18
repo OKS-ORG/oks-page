@@ -16,7 +16,9 @@ import {
   type PackageReport,
   type ThemeFont,
   type ThemeLayout,
+  type ThemePreset,
 } from "./theme-package.js";
+import { addStarterPages } from "./theme-starter.js";
 
 /** The biggest theme file that may be uploaded (the packed .tgz; the unpacked limit is checked while reading it). */
 export const THEME_UPLOAD_MAX_BYTES = 24 * 1024 * 1024;
@@ -71,6 +73,9 @@ export interface ThemeVersion {
   templates: ThemeLayout[];
   parts: ThemeLayout[];
   patterns: ThemeLayout[];
+  /** Added in pull request 112: older stored versions have neither. */
+  presets?: ThemePreset[];
+  starter?: ThemeLayout[];
   report: PackageReport;
   installedAt: number;
   installedBy: string;
@@ -98,6 +103,10 @@ export interface InstalledTheme {
   parts: number;
   sections: number;
   fonts: number;
+  /** Named sets of look values the owner can start from. */
+  presets: ThemePreset[];
+  /** How many sample pages the owner may add as drafts when using the theme. */
+  starterPages: number;
   installedAt: number;
   report: PackageReport;
 }
@@ -156,6 +165,8 @@ function summary(row: Record<string, unknown>, stored: StoredTheme): InstalledTh
     parts: c.parts.length,
     sections: c.patterns.length,
     fonts: c.fonts.length,
+    presets: c.presets ?? [],
+    starterPages: c.starter?.length ?? 0,
     installedAt: c.installedAt,
     report: c.report,
   };
@@ -359,6 +370,8 @@ export async function installTheme(
     templates: theme.templates,
     parts: theme.parts,
     patterns: theme.patterns,
+    presets: theme.presets,
+    starter: theme.starter,
     report,
     installedAt: now,
     installedBy: actor.userId,
@@ -410,11 +423,13 @@ export async function useTheme(
   actor: Actor,
   siteId: string,
   id: string | null,
-): Promise<ThemeActionResult<{ active: InstalledTheme | null }>> {
+  /** `starter`: also add the theme's sample pages as drafts (only when the owner asked). */
+  options: { starter?: boolean } = {},
+): Promise<ThemeActionResult<{ active: InstalledTheme | null; starterAdded: number }>> {
   if (!actor.can("themes.manage")) return forbidden;
   if (id === null) {
     await runner.all(`update "themes" set "is_active" = ? where "site_id" = ?`, [false, siteId]);
-    return { ok: true, active: null };
+    return { ok: true, active: null, starterAdded: 0 };
   }
   const found = await findTheme(runner, siteId, id);
   if (!found) return notFound;
@@ -426,7 +441,14 @@ export async function useTheme(
     ]);
     await tx.all(`update "themes" set "is_active" = ? where "id" = ?`, [true, id]);
   });
-  return { ok: true, active: summary({ ...found.row, is_active: true }, found.stored) };
+  const starterAdded = options.starter
+    ? await addStarterPages(runner, actor, siteId, found.stored.current.starter ?? [])
+    : 0;
+  return {
+    ok: true,
+    active: summary({ ...found.row, is_active: true }, found.stored),
+    starterAdded,
+  };
 }
 
 /** Goes back to the version installed before this one. Rolling back again returns to the newer version. */

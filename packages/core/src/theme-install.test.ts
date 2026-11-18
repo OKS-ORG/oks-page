@@ -20,6 +20,7 @@ import {
   themeFileType,
   useTheme,
 } from "./theme-install.js";
+import { createDraft } from "./content.js";
 import { loadActiveThemeLayouts } from "./theme-layouts.js";
 
 // ----- a tiny tar writer (plain files only)
@@ -252,6 +253,57 @@ for (const { kind, open, skip } of openers) {
 
       await useTheme(db.runner, admin, siteId, null);
       expect((await listThemes(db.runner, siteId)).some((t) => t.isActive)).toBe(false);
+    });
+
+    test("TH-64: using a theme adds its sample pages only when asked, only as drafts, and never changes a page that exists", async () => {
+      const withStarter = tgz({
+        "theme.json": JSON.stringify({ key: "story", name: "Story", version: "1.0.0" }),
+        "starter/about.json": JSON.stringify({
+          title: "About us",
+          blocks: [block("paragraph", {}, [{ type: "text", text: "Sample text.", styles: {} }])],
+        }),
+        "starter/news.json": JSON.stringify({
+          title: "First news",
+          type: "post",
+          blocks: [block("paragraph", {}, [{ type: "text", text: "Sample news.", styles: {} }])],
+        }),
+      });
+      const installed = await installTheme(db.runner, storage, admin, siteId, withStarter);
+      if (!installed.ok) throw new Error(installed.message);
+      expect(installed.theme.starterPages).toBe(2);
+      const made = await createDraft(db.runner, admin, siteId, { type: "page", title: "About us" });
+      if (!made.ok) throw new Error(made.message);
+      const rows = async () =>
+        (
+          await db.run(
+            `select "title", "slug", "type_key", "status" from "entries" order by "slug"`,
+          )
+        ).map((r) => [r["title"], r["slug"], r["type_key"], r["status"]]);
+      const before = await rows();
+      // Not asked: the theme is used and nothing is added.
+      const plain = await useTheme(db.runner, admin, siteId, installed.theme.id);
+      expect(plain).toMatchObject({ ok: true, starterAdded: 0 });
+      expect(await rows()).toEqual(before);
+      // Asked: two drafts are added, with new addresses; the page that existed is as it was.
+      const asked = await useTheme(db.runner, admin, siteId, installed.theme.id, { starter: true });
+      expect(asked).toMatchObject({ ok: true, starterAdded: 2 });
+      expect(await rows()).toEqual([
+        ["About us", "about-us", "page", "draft"],
+        ["About us", "about-us-2", "page", "draft"],
+        ["First news", "blog/first-news", "post", "draft"],
+      ]);
+      const stored = (
+        await db.run(`select "plain_text" from "entries" where "slug" = 'about-us-2'`)
+      )[0]!;
+      expect(String(stored["plain_text"])).toContain("Sample text.");
+      // Someone who may not add pages gets the theme and no pages.
+      const sam = actorOf(admin.userId, "subscriber");
+      expect(
+        await useTheme(db.runner, sam, siteId, installed.theme.id, { starter: true }),
+      ).toMatchObject({
+        ok: false,
+        code: "forbidden",
+      });
     });
 
     test("an update keeps the old version; roll back restores it and rolling back again goes forward (TH-57)", async () => {

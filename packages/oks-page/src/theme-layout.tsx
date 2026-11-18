@@ -12,6 +12,7 @@ import {
 } from "@oks-page/core";
 import { Fragment, type ReactNode } from "react";
 import { HIDE_CSS } from "./hide-css";
+import type { Look } from "./data/types";
 import { LINK, LookStyles, MenuList } from "./public-frame";
 import { styleFileUrl } from "./site-style";
 
@@ -91,7 +92,10 @@ export async function ThemedPage({
   page,
   before,
   editor = false,
+  look: givenLook,
 }: {
+  /** A look chosen by the caller (the preview of a theme); the site's own look when left out. */
+  look?: Look;
   layout: DrawNode[];
   parts: Record<string, DrawNode[]>;
   page: ThemedPageInfo;
@@ -106,7 +110,7 @@ export async function ThemedPage({
   const wanted = needs(layout, parts);
   const [site, look, latest, ...menuLists] = await Promise.all([
     getSiteInfo(),
-    getLook(),
+    givenLook ?? getLook(),
     wanted.posts ? getLatestPosts() : Promise.resolve([] as FeedItem[]),
     ...wanted.places.map((place) => getSiteMenu(place)),
   ]);

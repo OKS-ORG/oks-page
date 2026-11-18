@@ -12,6 +12,8 @@ const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const starterOf = (themes: InstalledTheme[], id: string): number =>
+  themes.find((t) => t.id === id)?.starterPages ?? 0;
 
 function Report({ report, title }: { report: PackageReport; title: string }) {
   const groups: [string, string[]][] = [
@@ -61,6 +63,8 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
   const [removing, setRemoving] = useState<string | null>(null);
   // The list of what a switch keeps and leaves behind, shown before the owner confirms.
   const [review, setReview] = useState<{ id: string; plan: ThemeSwitchPlan } | null>(null);
+  // "Add the sample pages as drafts": off until the owner ticks it, and off again for every new switch.
+  const [addStarter, setAddStarter] = useState(false);
   const active = themes.find((t) => t.isActive) ?? null;
 
   async function refresh() {
@@ -125,17 +129,24 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
       setProblem(failure(body, "The list could not be made."));
       return;
     }
+    setAddStarter(false);
     setReview({ id, plan: body.plan });
   }
 
-  const post = async (id: string, action: "use" | "roll-back", fallback: string) => {
+  const post = async (
+    id: string,
+    action: "use" | "roll-back",
+    fallback: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<unknown> => {
     const response = await fetch(`/api/admin/themes/${encodeURIComponent(id)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...extra }),
     });
     const body: unknown = await response.json().catch(() => null);
     if (!response.ok) throw new Error(failure(body, fallback));
+    return body;
   };
 
   return (
@@ -190,17 +201,41 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
         <section aria-labelledby="themes-switch">
           <h2 id="themes-switch">Before you switch</h2>
           <SwitchPlan plan={review.plan} />
+          {starterOf(themes, review.id) > 0 ? (
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={addStarter}
+                  onChange={(event) => setAddStarter(event.target.checked)}
+                />{" "}
+                {`Add the ${plural(starterOf(themes, review.id), "sample page", "sample pages")} as drafts`}
+              </label>
+              <br />
+              <small>They are new drafts. None of your pages is changed.</small>
+            </p>
+          ) : null}
           <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
             <Button
               color="primary"
               onPress={() =>
                 void run(async () => {
                   const { id, plan } = review;
-                  await post(id, "use", "The theme could not be used.");
+                  const body = (await post(
+                    id,
+                    "use",
+                    "The theme could not be used.",
+                    id !== "default" && addStarter ? { starter: true } : {},
+                  )) as { starterAdded?: number } | null;
                   setReview(null);
+                  const added = body?.starterAdded ?? 0;
+                  const extra =
+                    added > 0
+                      ? ` ${plural(added, "sample page was", "sample pages were")} added as drafts.`
+                      : "";
                   return id === "default"
                     ? "Your site uses the built-in design now."
-                    : `Your site uses ${plan.to.name} now.`;
+                    : `Your site uses ${plan.to.name} now.${extra}`;
                 })
               }
             >
@@ -235,12 +270,28 @@ export function ThemesScreen({ initial }: { initial: InstalledTheme[] }) {
                   : "Not tested for right-to-left languages."}
               </p>
               <p>{whatIsInside(theme)}.</p>
+              {theme.presets.length > 0 || theme.starterPages > 0 ? (
+                <p>
+                  {theme.presets.length > 0
+                    ? `Looks to start from: ${theme.presets.map((p) => p.name).join(", ")}. `
+                    : ""}
+                  {theme.starterPages > 0
+                    ? `${plural(theme.starterPages, "sample page", "sample pages")} you can add as drafts.`
+                    : ""}
+                </p>
+              ) : null}
               <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 {theme.isActive ? null : (
                   <Button color="primary" onPress={() => void looksAt(theme.id)}>
                     {`Use ${theme.name}`}
                   </Button>
                 )}
+                <a
+                  href={`/admin/themes/${theme.id}/preview`}
+                  style={{ display: "inline-block", minBlockSize: "24px", paddingBlock: "2px" }}
+                >
+                  {`Try ${theme.name} with my content`}
+                </a>
                 {theme.previousVersion ? (
                   <Button
                     onPress={() =>
