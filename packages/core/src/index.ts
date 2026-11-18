@@ -56,3 +56,5 @@ export * from "./editing.js";
 export { summarise, diffLines, type DiffLine } from "./revision-parts.js";
 export * from "./schedule.js";
 export * from "./passkey-audit.js";
+export * from "./page-css.js";
+export * from "./entry-editor.js";

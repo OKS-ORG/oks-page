@@ -90,6 +90,12 @@ importers:
 
   packages/admin:
     dependencies:
+      '@oks-page/content-safety':
+        specifier: workspace:*
+        version: link:../content-safety
+      '@oks-page/renderer':
+        specifier: workspace:*
+        version: link:../renderer
       oks-ui:
         specifier: 1.5.0
         version: 1.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -100,9 +106,6 @@ importers:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
-      '@oks-page/content-safety':
-        specifier: workspace:*
-        version: link:../content-safety
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0

@@ -1,4 +1,5 @@
 // Whether a block's `props` is safe to keep, as-is (spec 03, section 3 and 4).
+import { byteLength } from "./bytes.js";
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const MAX_PROPS_DEPTH = 6;
@@ -32,6 +33,6 @@ export function sanitizeProps(raw: unknown): Record<string, unknown> | null {
   if (raw === undefined) return {};
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
   if (!isPlainJsonSafe(raw, 1)) return {};
-  if (Buffer.byteLength(JSON.stringify(raw), "utf8") > MAX_PROPS_BYTES) return {};
+  if (byteLength(JSON.stringify(raw)) > MAX_PROPS_BYTES) return {};
   return null;
 }

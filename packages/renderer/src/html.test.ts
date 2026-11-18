@@ -1,7 +1,7 @@
 // The HTML writer: every block type, the escaping, and the hostile documents (EC-33).
 import { checkBlocks, type Block } from "@oks-page/content-safety";
 import { describe, expect, test } from "vitest";
-import { escapeHtml, writeBlocks } from "./html.js";
+import { escapeHtml, pageCss, writeBlocks } from "./html.js";
 
 let n = 0;
 const block = (type: string, over: Partial<Block> = {}): Block => ({
@@ -194,15 +194,71 @@ describe("media and other blocks", () => {
     );
   });
 
+  test("the layout blocks (PB-90): section, container, column, spacer, buttons", () => {
+    const button = block("button", {
+      props: { text: "Read <more>", href: "https://example.com/a", variant: "outline" },
+    });
+    const plain = block("button", { props: { text: "No link", href: "javascript:alert(1)" } });
+    expect(
+      html(
+        block("section", {
+          props: { width: "full", anchor: "top" },
+          children: [
+            block("container", {
+              children: [
+                block("columns", { children: [block("column", { children: [para(text("A"))] })] }),
+                block("spacer", { props: { size: "xl" } }),
+                block("buttonGroup", { children: [button, plain] }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    ).toBe(
+      '<section id="top" class="section section-full"><div class="container"><div class="columns"><div class="column"><p>A</p></div></div><div class="spacer spacer-xl" aria-hidden="true"></div><div class="button-group"><a class="button button-outline" href="https://example.com/a" rel="noopener noreferrer">Read &lt;more&gt;</a><span class="button button-solid">No link</span></div></div></section>',
+    );
+  });
+
+  test("a bad anchor, an unknown spacer size and an empty button are handled", () => {
+    expect(html(block("section", { props: { anchor: 'x" onload="y' } }))).toBe(
+      '<section class="section section-boxed"></section>',
+    );
+    expect(html(block("spacer", { props: { size: "huge" } }))).toContain("spacer-md");
+    expect(html(block("button", { props: { text: "  " } }))).toBe("");
+    expect(writeBlocks([block("button", { props: { text: "Go" } })]).plainText).toBe("Go");
+  });
+
+  test("a style becomes a class from the page CSS, never an inline style (PB-65)", () => {
+    const style = { base: { gap: "8px" }, desktop: { gap: "16px" } };
+    const out = html(block("container", { props: { style } }), para(text("x")));
+    expect(out).toMatch(new RegExp('^<div class="oks-s-[0-9a-f]{10} container"></div><p>x</p>$'));
+    expect(out).not.toContain("style=");
+    const css = pageCss([
+      block("container", { props: { style } }),
+      block("section", { props: { style } }),
+    ]);
+    // the same style on two blocks is written once; the base rules of the layout blocks come first
+    expect(css.split("\n").filter((l) => l.includes("oks-s-"))).toHaveLength(2);
+    expect(css.startsWith(".section{")).toBe(true);
+    expect(css).toContain("gap:8px");
+    expect(pageCss([para(text("x"))])).toBe("");
+    // a hostile style never reaches the CSS
+    const hostile = pageCss([
+      block("container", { props: { style: { base: { "background-image": "url(x)" } } } }),
+    ]);
+    expect(hostile).not.toContain("url");
+    expect(hostile).not.toContain("oks-s-");
+  });
+
   test("a block type the writer does not know is left out and reported", () => {
     const written = writeBlocks([
       para(text("a")),
       block("pricing-card"),
       block("pricing-card"),
-      block("map"),
+      block("weather"),
     ]);
     expect(written.html).toBe("<p>a</p>");
-    expect(written.skipped).toEqual(["map", "pricing-card"]);
+    expect(written.skipped).toEqual(["pricing-card", "weather"]);
   });
 });
 

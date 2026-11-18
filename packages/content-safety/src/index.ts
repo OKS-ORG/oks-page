@@ -1,6 +1,7 @@
 // The block checks: every save, import, API call and plugin write passes the same checks, in
 // the core, before anything reaches the database. They repair what they can and report what
 // they changed (spec 03, section 4; ADR 0019).
+import { byteLength } from "./bytes.js";
 import {
   type Block,
   type Budget,
@@ -10,6 +11,35 @@ import {
 } from "./blocks.js";
 
 export type { Block };
+export { convertOldStyles } from "./blocks.js";
+export {
+  BREAKPOINTS,
+  DEFAULT_BREAKPOINTS,
+  breakpointRanges,
+  checkStyle,
+  convertPhysicalStyle,
+  generateCss,
+  styleClass,
+  styleKey,
+  STYLE_PROPERTIES,
+  type BreakpointName,
+  type BreakpointRange,
+  type CheckedStyle,
+  type Style,
+} from "./styles.js";
+export {
+  applyOp,
+  countBlocks,
+  duplicateBlock,
+  duplicateInPlace,
+  insertBlock,
+  moveBlock,
+  placementProblem,
+  removeBlock,
+  updateProps,
+  type TreeOp,
+  type TreeResult,
+} from "./tree.js";
 
 export interface CheckedBody {
   version: number;
@@ -23,12 +53,12 @@ export interface CheckBlocksResult {
 }
 
 function limitDocumentSize(body: CheckedBody, repairs: string[]): CheckedBody {
-  if (Buffer.byteLength(JSON.stringify(body), "utf8") <= MAX_DOCUMENT_BYTES) return body;
+  if (byteLength(JSON.stringify(body)) <= MAX_DOCUMENT_BYTES) return body;
   const blocks = body.blocks.slice();
   while (blocks.length > 0) {
     blocks.pop();
     const next = { version: body.version, blocks };
-    if (Buffer.byteLength(JSON.stringify(next), "utf8") <= MAX_DOCUMENT_BYTES) {
+    if (byteLength(JSON.stringify(next)) <= MAX_DOCUMENT_BYTES) {
       repairs.push("cut_document_size");
       return next;
     }
@@ -40,7 +70,10 @@ function limitDocumentSize(body: CheckedBody, repairs: string[]): CheckedBody {
 /** Checks a whole stored body (`{ version, blocks }`), as read from the database, an import,
  * the content API or a plugin write. Never throws: anything it cannot make sense of becomes an
  * empty, safe body instead. */
-export function checkBlocks(input: unknown): CheckBlocksResult {
+export function checkBlocks(
+  input: unknown,
+  options: { breakpoints?: readonly string[] } = {},
+): CheckBlocksResult {
   const repairs: string[] = [];
   let version = 1;
   let rawBlocks: unknown;
@@ -58,9 +91,16 @@ export function checkBlocks(input: unknown): CheckBlocksResult {
   }
 
   const seenIds = new Set<string>();
-  const budget: Budget = { remaining: MAX_BLOCKS };
+  const budget: Budget = { remaining: MAX_BLOCKS, breakpoints: options.breakpoints };
   const blocks = checkBlockList(rawBlocks, 1, seenIds, budget, { add: (k) => repairs.push(k) });
   const body = limitDocumentSize({ version, blocks }, repairs);
   return { body, repairs };
 }
 export { isSafeColor, isSafeUrl, isSafeVideoUrl } from "./schemes.js";
+export { hasLock, LOCKED_MESSAGE, lockViolation } from "./locks.js";
+export {
+  flattenForWriting,
+  LAYOUT_ONLY,
+  wrapForLayout,
+  type FlattenResult,
+} from "./editor-switch.js";

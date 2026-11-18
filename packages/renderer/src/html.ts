@@ -4,7 +4,19 @@
 // Every text and every attribute value is escaped. Only addresses and colours that pass the same checks as the block
 // checks are written, so the writer is safe even for blocks that did not go through the checks. oks-ui's own HTML
 // function is never used (EC-32).
-import { isSafeColor, isSafeUrl, isSafeVideoUrl, type Block } from "@oks-page/content-safety";
+import { layoutCss } from "./block-css.js";
+import { ICONS } from "./icons.js";
+import {
+  BREAKPOINTS,
+  checkStyle,
+  generateCss,
+  isSafeColor,
+  isSafeUrl,
+  isSafeVideoUrl,
+  styleClass,
+  type Block,
+  type Style,
+} from "@oks-page/content-safety";
 
 export interface Written {
   html: string;
@@ -16,6 +28,24 @@ export interface Written {
 const MAX_DEPTH = 12;
 const LIST_TYPES = new Set(["bulletList", "numberedList", "taskList"]);
 const CALLOUTS = new Set(["info", "warning", "error", "success", "tip"]);
+const SOCIAL: Record<string, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  x: "X",
+  linkedin: "LinkedIn",
+  youtube: "YouTube",
+  github: "GitHub",
+  mastodon: "Mastodon",
+  email: "Email",
+};
+const SPACER_SIZES = new Set(["xs", "sm", "md", "lg", "xl"]);
+const BUTTON_STYLES = new Set(["solid", "outline", "link"]);
+
+// An anchor name is a short word: letters, digits, dash and underscore, starting with a letter.
+const anchorAttribute = (p: Record<string, unknown>): string => {
+  const anchor = typeof p["anchor"] === "string" ? p["anchor"] : "";
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(anchor) ? ` id="${anchor}"` : "";
+};
 
 export const escapeHtml = (text: string): string =>
   text
@@ -204,11 +234,148 @@ function blockHtml(block: Block, ctx: Context): string {
     case "table":
       return tableHtml(block);
     case "columns":
-      return `<div class="columns">${block.children.map((child) => `<div class="column">${blocksHtml([child], ctx)}</div>`).join("")}</div>`;
+      // A column of the layout editor draws itself; a block placed straight inside (a page of the writing editor) is wrapped.
+      return `<div class="columns">${block.children.map((child) => (child.type === "column" ? blocksHtml([child], ctx) : `<div class="column">${blocksHtml([child], ctx)}</div>`)).join("")}</div>`;
+    case "column":
+      return `<div class="column">${children}</div>`;
+    case "section": {
+      const width = p["width"] === "full" ? "full" : "boxed";
+      return `<section${anchorAttribute(p)} class="section section-${width}">${children}</section>`;
+    }
+    case "container":
+      return `<div${anchorAttribute(p)} class="container">${children}</div>`;
+    case "spacer": {
+      const size = SPACER_SIZES.has(str(p["size"])) ? str(p["size"]) : "md";
+      return `<div class="spacer spacer-${size}" aria-hidden="true"></div>`;
+    }
+    case "button": {
+      const text = str(p["text"]).trim();
+      if (!text) return "";
+      const variant = BUTTON_STYLES.has(str(p["variant"])) ? str(p["variant"]) : "solid";
+      const href = str(p["href"]).trim();
+      const label = escapeHtml(text);
+      return isSafeUrl(href)
+        ? `<a class="button button-${variant}" href="${escapeHtml(href)}" rel="noopener noreferrer">${label}</a>`
+        : `<span class="button button-${variant}">${label}</span>`;
+    }
+    case "buttonGroup":
+      return `<div class="button-group">${children}</div>`;
+    case "gallery": {
+      const items = (Array.isArray(p["images"]) ? p["images"] : []).flatMap((raw: unknown) => {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const src = str(item["src"]).trim();
+        if (!isSafeUrl(src)) return [];
+        const caption = str(item["caption"]);
+        const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(str(item["alt"]))}" loading="lazy">`;
+        return [
+          `<li><figure>${img}${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}</figure></li>`,
+        ];
+      });
+      if (items.length === 0) return "";
+      const columns = Math.min(Math.max(Math.trunc(Number(p["columns"])) || 3, 1), 6);
+      return `<ul class="gallery gallery-${columns}">${items.join("")}</ul>`;
+    }
+    case "audio": {
+      const src = str(p["src"]).trim();
+      if (!isSafeUrl(src)) return "";
+      const title = str(p["title"]);
+      const link = `<a href="${escapeHtml(src)}" rel="noopener noreferrer">${escapeHtml(title || "Play the audio")}</a>`;
+      return `<figure class="audio">${title ? `<figcaption>${escapeHtml(title)}</figcaption>` : ""}<audio controls preload="none" src="${escapeHtml(src)}">${link}</audio></figure>`;
+    }
+    case "icon": {
+      const path = ICONS[str(p["name"])];
+      if (!path) return "";
+      const size = Math.min(Math.max(Math.trunc(Number(p["size"])) || 24, 8), 128);
+      const label = str(p["label"]);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="${path}"/></svg>`;
+      const href = str(p["href"]).trim();
+      if (isSafeUrl(href))
+        return `<a class="icon" href="${escapeHtml(href)}" rel="noopener noreferrer"${label ? ` aria-label="${escapeHtml(label)}"` : ""}>${svg}</a>`;
+      return label
+        ? `<span class="icon" role="img" aria-label="${escapeHtml(label)}">${svg}</span>`
+        : `<span class="icon">${svg}</span>`;
+    }
+    case "socialLinks": {
+      const items = (Array.isArray(p["items"]) ? p["items"] : []).flatMap((raw: unknown) => {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const href = str(item["href"]).trim();
+        const name = SOCIAL[str(item["network"]).toLowerCase()] ?? (str(item["network"]) || "Link");
+        return isSafeUrl(href)
+          ? [
+              `<li><a href="${escapeHtml(href)}" rel="noopener noreferrer me">${escapeHtml(name)}</a></li>`,
+            ]
+          : [];
+      });
+      return items.length > 0 ? `<ul class="social-links">${items.join("")}</ul>` : "";
+    }
+    case "map": {
+      // Nothing is sent to a map company until the visitor follows the link (spec 06, 14.3).
+      const query = str(p["query"]).trim().slice(0, 200);
+      if (!query) return "";
+      const google = p["provider"] === "google";
+      const href = google
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+        : `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
+      return `<p class="map"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Show the map: ${escapeHtml(query)}</a> <small>Opens ${google ? "Google Maps" : "OpenStreetMap"}.</small></p>`;
+    }
+    case "accordion": {
+      // One open at a time: the browser's own grouping of details by name.
+      const name = p["single"] === true ? ` name="a-${escapeHtml(block.id)}"` : "";
+      return `<div class="accordion">${children.replace(/<details>/g, `<details${name}>`)}</div>`;
+    }
+    case "tabs":
+      // Without script the tabs show one under another; each has its own heading.
+      return `<div class="tabs">${children}</div>`;
+    case "tab": {
+      const title = str(p["title"]).trim() || "Tab";
+      return `<section class="tab"><h3>${escapeHtml(title)}</h3>${children}</section>`;
+    }
+    case "slider":
+      return `<div class="slider" role="region" aria-roledescription="carousel" aria-label="${escapeHtml(str(p["label"]) || "Slides")}" tabindex="0">${children}</div>`;
+    case "slide":
+      return `<div class="slide" role="group" aria-roledescription="slide">${children}</div>`;
     default:
       ctx.skipped.add(block.type);
       return "";
   }
+}
+
+// ---- the style of a block: a class from the generated page CSS, never an inline style (spec 06, 4.3) ----
+
+const ALL_SIZES = BREAKPOINTS.map((b) => b.name);
+
+/** The checked style of a block. Every screen size is accepted here; the site's own list decides which are drawn. */
+const blockStyle = (block: Block): Style => checkStyle(props(block)["style"], ALL_SIZES).style;
+
+/** Puts the style class on the first element of a written block. */
+function withStyleClass(html: string, style: Style): string {
+  const cls = styleClass(style);
+  if (!cls) return html;
+  const open = /^<([a-z][a-z0-9]*)([^>]*)>/.exec(html);
+  if (!open) return html;
+  const attributes = open[2]!;
+  const next = / class="/.test(attributes)
+    ? attributes.replace(/ class="/, ` class="${cls} `)
+    : `${attributes} class="${cls}"`;
+  return `<${open[1]}${next}>${html.slice(open[0].length)}`;
+}
+
+/** The CSS for the styles of a page's blocks: one class for each distinct style. `enabled` is the site's screen sizes. */
+export function pageCss(blocks: Block[], enabled?: readonly string[]): string {
+  const styles: Style[] = [];
+  const types = new Set<string>();
+  const walk = (list: Block[] | undefined, depth: number): void => {
+    if (!Array.isArray(list) || depth > MAX_DEPTH) return;
+    for (const block of list) {
+      if (block === null || typeof block !== "object") continue;
+      types.add(block.type);
+      styles.push(blockStyle(block));
+      walk(block.children, depth + 1);
+    }
+  };
+  walk(blocks, 0);
+  // The base rules of the layout blocks come first, so a block's own style can change them.
+  return [layoutCss(types), generateCss(styles, enabled)].filter(Boolean).join("\n");
 }
 
 function blocksHtml(blocks: Block[] | undefined, parent: Context): string {
@@ -224,9 +391,9 @@ function blocksHtml(blocks: Block[] | undefined, parent: Context): string {
       while (i + 1 < blocks.length && blocks[i + 1]?.type === block.type) items.push(blocks[++i]!);
       out += listHtml(items, ctx);
     } else
-      out += blockHtml(
-        { ...block, children: Array.isArray(block.children) ? block.children : [] },
-        ctx,
+      out += withStyleClass(
+        blockHtml({ ...block, children: Array.isArray(block.children) ? block.children : [] }, ctx),
+        blockStyle(block),
       );
   }
   return out;
@@ -263,6 +430,30 @@ function blockText(block: Block, depth: number, lines: string[]): void {
       break;
     }
     case "divider":
+    case "spacer":
+      break;
+    case "button":
+      push(str(p["text"]));
+      break;
+    case "gallery":
+      for (const item of Array.isArray(p["images"]) ? p["images"] : [])
+        push(
+          `${str((item as Record<string, unknown>)?.["alt"])} ${str((item as Record<string, unknown>)?.["caption"])}`,
+        );
+      break;
+    case "audio":
+      push(str(p["title"]));
+      break;
+    case "icon":
+      push(str(p["label"]));
+      break;
+    case "map":
+      push(str(p["query"]));
+      break;
+    case "tab":
+      push(str(p["title"]));
+      break;
+    case "socialLinks":
       break;
     default:
       push(inlineText(block.content));

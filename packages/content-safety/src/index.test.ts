@@ -281,7 +281,7 @@ test("EC-24 text such as <script> stays text", () => {
 });
 
 test("EC-25 per-screen style objects (props.style) are kept", () => {
-  const style = { base: { fontSize: "16px" }, tablet: { fontSize: "20px" } };
+  const style = { base: { "font-size": "16px" }, tablet: { "font-size": "20px" } };
   const { body, repairs } = checkBlocks({ blocks: [block({ props: { style } })] });
   expect(body.blocks[0]!.props.style).toEqual(style);
   expect(repairs).toEqual([]);

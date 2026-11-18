@@ -1,6 +1,8 @@
 // The queries behind both data modules (server and export). No caching here.
 import {
   directionOf,
+  pageCssOfBody,
+  pageStyleUrl,
   loadReadingRoutes,
   loadSiteIcon,
   loadSiteLanguage,
@@ -169,10 +171,19 @@ export const slugOf = (path: string[] | undefined) => {
   return decoded.normalize("NFC");
 };
 
+function readBody(raw: unknown): unknown {
+  if (raw == null) return null;
+  try {
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
-    `select e."id", e."title", e."slug", e."type_key", e."html", e."plain_text", e."seo", e."meta", e."published_at", e."updated_at", u."name" as "author"
+    `select e."id", e."title", e."slug", e."type_key", e."html", e."body", e."plain_text", e."seo", e."meta", e."published_at", e."updated_at", u."name" as "author"
        from "entries" e left join "users" u on u."id" = e."author_id"
       where e."site_id" = ? and e."slug" = ? and e."status" = 'published' and e."locale" = ''
       order by case e."type_key" when 'page' then 0 else 1 end limit 1`,
@@ -184,12 +195,17 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
   const seo = readEntrySeo(r["seo"]);
   const written = String(r["html"]);
   const plain = String(r["plain_text"]);
+  // The responsive styles of the blocks come as a file the page links to (spec 06, 4.3).
+  const pageCss = pageCssOfBody(readBody(r["body"]));
+  const styleUrl = pageStyleUrl(String(r["id"]), pageCss);
+  const link = styleUrl ? `<link rel="stylesheet" href="${styleUrl}">` : "";
   return {
     id: String(r["id"]),
     title: String(r["title"]),
     slug: String(r["slug"]),
     type: String(r["type_key"]),
-    html: await enhanceImages(getRunner(), siteId, written, mediaContext().storage),
+    html: link + (await enhanceImages(getRunner(), siteId, written, mediaContext().storage)),
+    pageStyle: { css: pageCss, link },
     plainText: plain,
     updatedAt: ms(r["updated_at"]),
     publishedAt: r["published_at"] == null ? ms(r["updated_at"]) : ms(r["published_at"]),

@@ -46,7 +46,11 @@ export async function getLatestPosts(): Promise<FeedItem[]> {
 }
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {
-  return loadPublishedEntry(slug);
+  const entry = await loadPublishedEntry(slug);
+  if (!entry || !entry.pageStyle.link) return entry;
+  // A static host has nothing to answer `/page-style/...`, so the page carries its CSS itself.
+  const { css, link } = entry.pageStyle;
+  return { ...entry, html: `<style>${css}</style>${entry.html.slice(link.length)}` };
 }
 
 import { listArchiveSlugs, listPublishedSlugs } from "./entries";

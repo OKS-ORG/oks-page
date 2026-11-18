@@ -37,6 +37,10 @@ function hasContent(blocks: Block[]): boolean {
     (b) =>
       NOT_TEXT.has(b.type) ||
       textOf(b.content).trim() !== "" ||
+      // A button keeps its words in its settings, not in text content.
+      (b.type === "button" &&
+        typeof b.props["text"] === "string" &&
+        b.props["text"].trim() !== "") ||
       (b.type !== "divider" && hasContent(b.children)),
   );
 }

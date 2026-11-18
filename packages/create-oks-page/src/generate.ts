@@ -111,7 +111,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     // Next.js reads the matcher while it builds, so it is written here and not re-exported.
     {
       path: "proxy.ts",
-      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|fonts|site-style|favicon.ico).*)",\n  ],\n};\n`,
+      content: `export { proxy } from ${from("proxy")};\n// Next.js reads the matcher while it builds, so it is written out here and not re-exported.\nexport const config = {\n  matcher: [\n    "/((?!api|admin|_next|robots.txt|sitemap.xml|feed.xml|atom.xml|not-found-handler|maintenance-handler|test-form|uploads|fonts|site-style|page-style|favicon.ico).*)",\n  ],\n};\n`,
     },
     {
       path: "instrumentation.ts",
@@ -303,6 +303,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, PUT } from ${from("api-entry-seo")};\n`,
     },
     {
+      path: "app/api/admin/entries/[id]/editor/route.ts",
+      content: `export { GET, PUT } from ${from("api-entry-editor")};\n`,
+    },
+    {
       path: "app/api/admin/entries/[id]/layout/route.ts",
       content: `export { GET, PUT } from ${from("api-entry-layout")};\n`,
     },
@@ -409,6 +413,11 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/site-style/[file]/route.ts",
       content: `export { GET } from ${from("api-site-style")};\n`,
+    },
+    {
+      path: "app/page-style/[id]/[file]/route.ts",
+      content: `export { GET } from ${from("api-page-style")};
+`,
     },
     {
       path: "app/api/admin/fonts/route.ts",

@@ -61,6 +61,8 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
           (actor.can("content.delete_own", entry.type) && entry.authorId === actor.userId)
         }
         showTerms={entry.type === "post"}
+        editor={entry.editor}
+        canLock={actor.can("themes.manage")}
         timeZone={timeZone}
         listHref={`/admin/${segment}`}
       />

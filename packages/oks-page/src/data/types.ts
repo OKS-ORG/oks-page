@@ -4,6 +4,8 @@ export interface EntryView {
   slug: string;
   type: string;
   html: string;
+  /** The CSS of the blocks' responsive styles, and the link to its file that starts `html` (empty when there are none). */
+  pageStyle: { css: string; link: string };
   plainText: string;
   updatedAt: number;
   /** When it was first published. */

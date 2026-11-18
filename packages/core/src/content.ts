@@ -2,7 +2,13 @@
 // list them. Every save checks who may do it, repairs the blocks, writes the HTML and the plain text with our own writer,
 // and uses the revision rule, so two people editing the same entry cannot overwrite each other.
 import { newPostDefaults } from "./site-settings.js";
-import { checkBlocks, type Block } from "@oks-page/content-safety";
+import {
+  checkBlocks,
+  hasLock,
+  LAYOUT_ONLY,
+  lockViolation,
+  type Block,
+} from "@oks-page/content-safety";
 import { newId, saveEntry, type SqlRunner } from "@oks-page/db";
 import { recordSlugChange } from "./redirects.js";
 import { sectionsForContent, writeContentBlocks } from "./saved-sections.js";
@@ -246,6 +252,8 @@ export interface EntryForEdit {
   revision: number;
   blocks: Block[];
   authorId: string;
+  /** Which editor opens it: the writing editor, or the layout editor (spec 06, section 13). */
+  editor: "writing" | "layout";
 }
 
 const mayEdit = (actor: Actor, type: string, authorId: string): boolean =>
@@ -257,6 +265,15 @@ const toDate = (value: unknown): Date => (value instanceof Date ? value : new Da
 const parseJson = (value: unknown): unknown =>
   typeof value === "string" ? JSON.parse(value) : value;
 
+/** Which editor opens an entry: the one it chose, or the layout editor when its body holds blocks only that editor draws. */
+export function editorOf(meta: unknown, blocks: Block[]): "writing" | "layout" {
+  const chosen =
+    meta !== null && typeof meta === "object" ? (meta as { editor?: unknown }).editor : undefined;
+  const onlyLayout = (list: Block[]): boolean =>
+    list.some((b) => LAYOUT_ONLY.has(b.type) || onlyLayout(b.children ?? []));
+  return chosen === "layout" || onlyLayout(blocks) ? "layout" : "writing";
+}
+
 export async function loadForEdit(
   runner: SqlRunner,
   actor: Actor,
@@ -265,7 +282,7 @@ export async function loadForEdit(
 ): Promise<ContentResult<{ entry: EntryForEdit }>> {
   const row = (
     await runner.all(
-      `select "id", "type_key", "title", "slug", "status", "revision", "body", "author_id", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "id", "type_key", "title", "slug", "status", "revision", "body", "meta", "author_id", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -290,6 +307,7 @@ export async function loadForEdit(
       revision: Number(row["revision"]),
       blocks,
       authorId,
+      editor: editorOf(parseJson(row["meta"]), blocks),
     },
   };
 }
@@ -335,6 +353,18 @@ export async function saveContent(
   const type = String(row["type_key"]);
   const authorId = String(row["author_id"]);
   if (!mayEdit(actor, type, authorId)) return fail("forbidden", "You may not edit this.");
+  // Locked parts of a page (spec 06, section 5): only a designer may change them, and the server decides, not the screen.
+  if (!actor.can("themes.manage")) {
+    const old = parseJson(row["body"]) as { blocks?: Block[] } | Block[] | null;
+    const before = Array.isArray(old) ? old : Array.isArray(old?.blocks) ? old.blocks : [];
+    if (hasLock(before) || JSON.stringify(input.blocks ?? null).includes('"locked"')) {
+      const violation = lockViolation(
+        before,
+        checkBlocks({ version: 1, blocks: input.blocks }).body.blocks,
+      );
+      if (violation) return fail("forbidden", violation, { field: "blocks" });
+    }
+  }
 
   const title = String(input.title ?? "").trim();
   if (!title) return fail("invalid", "Give it a title.", { field: "title" });

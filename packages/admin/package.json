@@ -14,12 +14,13 @@
     "./shell.css": "./src/shell.css"
   },
   "dependencies": {
+    "@oks-page/content-safety": "workspace:*",
+    "@oks-page/renderer": "workspace:*",
     "oks-ui": "1.5.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@oks-page/content-safety": "workspace:*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "axe-core": "4.11.1",

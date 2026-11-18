@@ -6615,6 +6615,210 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(site.base + `/fonts/${key}.woff2`)).status).toBe(404);
     });
 
+    test("a page with styled blocks links to its own style file: classes in the page, no inline style, the file is cached while its name matches (PB-65)", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Styled page",
+      });
+      expect(made.status).toBe(200);
+      const id = String(made.json!["id"]);
+      const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Styled page",
+        slugPart: "styled-page",
+        status: "published",
+        blocks: [
+          {
+            id: "s1",
+            type: "section",
+            props: { style: { base: { gap: "8px", position: "fixed" }, desktop: { gap: "24px" } } },
+            content: null,
+            children: [
+              {
+                id: "b1",
+                type: "button",
+                props: { text: "Go", href: "/contact" },
+                content: null,
+                children: [],
+              },
+            ],
+          },
+        ],
+        revision: made.json!["revision"],
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const html = await (await fetch(site.base + "/styled-page")).text();
+      const link =
+        /<link rel="stylesheet" href="(\/page-style\/([A-Za-z0-9_-]+)\/[0-9a-f]{16}\.css)"/.exec(
+          html,
+        );
+      expect(link).toBeTruthy();
+      expect(html).toMatch(/<section class="oks-s-[0-9a-f]{10} section section-boxed">/);
+      expect(html).not.toContain("position:fixed");
+      expect(html).not.toMatch(/<style[\s>]/);
+      const file = await fetch(site.base + link![1]!);
+      expect(file.status).toBe(200);
+      expect(file.headers.get("content-type")).toBe("text/css; charset=utf-8");
+      expect(file.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      const css = await file.text();
+      expect(css).toContain("gap:8px");
+      expect(css).toContain("@media (min-width:1025px)");
+      expect(css).not.toContain("fixed");
+      // An older name still gets the current file, not cached; a bad name or another page's id gets nothing.
+      const older = await fetch(site.base + `/page-style/${link![2]}/0000000000000000.css`);
+      expect(older.headers.get("cache-control")).toBe("no-cache");
+      expect(await older.text()).toBe(css);
+      expect((await fetch(site.base + `/page-style/${link![2]}/x.css`)).status).toBe(404);
+      expect((await fetch(site.base + "/page-style/nope/0000000000000000.css")).status).toBe(404);
+      // A page without styled blocks has no link.
+      const plain = await (await fetch(site.base + "/")).text();
+      expect(plain).not.toContain("/page-style/");
+    });
+
+    test("PB-63: the layout editor, with the keyboard-reachable buttons: build a page, a refusal in plain words, undo and redo, hide on phone, save, and the public page shows it", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Built page",
+      });
+      expect(made.status).toBe(200);
+      const id = String(made.json!["id"]);
+      await page.goto(site.base + `/admin/pages/${id}`);
+      // A page made the old way says so, and offers the other editor.
+      await page.getByText("Simple page: written in the writing editor.").waitFor();
+      await page.getByRole("button", { name: "Switch to the layout editor" }).click();
+      const tools = page.getByRole("toolbar", { name: "Layout tools" });
+      await tools.waitFor();
+      const blocks = page.getByRole("region", { name: "Blocks on this page" });
+      const add = async (label: string) => {
+        await page.getByLabel("Add a block").selectOption({ label });
+        await tools.getByRole("button", { name: "Add", exact: true }).click();
+      };
+      await add("Section");
+      await add("Columns (two)");
+      await expect.poll(() => blocks.getByRole("button").count()).toBe(4);
+      // A paragraph cannot go straight into columns: it lands after them, in the section.
+      await add("Paragraph");
+      await blocks.getByRole("button", { name: /^Paragraph/ }).click();
+      // Moving it into the block above (the columns) is refused in plain words, and changes nothing.
+      await page.getByRole("button", { name: "Move into the block above" }).click();
+      await page.getByRole("alert").filter({ hasText: "Put it inside a column" }).waitFor();
+      expect(await blocks.getByRole("button").count()).toBe(5);
+      // Words, then undo and redo.
+      const words = page.getByLabel("Text", { exact: true });
+      await words.fill("Hello builder");
+      await blocks.getByRole("button", { name: "Paragraph: Hello builder" }).waitFor();
+      await tools.getByRole("button", { name: "Undo" }).click();
+      await blocks.getByRole("button", { name: "Paragraph: Some text." }).waitFor();
+      await tools.getByRole("button", { name: "Redo" }).click();
+      await blocks.getByRole("button", { name: "Paragraph: Hello builder" }).waitFor();
+      // Hide on phone: the style on the phone shows display: none.
+      await page.getByRole("group", { name: "Hide on" }).getByLabel("Phone").check();
+      await tools.getByRole("radio", { name: "Phone" }).check();
+      await page.getByText("display: none").first().waitFor();
+      // Publish and save.
+      // A click that does not register is tried again until the choice shows.
+      const published = page.getByRole("radio", { name: /^Published/ });
+      for (let tries = 0; tries < 6 && !(await published.isChecked()); tries++) {
+        await page.getByText("Published (everyone sees it)").click();
+        await page.waitForTimeout(300);
+      }
+      expect(await published.isChecked()).toBe(true);
+      await tools.getByRole("button", { name: "Save" }).click();
+      await page.getByText("Saved.").first().waitFor();
+      let html = "";
+      await expect
+        .poll(async () => {
+          html = await (await fetch(site.base + "/built-page")).text();
+          return html.includes("Hello builder");
+        })
+        .toBe(true);
+      expect(html).toContain("Hello builder");
+      expect(html).toMatch(/<section class="[^"]*section section-boxed">/);
+      expect(html).not.toMatch(/<style[\s>]/);
+      const href = /href="(\/page-style\/[^"]+\.css)"/.exec(html)?.[1];
+      expect(href).toBeTruthy();
+      const css = await (await fetch(site.base + href!)).text();
+      expect(css).toContain("display:none");
+      expect(css).toContain(".columns{");
+      // Back to the writing editor: the layout would be lost, so it lists what and waits.
+      await page.getByRole("button", { name: "Switch to the writing editor" }).click();
+      const dialog = page.getByRole("alertdialog");
+      await dialog.getByText("would become one flow of content").waitFor();
+      await dialog.getByRole("button", { name: "Keep the layout" }).click();
+    });
+
+    test("PB-90: the rest of the catalogue in the layout editor: tabs, an accordion, a map, an icon and social links, with their words on the public page", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Catalogue page",
+      });
+      expect(made.status).toBe(200);
+      const id = String(made.json!["id"]);
+      await page.goto(site.base + `/admin/pages/${id}`);
+      await page.getByRole("button", { name: "Switch to the layout editor" }).click();
+      const tools = page.getByRole("toolbar", { name: "Layout tools" });
+      await tools.waitFor();
+      const blocks = page.getByRole("region", { name: "Blocks on this page" });
+      // From the keyboard: choose in the list, move to Add, press Enter (PB-63).
+      const add = async (label: string) => {
+        await page.getByLabel("Add a block").selectOption({ label });
+        await tools.getByRole("button", { name: "Add", exact: true }).focus();
+        await page.keyboard.press("Enter");
+      };
+      await add("Section");
+      await add("Tabs");
+      // A tab can only go inside tabs: asking for one anywhere else is refused in plain words.
+      await blocks.getByRole("button", { name: /^Tabs/ }).click();
+      await page.getByRole("button", { name: "Add a tab" }).click();
+      await expect.poll(() => blocks.getByRole("button", { name: /^Tab:/ }).count()).toBe(3);
+      // Name the first tab.
+      await blocks.getByRole("button", { name: "Tab: First" }).click();
+      await page.getByLabel("Tab title").fill("Prices");
+      await blocks.getByRole("button", { name: "Tab: Prices" }).waitFor();
+      // The section holds the next blocks.
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await add("Accordion");
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await add("Map");
+      await page.getByLabel("Address or place").fill("Old Mill Road");
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await add("Icon");
+      await page.getByLabel("What it means (read out to people who cannot see it)").fill("A star");
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await add("Social links");
+      const links = page.getByLabel("Links (one per line: network | address)");
+      await links.fill("github | https://github.com/example\nx | javascript:alert(1)");
+      await links.blur();
+      // A click that does not register is tried again until the choice shows.
+      const published = page.getByRole("radio", { name: /^Published/ });
+      for (let tries = 0; tries < 6 && !(await published.isChecked()); tries++) {
+        await page.getByText("Published (everyone sees it)").click();
+        await page.waitForTimeout(300);
+      }
+      expect(await published.isChecked()).toBe(true);
+      await tools.getByRole("button", { name: "Save" }).click();
+      await page.getByText("Saved.").first().waitFor();
+      // The save finishes a moment after the words appear; wait until the public page shows it.
+      let html = "";
+      await expect
+        .poll(async () => {
+          html = await (await fetch(site.base + "/catalogue-page")).text();
+          return html.includes('<div class="tabs">');
+        })
+        .toBe(true);
+      expect(html).toContain('<div class="tabs">');
+      expect(html).toContain("<h3>Prices</h3>");
+      expect(html).toContain('<div class="accordion"><details>');
+      expect(html).toContain("Show the map: Old Mill Road");
+      expect(html).toContain("openstreetmap.org/search?query=Old%20Mill%20Road");
+      expect(html).not.toContain("<iframe");
+      expect(html).toContain('aria-label="A star"');
+      expect(html).toContain(">GitHub</a>");
+      expect(html).not.toContain("javascript:alert");
+    });
+
     test("the owner's look is a file: the page links to /site-style/<fingerprint>.css instead of carrying the text, the file is cached for a year while its name matches, and an older name still gets the current look, not cached", async () => {
       const page = await signedIn(owner);
       const saved = await call(page, "PUT", "/api/admin/settings/theme", {

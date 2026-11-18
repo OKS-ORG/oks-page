@@ -1,10 +1,10 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
-import { EntryEditor } from "@oks-page/admin";
+import { EntryEditor, LayoutEditor } from "@oks-page/admin";
 import type { InsertableSection } from "@oks-page/core";
 import { utcToZonedLocal, zonedLocalToUtc } from "@oks-page/core/timezone";
 import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import type { Block } from "oks-ui";
 import {
   AutosaveStatus,
@@ -38,6 +38,10 @@ export interface EntryEditScreenProps {
   savedSections?: InsertableSection[];
   canPublish: boolean;
   canTrash: boolean;
+  /** Which editor this entry opens in (spec 06, section 13). */
+  editor?: "writing" | "layout";
+  /** Whether this person may lock parts of a page (a designer). */
+  canLock?: boolean;
   /** Posts have categories and tags; pages do not. */
   showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
@@ -185,6 +189,74 @@ function markDecorative(blocks: { id: string }[], blockId: string): unknown[] {
       ? { ...block, props: { ...block.props, decorative: true }, children }
       : { ...block, children };
   });
+}
+
+type LayoutBlocks = ComponentProps<typeof LayoutEditor>["initialBlocks"];
+
+/**
+ * The switch between the two editors. It saves what is on the screen first, then asks the server; going to the writing
+ * editor lists in plain words what would be lost and waits for a yes.
+ */
+function EditorSwitch({
+  id,
+  to,
+  save,
+}: {
+  id: string;
+  to: "writing" | "layout";
+  save: () => Promise<unknown>;
+}) {
+  const [lost, setLost] = useState<string[] | null>(null);
+  const [problem, setProblem] = useState("");
+  async function go(anyway: boolean) {
+    setProblem("");
+    try {
+      await save();
+    } catch {
+      return; // the screen shows why it did not save
+    }
+    const response = await fetch(`/api/admin/entries/${id}/editor`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ editor: to, ...(anyway ? { anyway: true } : {}) }),
+    });
+    const body = (await response.json()) as {
+      error?: { code?: string; message: string; lost?: string[] };
+    };
+    if (response.ok) return window.location.reload();
+    if (body.error?.code === "would_lose" && body.error.lost) return setLost(body.error.lost);
+    setProblem(body.error?.message ?? "It could not be switched.");
+  }
+  return (
+    <>
+      <Button onPress={() => void go(false)}>
+        {to === "layout" ? "Switch to the layout editor" : "Switch to the writing editor"}
+      </Button>
+      {problem ? <span role="alert"> {problem}</span> : null}
+      <Modal
+        isOpen={lost !== null}
+        onClose={() => setLost(null)}
+        role="alertdialog"
+        title="Switch to the writing editor?"
+        actions={
+          <>
+            <Button onPress={() => setLost(null)}>Keep the layout</Button>
+            <Button color="danger" onPress={() => void go(true)}>
+              Switch anyway
+            </Button>
+          </>
+        }
+      >
+        <p>The writing editor has no layout. If you switch:</p>
+        <ul>
+          {(lost ?? []).map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <p>A copy of the page as it is now is kept in its revisions, so you can bring it back.</p>
+      </Modal>
+    </>
+  );
 }
 
 export function EntryEditScreen(props: EntryEditScreenProps) {
@@ -359,29 +431,33 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           </p>
         </div>
       ) : null}
-      <EntryEditor
-        label="Content"
-        initialBlocks={props.blocks}
-        onImageUpload={uploadForEditor}
-        onFileUpload={uploadForEditor}
-        onVideoUpload={uploadForEditor}
-        onBlocksChange={(next) => {
-          blocksNow.current = next;
-          setChanges((n) => n + 1);
-        }}
-        savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
-        toolbar={({ insertImage, insertBlocks, replaceBlocks }) => {
-          replaceBlocksNow.current = replaceBlocks;
-          return (
+      {props.editor === "layout" ? (
+        <LayoutEditor
+          label="Content"
+          initialBlocks={props.blocks as unknown as LayoutBlocks}
+          canLock={props.canLock === true}
+          onChange={(next) => {
+            blocksNow.current = next as unknown as Block[];
+            setChanges((n) => n + 1);
+          }}
+          registerReplace={(replace) => {
+            replaceBlocksNow.current = (blocks) => replace(blocks as unknown as LayoutBlocks);
+          }}
+          onSave={(blocks) => send(blocks as unknown as Block[], false)}
+          toolbar={
             <>
-              <InsertFromLibrary insertImage={insertImage} />
-              <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
+              <EditorSwitch
+                id={props.id}
+                to="writing"
+                save={() => send(blocksNow.current, false)}
+              />
               <UnsavedCopyBanner
                 copy={unsaved}
                 timeZone={props.timeZone ?? null}
                 onBringBack={(copy) => {
                   setTitle(copy.title);
-                  replaceBlocks(copy.blocks);
+                  replaceBlocksNow.current?.(copy.blocks);
+                  blocksNow.current = copy.blocks;
                   forgetUnsaved();
                 }}
                 onThrowAway={() => {
@@ -390,10 +466,51 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
                 }}
               />
             </>
-          );
-        }}
-        onSave={(blocks) => send(blocks, false)}
-      />
+          }
+        />
+      ) : (
+        <>
+          <p>
+            <small>Simple page: written in the writing editor. </small>
+            <EditorSwitch id={props.id} to="layout" save={() => send(blocksNow.current, false)} />
+          </p>
+          <EntryEditor
+            label="Content"
+            initialBlocks={props.blocks}
+            onImageUpload={uploadForEditor}
+            onFileUpload={uploadForEditor}
+            onVideoUpload={uploadForEditor}
+            onBlocksChange={(next) => {
+              blocksNow.current = next;
+              setChanges((n) => n + 1);
+            }}
+            savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
+            toolbar={({ insertImage, insertBlocks, replaceBlocks }) => {
+              replaceBlocksNow.current = replaceBlocks;
+              return (
+                <>
+                  <InsertFromLibrary insertImage={insertImage} />
+                  <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
+                  <UnsavedCopyBanner
+                    copy={unsaved}
+                    timeZone={props.timeZone ?? null}
+                    onBringBack={(copy) => {
+                      setTitle(copy.title);
+                      replaceBlocks(copy.blocks);
+                      forgetUnsaved();
+                    }}
+                    onThrowAway={() => {
+                      forgetUnsaved();
+                      void fetch(`/api/admin/entries/${props.id}/autosave`, { method: "DELETE" });
+                    }}
+                  />
+                </>
+              );
+            }}
+            onSave={(blocks) => send(blocks, false)}
+          />
+        </>
+      )}
       <EntryAccessibility
         blocks={blocksNow.current}
         onMarkDecorative={(blockId) =>

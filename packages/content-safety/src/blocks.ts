@@ -1,7 +1,7 @@
 // Checking one block and its children (spec 03, sections 3 and 4).
-import { randomUUID } from "node:crypto";
 import { checkContent, type Repairs } from "./content.js";
 import { sanitizeProps } from "./props.js";
+import { checkStyle, convertPhysicalStyle } from "./styles.js";
 import { isSafeUrl, isSafeVideoUrl, isSafeColor, looksLikeScriptUrl } from "./schemes.js";
 
 export interface Block {
@@ -37,6 +37,22 @@ const BUILT_IN_TYPES = new Set([
   "file",
   "bookmark",
   "columns",
+  "column",
+  "section",
+  "container",
+  "spacer",
+  "button",
+  "buttonGroup",
+  "gallery",
+  "audio",
+  "icon",
+  "map",
+  "socialLinks",
+  "accordion",
+  "tabs",
+  "tab",
+  "slider",
+  "slide",
 ]);
 
 // The one URL-bearing prop for each built-in block type that has one. Video is checked
@@ -46,11 +62,42 @@ const URL_PROP_BY_TYPE: Record<string, string> = {
   file: "src",
   embed: "url",
   bookmark: "url",
+  audio: "src",
 };
 
+const MAX_LIST_ITEMS = 100;
+const SHORT = 300;
+
+/** A list of small records (gallery pictures, social links): only the named text fields are kept, the address must
+ * be a safe one, and at most 100 items stay. */
+function cleanItems(
+  raw: unknown,
+  fields: string[],
+  urlField: string,
+  repairs: Repairs,
+): Record<string, string>[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Record<string, string>[] = [];
+  for (const item of raw.slice(0, MAX_LIST_ITEMS)) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const record: Record<string, string> = {};
+    for (const f of fields) {
+      const v = (item as Record<string, unknown>)[f];
+      if (typeof v === "string") record[f] = v.slice(0, f === urlField ? 2000 : SHORT);
+    }
+    if (!isSafeUrl(record[urlField])) {
+      repairs.add("removed_url");
+      continue;
+    }
+    out.push(record);
+  }
+  if (raw.length > MAX_LIST_ITEMS) repairs.add("cut_block_count");
+  return out;
+}
+
 function newBlockId(seenIds: Set<string>): string {
-  let id = randomUUID().replace(/-/g, "").slice(0, 26);
-  while (seenIds.has(id)) id = randomUUID().replace(/-/g, "").slice(0, 26);
+  let id = globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 26);
+  while (seenIds.has(id)) id = globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 26);
   seenIds.add(id);
   return id;
 }
@@ -95,6 +142,10 @@ function checkKnownTypeProps(type: string, props: Record<string, unknown>, repai
     delete props.backgroundColor;
     repairs.add("removed_color");
   }
+  if (type === "gallery" && "images" in props)
+    props.images = cleanItems(props.images, ["src", "alt", "caption"], "src", repairs);
+  if (type === "socialLinks" && "items" in props)
+    props.items = cleanItems(props.items, ["network", "href"], "href", repairs);
   if (type === "video") {
     checkOneUrlProp(props, "src", isSafeVideoUrl, repairs);
   } else {
@@ -105,6 +156,27 @@ function checkKnownTypeProps(type: string, props: Record<string, unknown>, repai
 
 export interface Budget {
   remaining: number;
+  /** The screen sizes that are switched on for the site (spec 06, 4.1). Default: base, tablet, desktop. */
+  breakpoints?: readonly string[] | undefined;
+}
+
+/** Checks the responsive style of a block: only allowed properties and values are kept (spec 06, section 4.2). */
+function checkStyleProp(props: Record<string, unknown>, budget: Budget, repairs: Repairs): void {
+  if (!("style" in props)) return;
+  const { style, messages } = checkStyle(props.style, budget.breakpoints);
+  if (Object.keys(style).length > 0) props.style = style;
+  else delete props.style;
+  if (messages.length > 0) repairs.add("removed_style");
+}
+
+/** An older page saved physical horizontal properties (margin-left, text-align: left). They become start and end
+ * (D77, PB-71). Used when an old page is read, before the checks. */
+export function convertOldStyles(blocks: Block[]): Block[] {
+  return blocks.map((b) => {
+    const props = { ...b.props };
+    if ("style" in props) props.style = convertPhysicalStyle(props.style);
+    return { ...b, props, children: convertOldStyles(b.children ?? []) };
+  });
 }
 
 /** Checks one list of raw, untrusted block candidates and returns the safe blocks. `depth` is
@@ -178,6 +250,7 @@ function checkOneBlock(
     for (const key of Object.keys(props)) props[key] = stripScriptLikeStrings(props[key], repairs);
   }
 
+  checkStyleProp(props, budget, repairs);
   const content = checkContent(raw.content, repairs);
 
   let childrenRaw = raw.children;

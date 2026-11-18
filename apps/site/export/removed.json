@@ -15,7 +15,8 @@
     "app/admin",
     "app/uploads",
     "app/fonts",
-    "app/site-style"
+    "app/site-style",
+    "app/page-style"
   ],
   "replaced": {
     "app/[[...slug]]/page.tsx": "export/page.tsx"
