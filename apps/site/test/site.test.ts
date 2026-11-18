@@ -6584,6 +6584,41 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("link", { name: "Markdown picture page" }).waitFor();
     });
 
+    test("the search in the admin (Ctrl+K): it goes to a screen, finds a page by its title and opens it, and says so when nothing matches", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/media");
+      const made = await page.evaluate(async () => {
+        const r = await fetch("/api/admin/entries", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "page", title: "Searchable zebra page" }),
+        });
+        return r.status;
+      });
+      expect(made).toBe(200);
+      // The shell needs a moment to wake up before the shortcut works.
+      await page.getByRole("button", { name: "Search" }).waitFor();
+      await page.getByRole("button", { name: "Search" }).click();
+      const box = page.getByPlaceholder("Search the admin");
+      await box.fill("privacy");
+      await page.getByRole("option", { name: /Settings: Privacy/ }).click();
+      await page.waitForURL("**/admin/settings/privacy");
+      await page.getByRole("button", { name: "Search" }).click();
+      await page.getByPlaceholder("Search the admin").fill("zebra searchable");
+      const hit = page.getByRole("dialog").getByRole("option", { name: /Searchable zebra page/ });
+      await hit.waitFor();
+      expect(await hit.textContent()).toContain("Page · draft");
+      expect(await axeViolations(page)).toEqual([]);
+      await hit.click();
+      await page.waitForURL(/\/admin\/pages\/[0-9A-Za-z-]+$/);
+      await page.getByRole("button", { name: "Search" }).click();
+      await page.getByPlaceholder("Search the admin").fill("zzzz nothing");
+      await page
+        .getByText(/No results|Nothing/i)
+        .first()
+        .waitFor();
+    });
+
     test("security headers: every page and API answer says where it may be framed, its base address and where forms may send; the upload and font files keep their own stricter policy", async () => {
       const rules =
         "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'";

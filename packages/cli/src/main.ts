@@ -1,7 +1,10 @@
 // The `oks` command line: `oks check [folder]`, `oks export [folder] [--check] [--out folder] [--redirects file.json]
-// [--uploads folder]` and `oks media migrate --to s3|local [--uploads folder]`.
-import { readFileSync } from "node:fs";
+// [--uploads folder]`, `oks media migrate --to s3|local [--uploads folder]`, `oks migrate` and `oks user reset <email>`.
+import { build } from "esbuild";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { localAdapter, migrateFiles, s3Adapter, s3OptionsFromEnv } from "@oks-page/media";
 import { checkPlugin, formatCheck } from "./check.js";
 import { exportSite } from "./export.js";
@@ -14,7 +17,73 @@ const USAGE = [
   "                            Check a site, then write it as plain files.",
   "       oks media migrate --to s3|local [--uploads folder]",
   "                            Copy every uploaded file between the uploads folder and the S3 bucket set in OKS_S3_*.",
+  "       oks migrate          Make or update the database tables (run it in the project's folder).",
+  "       oks user reset <email>",
+  "                            Give an account a new one-time password and sign it out everywhere (needs the secret key in .env).",
 ].join("\n");
+
+// The product's name comes from this package's own name (@<product>/cli), as the installer does.
+const own = createRequire(import.meta.url)("../package.json") as { name: string };
+const PRODUCT = own.name.replace(/^@/, "").replace(/\/cli$/, "");
+
+/** The commands that work on the project's own database, found in the project's own copy of the product. */
+export interface ProjectCommands {
+  migrateCommand(out: (text: string) => void): Promise<number>;
+  userResetCommand(
+    args: string[],
+    out: (text: string) => void,
+    env: Record<string, string | undefined>,
+  ): Promise<number>;
+}
+
+/** Reads `KEY=value` lines (a quoted value loses its quotes). Lines that are comments or not settings are ignored. */
+export function parseEnvFile(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    let value = m[2]!;
+    if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1);
+    values[m[1]!] = value;
+  }
+  return values;
+}
+
+/** The project's `.env` and `.env.local` settings fill in what the environment does not already have. */
+export function loadProjectEnv(folder: string, env: Record<string, string | undefined>): void {
+  for (const name of [".env.local", ".env"]) {
+    const file = path.join(folder, name);
+    if (!existsSync(file)) continue;
+    for (const [key, value] of Object.entries(parseEnvFile(readFileSync(file, "utf8"))))
+      if (env[key] === undefined || env[key] === "") env[key] = value;
+  }
+}
+
+/**
+ * Finds the product from the project's folder (not from where this command is installed). Its files are written for the
+ * site's bundler (no `.js` ending on imports), so they are bundled into one file first. The file is placed next to them,
+ * so its packages (the database, the sign-in library) are found where the product itself finds them, and it is removed
+ * again as soon as it has been loaded.
+ */
+async function loadProject(folder: string): Promise<ProjectCommands> {
+  const resolve = createRequire(path.join(path.resolve(folder), "package.json")).resolve;
+  const entry = resolve(`${PRODUCT}/cli-commands`);
+  const outfile = path.join(path.dirname(entry), `.oks-cli-${process.pid}.mjs`);
+  try {
+    await build({
+      entryPoints: [entry],
+      outfile,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      packages: "external",
+      logLevel: "silent",
+    });
+    return (await import(pathToFileURL(outfile).href)) as ProjectCommands;
+  } finally {
+    rmSync(outfile, { force: true });
+  }
+}
 
 /** The text after a flag such as --out, or undefined. */
 function flag(args: string[], name: string): string | undefined {
@@ -27,8 +96,23 @@ export async function runCli(
   argv: string[],
   out: (text: string) => void,
   env: Record<string, string | undefined> = process.env,
+  project: (folder: string) => Promise<ProjectCommands> = loadProject,
 ): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "migrate" || (command === "user" && rest[0] === "reset")) {
+    const folder = process.cwd();
+    loadProjectEnv(folder, env);
+    let commands: ProjectCommands;
+    try {
+      commands = await project(folder);
+    } catch {
+      out(`Problem: ${PRODUCT} is not installed here. Run this command in the project's folder.`);
+      return 1;
+    }
+    return command === "migrate"
+      ? commands.migrateCommand(out)
+      : commands.userResetCommand(rest.slice(1), out, env);
+  }
   if (command === "media" && rest[0] === "migrate") return migrate(rest.slice(1), out, env);
   const values = new Set([flag(rest, "--out"), flag(rest, "--redirects"), flag(rest, "--uploads")]);
   const folder = rest.find((a) => !a.startsWith("--") && !values.has(a));

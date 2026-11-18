@@ -80,6 +80,17 @@ describe("matching (SEO-70 to SEO-73)", () => {
     expect(ids(list, "apples")).toEqual(["title", "term", "new", "old", "text"]);
   });
 
+  test("SEO-70b: the excerpt is searched and ranks with the category names: below the title, above the text", () => {
+    const list = [
+      row("text", "Notes", "All about quinces.", { publishedAt: 1 }),
+      row("excerpt", "Notes two", "", { excerpt: "Quinces in autumn", publishedAt: 2 }),
+      row("title", "Quinces", "", { publishedAt: 3 }),
+    ];
+    expect(ids(list, "quinces")).toEqual(["title", "excerpt", "text"]);
+    expect(ids(list, "autumn")).toEqual(["excerpt"]);
+    expect(ids(list, "autum")).toEqual(["excerpt"]);
+  });
+
   test("a whole word ranks above the start of a longer word", () => {
     const list = [row("long", "Bakery"), row("whole", "Bake")];
     expect(ids(list, "bake")).toEqual(["whole", "long"]);
@@ -209,6 +220,18 @@ for (const { kind, open, skip } of openers) {
       const index = buildIndex(rows);
       expect(search(index, "gardens").hits).toHaveLength(2);
       expect(search(index, "draft").hits).toHaveLength(0);
+    });
+
+    test("SEO-70c: the excerpt (the description in the SEO box) is searched, and a hidden entry's excerpt is not", async () => {
+      await add("blog/described", "Plain title", {
+        seo: { description: "Rhubarb crumble secrets" },
+      });
+      await add("blog/hidden-d", "Other title", {
+        seo: { description: "Rhubarb tart" },
+        meta: { hideFromSearch: true },
+      });
+      const index = await loadSearchIndex(db.runner, siteId);
+      expect(search(index, "rhubarb").hits.map((h) => h.row.title)).toEqual(["Plain title"]);
     });
 
     test("category and tag names are searchable, and rows come newest first", async () => {

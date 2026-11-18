@@ -13,7 +13,7 @@ const nav = [
 const rows = Array.from({ length: 50 }, (_, i) => ({ id: i, title: "Page " + i + " with a fairly long title to push the table wider", status: "Published" }));
 createRoot(document.getElementById("root")).render(
   <Shell nav={nav} selectedKey="pages" title="Pages" breadcrumbs={[{ label: "Home", href: "#dashboard" }, { label: "Pages" }]}
-    searchItems={[{ id: "plugins", label: "Plugins", href: "#plugins" }]} onNavigate={(h) => { location.hash = h; }}>
+    searchItems={[{ id: "plugins", label: "Plugins", href: "#plugins" }]} onSearch={async (q) => (q === "zeta" ? [{ id: "e1", label: "Zeta page", href: "#zeta" }] : [])} onNavigate={(h) => { location.hash = h; }}>
     <Table aria-label="Pages" columns={[{ key: "title", header: "Title" }, { key: "status", header: "Status" }]} rows={rows} getRowKey={(r) => r.id} />
   </Shell>);
 `;
@@ -74,6 +74,17 @@ describe.skipIf(!browserPath)("the admin shell", () => {
     await box.fill("plug");
     await page.keyboard.press("Enter");
     expect(await page.evaluate(() => location.hash)).toBe("#plugins");
+    await page.close();
+  });
+
+  test("AD-06b: the search also asks the lookup after a short pause, and shows what it finds", async () => {
+    const { page } = await site.open(1280);
+    await page.keyboard.press("Control+k");
+    const box = page.getByRole("combobox");
+    await box.fill("zeta");
+    await page.getByRole("option", { name: "Zeta page" }).waitFor();
+    await page.keyboard.press("Enter");
+    expect(await page.evaluate(() => location.hash)).toBe("#zeta");
     await page.close();
   });
 

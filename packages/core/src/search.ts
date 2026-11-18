@@ -16,6 +16,8 @@ export interface SearchRow {
   text: string;
   /** The names of the entry's categories and tags. */
   terms: string[];
+  /** The excerpt (the description in the SEO box). It ranks with the category and tag names. */
+  excerpt?: string;
 }
 
 /** Lower case, and the marks that sit on letters (accents, Arabic vowel signs) taken off. */
@@ -61,6 +63,7 @@ export interface SearchIndex {
 const FORM = "~";
 const isForm = (key: string) => key.startsWith(FORM);
 
+const EXCERPT_LIMIT = 1000;
 const IN_TITLE = 4;
 const IN_TERMS = 2;
 const IN_TEXT = 1;
@@ -92,6 +95,7 @@ export class SearchIndexBuilder {
       row.terms.flatMap((t) => wordsOf(t)),
       IN_TERMS,
     );
+    mark(wordsOf((row.excerpt ?? "").slice(0, EXCERPT_LIMIT)), IN_TERMS);
     mark(wordsOf(row.text.slice(0, TEXT_LIMIT)), IN_TEXT);
     for (const [word, bits] of [...where])
       for (const form of formsOf(word, this.language))
@@ -434,6 +438,7 @@ function searchRowsOf(
       publishedAt: toNumber(e["at"]),
       text: String(e["plain_text"]),
       terms: byEntry.get(id) ?? [],
+      excerpt: String(asObject(e["seo"])["description"] ?? ""),
     });
   }
   return rows;

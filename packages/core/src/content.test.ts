@@ -11,6 +11,7 @@ import {
   slugFromTitle,
   type Actor,
 } from "./content.js";
+import { searchAdminEntries } from "./admin-search.js";
 import { DEFAULT_ROLES } from "./roles.js";
 import { runSetup } from "./setup.js";
 
@@ -213,6 +214,39 @@ for (const { kind, open, skip } of openers) {
       const stored = String(row["html"]) + JSON.stringify(row["body"]);
       expect(stored).not.toContain("javascript:");
       expect(stored).not.toContain("onmouseover");
+    });
+
+    test("AS-01: the admin search finds pages and posts by every word of the title, in any case, with % and _ taken literally", async () => {
+      await draft(anna, "Summer Sale Plans");
+      await draft(anna, "Winter plans", "post");
+      await draft(anna, "100% real");
+      await draft(anna, "100 percent real");
+      await draft(anna, "a_b");
+      await draft(anna, "axb");
+      const find = async (q: string, who = anna) =>
+        (await searchAdminEntries(db.runner, who, siteId, q)).map((h) => `${h.type}:${h.title}`);
+      expect((await find("plans")).sort()).toEqual(["page:Summer Sale Plans", "post:Winter plans"]);
+      expect(await find("SUMMER plans")).toEqual(["page:Summer Sale Plans"]);
+      expect(await find("100%")).toEqual(["page:100% real"]);
+      expect(await find("a_b")).toEqual(["page:a_b"]);
+      expect(await find("x")).toEqual([]);
+      expect(await find("  ")).toEqual([]);
+      expect(await find("nothing like it")).toEqual([]);
+    });
+
+    test("AS-02: the admin search leaves out the trash, shows eight at most, and shows each person only what they may edit", async () => {
+      const gone = await draft(anna, "Findme gone");
+      await db.run(`update entries set status = 'trash' where id = ?`, [gone.id]);
+      await draft(bob, "Findme by Bob");
+      await draft(eve, "Findme by Eve");
+      const titles = async (who: Actor) =>
+        (await searchAdminEntries(db.runner, who, siteId, "findme")).map((h) => h.title).sort();
+      expect(await titles(anna)).toEqual(["Findme by Bob", "Findme by Eve"]);
+      expect(await titles(eve)).toEqual(["Findme by Bob", "Findme by Eve"]);
+      expect(await titles(bob)).toEqual(["Findme by Bob"]);
+      expect(await titles(sam)).toEqual([]);
+      for (let i = 0; i < 10; i++) await draft(anna, `Many ${i}`);
+      expect(await searchAdminEntries(db.runner, anna, siteId, "many")).toHaveLength(8);
     });
 
     test("CT-60: a save that removes a block leaves a line in the log, a clean save does not", async () => {

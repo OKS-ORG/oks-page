@@ -1,1 +1,1 @@
-export { POST } from "oks-page/api-entries";
+export { GET, POST } from "oks-page/api-entries";

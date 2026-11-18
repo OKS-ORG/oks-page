@@ -1,5 +1,5 @@
 // POST /api/admin/entries: add a draft page or post. Needs a signed-in member who may add that kind of content.
-import { createDraft, type ContentErrorCode } from "@oks-page/core";
+import { createDraft, searchAdminEntries, type ContentErrorCode } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -41,4 +41,13 @@ export async function POST(request: Request) {
   });
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   return NextResponse.json({ id: result.id, slug: result.slug, revision: result.revision });
+}
+
+/** GET /api/admin/entries?q=...: the pages and posts the signed-in person may edit whose title holds the words (Ctrl+K). */
+export async function GET(request: Request) {
+  const member = await signedInMember();
+  if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
+  const q = new URL(request.url).searchParams.get("q") ?? "";
+  const hits = await searchAdminEntries(getRunner(), await actorOf(member), member.siteId, q);
+  return NextResponse.json({ hits }, { headers: { "cache-control": "no-store" } });
 }
