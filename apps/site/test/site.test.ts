@@ -6819,6 +6819,68 @@ describe.skipIf(!findBrowser())(
       expect(html).not.toContain("javascript:alert");
     });
 
+    test("PB-51: choose a block by clicking it in the preview, and move blocks by dragging them in the list, with a plain refusal", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Dragged page",
+      });
+      expect(made.status).toBe(200);
+      await page.goto(site.base + `/admin/pages/${String(made.json!["id"])}`);
+      await page.getByRole("button", { name: "Switch to the layout editor" }).click();
+      const tools = page.getByRole("toolbar", { name: "Layout tools" });
+      await tools.waitFor();
+      const blocks = page.getByRole("region", { name: "Blocks on this page" });
+      const add = async (label: string) => {
+        await page.getByLabel("Add a block").selectOption({ label });
+        await tools.getByRole("button", { name: "Add", exact: true }).focus();
+        await page.keyboard.press("Enter");
+      };
+      const order = async () =>
+        (await blocks.getByRole("button").allInnerTexts()).map((t) => t.trim());
+      await add("Section");
+      await add("Heading");
+      await blocks.getByRole("button", { name: /^Section/ }).click();
+      await add("Paragraph");
+      await expect.poll(order).toEqual(["Section", "Heading: A heading", "Paragraph: Some text."]);
+
+      // Drag the paragraph to the top edge of the heading: it goes before it.
+      await blocks
+        .getByRole("button", { name: /^Paragraph/ })
+        .dragTo(blocks.getByRole("button", { name: /^Heading/ }), {
+          targetPosition: { x: 20, y: 1 },
+        });
+      await expect.poll(order).toEqual(["Section", "Paragraph: Some text.", "Heading: A heading"]);
+
+      // Dragging the section onto the paragraph inside it is refused in plain words, and nothing moves.
+      await blocks
+        .getByRole("button", { name: /^Section/ })
+        .dragTo(blocks.getByRole("button", { name: /^Paragraph/ }));
+      await page
+        .getByRole("alert")
+        .filter({ hasText: "A block cannot be moved into itself." })
+        .waitFor();
+      expect(await order()).toEqual(["Section", "Paragraph: Some text.", "Heading: A heading"]);
+
+      // Undo brings the old order back.
+      await tools.getByRole("button", { name: "Undo" }).click();
+      await expect.poll(order).toEqual(["Section", "Heading: A heading", "Paragraph: Some text."]);
+
+      // A click in the preview chooses the block under it.
+      const preview = page.frameLocator('iframe[title="Page preview"]');
+      await preview.getByText("A heading").click();
+      await expect
+        .poll(() => blocks.getByRole("button", { name: /^Heading/ }).getAttribute("aria-current"))
+        .toBe("true");
+      await preview.getByText("Some text.").click();
+      await expect
+        .poll(() => blocks.getByRole("button", { name: /^Paragraph/ }).getAttribute("aria-current"))
+        .toBe("true");
+      // The block chosen in the list is marked in the preview.
+      await blocks.getByRole("button", { name: /^Heading/ }).click();
+      await expect.poll(() => preview.locator("[data-selected]").innerText()).toBe("A heading");
+    });
+
     test("the owner's look is a file: the page links to /site-style/<fingerprint>.css instead of carrying the text, the file is cached for a year while its name matches, and an older name still gets the current look, not cached", async () => {
       const page = await signedIn(owner);
       const saved = await call(page, "PUT", "/api/admin/settings/theme", {

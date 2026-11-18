@@ -412,10 +412,59 @@ export function LayoutEditor(props: LayoutEditorProps) {
 
   // ---- the preview ----
   const document = useMemo(() => {
-    const written = writeBlocks(tree);
+    const written = writeBlocks(tree, { ids: true });
     const css = pageCss(tree);
-    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;margin:0;padding:1rem}img{max-inline-size:100%}${css}</style><body>${written.html}`;
+    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;margin:0;padding:1rem}img{max-inline-size:100%}[data-oks-id]{cursor:default}[data-selected]{outline:2px solid #2563eb;outline-offset:2px}${css}</style><body>${written.html}`;
   }, [tree]);
+
+  // A click in the preview chooses the block under it. The frame has no script (it only shares its origin, so this page
+  // can read it); the click is caught here, and links in the preview do nothing.
+  const frame = useRef<HTMLIFrameElement>(null);
+  const markSelected = useCallback(() => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    doc.querySelectorAll("[data-selected]").forEach((el) => el.removeAttribute("data-selected"));
+    if (selected)
+      doc.querySelector(`[data-oks-id="${selected}"]`)?.setAttribute("data-selected", "");
+  }, [selected]);
+  const wireFrame = useCallback(() => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    doc.onclick = (event) => {
+      event.preventDefault();
+      const hit = (event.target as Element | null)?.closest?.("[data-oks-id]");
+      const id = hit?.getAttribute("data-oks-id");
+      if (id) setSelected(id);
+    };
+    markSelected();
+  }, [markSelected]);
+  useEffect(markSelected, [markSelected]);
+
+  // ---- dragging in the list: before, after or inside the block it is dropped on ----
+  const [drag, setDrag] = useState<string | null>(null);
+  const [hint, setHint] = useState<{ id: string; where: "before" | "after" | "inside" } | null>(
+    null,
+  );
+  const drop = () => {
+    if (!drag || !hint) return;
+    const target = findPlace(tree, hint.id);
+    const from = findPlace(tree, drag);
+    setDrag(null);
+    setHint(null);
+    if (!target || !from) return;
+    let parentId: string | null;
+    let index: number;
+    if (hint.where === "inside") {
+      parentId = target.block.id;
+      index = target.block.children.length;
+    } else {
+      parentId = target.parent?.id ?? null;
+      index = target.index + (hint.where === "after" ? 1 : 0);
+    }
+    // The block leaves its old place first, so a place further down in the same list moves up by one.
+    if ((from.parent?.id ?? null) === parentId && from.index < index) index -= 1;
+    run(moveBlock(tree, drag, parentId, index));
+  };
 
   // ---- keys: undo and redo ----
   const onKey = (event: React.KeyboardEvent) => {
@@ -457,6 +506,27 @@ export function LayoutEditor(props: LayoutEditorProps) {
         <li key={b.id}>
           <button
             type="button"
+            draggable
+            onDragStart={(e) => {
+              setDrag(b.id);
+              e.dataTransfer.setData("text/plain", b.id);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragEnd={() => {
+              setDrag(null);
+              setHint(null);
+            }}
+            onDragOver={(e) => {
+              if (!drag) return;
+              e.preventDefault();
+              const box = e.currentTarget.getBoundingClientRect();
+              const at = (e.clientY - box.top) / Math.max(box.height, 1);
+              setHint({ id: b.id, where: at < 0.25 ? "before" : at > 0.75 ? "after" : "inside" });
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              drop();
+            }}
             onClick={() => setSelected(b.id)}
             aria-current={selected === b.id ? "true" : undefined}
             style={{
@@ -466,6 +536,13 @@ export function LayoutEditor(props: LayoutEditorProps) {
               padding: "0.25rem 0.5rem",
               border: "1px solid transparent",
               borderColor: selected === b.id ? "currentColor" : "transparent",
+              borderTopColor: hint?.id === b.id && hint.where === "before" ? "#2563eb" : undefined,
+              borderBottomColor:
+                hint?.id === b.id && hint.where === "after" ? "#2563eb" : undefined,
+              boxShadow:
+                hint?.id === b.id && hint.where === "inside"
+                  ? "inset 0 0 0 2px #2563eb"
+                  : undefined,
               background: selected === b.id ? "rgba(127,127,127,0.18)" : "none",
               color: "inherit",
               font: "inherit",
@@ -884,8 +961,10 @@ export function LayoutEditor(props: LayoutEditorProps) {
           <h3 style={{ marginTop: 0 }}>Preview ({deviceWidth} px wide)</h3>
           <div style={{ overflowX: "auto" }}>
             <iframe
+              ref={frame}
               title="Page preview"
-              sandbox=""
+              sandbox="allow-same-origin"
+              onLoad={wireFrame}
               srcDoc={document}
               style={{
                 width: `${deviceWidth}px`,

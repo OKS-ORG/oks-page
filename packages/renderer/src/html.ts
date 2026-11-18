@@ -131,6 +131,8 @@ const formatBytes = (size: number): string =>
 interface Context {
   depth: number;
   skipped: Set<string>;
+  /** The layout editor asks for each block's id on its first element, so a click in the preview can find the block. */
+  ids: boolean;
 }
 
 const alignStyle = (block: Block): string => {
@@ -347,6 +349,13 @@ const ALL_SIZES = BREAKPOINTS.map((b) => b.name);
 /** The checked style of a block. Every screen size is accepted here; the site's own list decides which are drawn. */
 const blockStyle = (block: Block): Style => checkStyle(props(block)["style"], ALL_SIZES).style;
 
+/** Puts the block's id on the first element of a written block (only for the editor's preview). */
+function withId(html: string, id: string | null): string {
+  if (!id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return html;
+  const open = /^<([a-z][a-z0-9]*)/.exec(html);
+  return open ? `<${open[1]} data-oks-id="${id}"${html.slice(open[0].length)}` : html;
+}
+
 /** Puts the style class on the first element of a written block. */
 function withStyleClass(html: string, style: Style): string {
   const cls = styleClass(style);
@@ -391,9 +400,15 @@ function blocksHtml(blocks: Block[] | undefined, parent: Context): string {
       while (i + 1 < blocks.length && blocks[i + 1]?.type === block.type) items.push(blocks[++i]!);
       out += listHtml(items, ctx);
     } else
-      out += withStyleClass(
-        blockHtml({ ...block, children: Array.isArray(block.children) ? block.children : [] }, ctx),
-        blockStyle(block),
+      out += withId(
+        withStyleClass(
+          blockHtml(
+            { ...block, children: Array.isArray(block.children) ? block.children : [] },
+            ctx,
+          ),
+          blockStyle(block),
+        ),
+        ctx.ids ? block.id : null,
       );
   }
   return out;
@@ -463,8 +478,8 @@ function blockText(block: Block, depth: number, lines: string[]): void {
 }
 
 /** The HTML and the plain text of a checked block list. Blocks the writer does not draw are listed in `skipped`. */
-export function writeBlocks(blocks: Block[]): Written {
-  const ctx: Context = { depth: 0, skipped: new Set() };
+export function writeBlocks(blocks: Block[], options: { ids?: boolean } = {}): Written {
+  const ctx: Context = { depth: 0, skipped: new Set(), ids: options.ids === true };
   const html = blocksHtml(blocks, ctx);
   const lines: string[] = [];
   for (const block of Array.isArray(blocks) ? blocks : []) blockText(block, 0, lines);

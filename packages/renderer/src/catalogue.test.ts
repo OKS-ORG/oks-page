@@ -200,3 +200,14 @@ describe("the block checks for these blocks (PB-61)", () => {
     expect((body.blocks[0]!.props["images"] as unknown[]).length).toBe(100);
   });
 });
+
+describe("ids for the editor's preview", () => {
+  test("only when asked, on the first element of each block, and only a safe id", () => {
+    const blocks = [
+      block("paragraph", { id: "p-1", content: words("x") }),
+      block("divider", { id: 'bad"id' }),
+    ];
+    expect(writeBlocks(blocks).html).toBe("<p>x</p><hr>");
+    expect(writeBlocks(blocks, { ids: true }).html).toBe('<p data-oks-id="p-1">x</p><hr>');
+  });
+});
