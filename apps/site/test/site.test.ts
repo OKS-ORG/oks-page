@@ -6881,6 +6881,185 @@ describe.skipIf(!findBrowser())(
       await expect.poll(() => preview.locator("[data-selected]").innerText()).toBe("A heading");
     });
 
+    /** A layout page with these blocks, published or not, made through the same save the editor uses. */
+    const layoutPage = async (page: Page, title: string, blocks: unknown[], publish = false) => {
+      const made = await call(page, "POST", "/api/admin/entries", { type: "page", title });
+      expect(made.status).toBe(200);
+      const saved = await call(page, "PUT", `/api/admin/entries/${String(made.json!["id"])}`, {
+        title,
+        slugPart: String(made.json!["slug"]),
+        status: publish ? "published" : "draft",
+        blocks,
+        revision: made.json!["revision"],
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      return { id: String(made.json!["id"]), slug: String(made.json!["slug"]) };
+    };
+    let uid = 0;
+    const b = (
+      type: string,
+      props: Record<string, unknown> = {},
+      children: unknown[] = [],
+      content: unknown = null,
+    ) => ({ id: `chk${++uid}x`, type, props, content, children });
+    const words = (value: string) => [{ type: "text", text: value, styles: {} }];
+
+    test("PB-95: the layout editor has no accessibility violations on a wide and a narrow screen, in light and dark", async () => {
+      const setup = await signedIn(owner);
+      const made = await layoutPage(setup, "Accessible layout", [
+        b("section", {}, [
+          b("heading", { level: 2 }, [], words("Welcome")),
+          b("columns", {}, [b("column", {}, [b("paragraph", {}, [], words("Left"))]), b("column")]),
+          b("buttonGroup", {}, [b("button", { text: "Go", href: "/x", variant: "solid" })]),
+          b("gallery", { columns: 2, images: [{ src: "/uploads/none.jpg", alt: "None" }] }),
+          b("tabs", {}, [b("tab", { title: "One" }, [b("paragraph", {}, [], words("First"))])]),
+        ]),
+      ]);
+      for (const colorScheme of ["light", "dark"] as const) {
+        for (const width of [1280, 390]) {
+          const context = await browser.newContext({
+            viewport: { width, height: 900 },
+            colorScheme,
+          });
+          // The same sign-in as the page above, so the sign-in limits are not used up.
+          await context.addCookies(await setup.context().cookies());
+          const page = await context.newPage();
+          await page.goto(site.base + `/admin/pages/${made.id}`);
+          const blocks = page.getByRole("region", { name: "Blocks on this page" });
+          await blocks.getByRole("button", { name: /^Section/ }).waitFor();
+          expect(await axeViolations(page), `nothing chosen, ${colorScheme} ${width}px`).toEqual(
+            [],
+          );
+          // With a block chosen, its settings and the style box are on the screen too.
+          await blocks.getByRole("button", { name: "Button: Go" }).click();
+          expect(await axeViolations(page), `a button chosen, ${colorScheme} ${width}px`).toEqual(
+            [],
+          );
+          await blocks.getByRole("button", { name: /^Gallery/ }).click();
+          expect(await axeViolations(page), `a gallery chosen, ${colorScheme} ${width}px`).toEqual(
+            [],
+          );
+          await context.close();
+        }
+      }
+    });
+
+    test("PB-96: the layout blocks mirror in right to left: columns, buttons, a slider and start/end spacing", async () => {
+      const page = await signedIn(owner);
+      const made = await layoutPage(
+        page,
+        "Mirrored layout",
+        [
+          b("section", { width: "full" }, [
+            b("buttonGroup", {}, [
+              b("button", {
+                text: "First",
+                variant: "solid",
+                style: { base: { "margin-inline-start": "40px" } },
+              }),
+              b("button", { text: "Second", variant: "outline" }),
+            ]),
+            b("slider", { label: "News" }, [
+              b("slide", {}, [b("paragraph", {}, [], words("Slide one"))]),
+              b("slide", {}, [b("paragraph", {}, [], words("Slide two"))]),
+            ]),
+          ]),
+        ],
+        true,
+      );
+      let html = "";
+      await expect
+        .poll(async () => {
+          html = await (await fetch(site.base + `/${made.slug}`)).text();
+          return html.includes("page-style");
+        })
+        .toBe(true);
+      const href = /href="(\/page-style\/[^"]+\.css)"/.exec(html)![1]!;
+      const css = await (await fetch(site.base + href)).text();
+      const article = /<article>([\s\S]*?)<\/article>/.exec(html)![1]!.replace(/<link[^>]*>/, "");
+      const measure = async (dir: "ltr" | "rtl") => {
+        const probe = await browser.newPage({ viewport: { width: 900, height: 600 } });
+        await probe.setContent(
+          `<!doctype html><html dir="${dir}"><head><style>body{margin:0}${css}</style></head><body>${article}</body></html>`,
+        );
+        const result = await probe.evaluate(() => {
+          const rect = (el: Element) => el.getBoundingClientRect();
+          const group = document.querySelector(".button-group")!;
+          const first = group.children[0]!;
+          const second = group.children[1]!;
+          const slider = document.querySelector(".slider")!;
+          const slide = slider.children[0]!;
+          return {
+            firstGap: dirGap(rect(group), rect(first)),
+            firstBeforeSecond: dirOrder(rect(first), rect(second)),
+            slideAtStart: dirGap(rect(slider), rect(slide)),
+          };
+          function dirGap(outer: DOMRect, inner: DOMRect) {
+            return document.documentElement.dir === "rtl"
+              ? Math.round(outer.right - inner.right)
+              : Math.round(inner.left - outer.left);
+          }
+          function dirOrder(a: DOMRect, c: DOMRect) {
+            return document.documentElement.dir === "rtl" ? a.left > c.left : a.left < c.left;
+          }
+        });
+        await probe.close();
+        return result;
+      };
+      for (const dir of ["ltr", "rtl"] as const) {
+        const got = await measure(dir);
+        // The first button starts 40 px in from the START edge, whichever side that is; it comes first in reading order;
+        // the first slide is at the start edge.
+        expect(got.firstGap, `${dir} first button gap`).toBe(40);
+        expect(got.firstBeforeSecond, `${dir} reading order`).toBe(true);
+        expect(got.slideAtStart, `${dir} first slide`).toBe(0);
+      }
+    });
+
+    test("PB-64: a page with 5,000 blocks opens and stays usable in the layout editor", async () => {
+      const page = await signedIn(owner);
+      // One section with 4,998 short paragraphs and a heading we can find: 5,000 blocks in all.
+      const rows = Array.from({ length: 4998 }, (_, i) =>
+        b("paragraph", {}, [], words(`Row ${i}`)),
+      );
+      const made = await layoutPage(page, "Huge layout", [
+        b("section", {}, [b("heading", { level: 2 }, [], words("The needle")), ...rows]),
+      ]);
+      const started = Date.now();
+      await page.goto(site.base + `/admin/pages/${made.id}`);
+      const blocks = page.getByRole("region", { name: "Blocks on this page" });
+      await blocks
+        .getByRole("button", { name: /^Heading: The needle/ })
+        .waitFor({ timeout: 60_000 });
+      const opened = Date.now() - started;
+      expect(opened, `opening took ${opened} ms`).toBeLessThan(20_000);
+      // The page is drawn on the server first and gets its behaviour a moment later; a click before that does nothing.
+      // So the first choice is tried until it works, and only then is the speed of the next one measured.
+      const heading = blocks.getByRole("button", { name: /^Heading: The needle/ });
+      const textBox = page.getByLabel("Text", { exact: true });
+      for (let tries = 0; tries < 40 && !(await textBox.isVisible()); tries++) {
+        await heading.click();
+        await page.waitForTimeout(500);
+      }
+      expect(await textBox.isVisible()).toBe(true);
+      const chosenAt = Date.now();
+      await blocks.getByRole("button", { name: "Paragraph: Row 10", exact: true }).click();
+      await expect.poll(() => textBox.inputValue(), { timeout: 10_000 }).toBe("Row 10");
+      const chosen = Date.now() - chosenAt;
+      expect(chosen, `choosing took ${chosen} ms`).toBeLessThan(3_000);
+      await heading.click();
+      await expect.poll(() => textBox.inputValue(), { timeout: 10_000 }).toBe("The needle");
+      // A change is shown in the list.
+      const typedAt = Date.now();
+      await textBox.fill("The haystack");
+      await blocks
+        .getByRole("button", { name: /^Heading: The haystack/ })
+        .waitFor({ timeout: 10_000 });
+      const typed = Date.now() - typedAt;
+      expect(typed, `a change took ${typed} ms`).toBeLessThan(3_000);
+      console.log(`PB-64: opened in ${opened} ms, chose in ${chosen} ms, changed in ${typed} ms`);
+    });
+
     test("the owner's look is a file: the page links to /site-style/<fingerprint>.css instead of carrying the text, the file is cached for a year while its name matches, and an older name still gets the current look, not cached", async () => {
       const page = await signedIn(owner);
       const saved = await call(page, "PUT", "/api/admin/settings/theme", {
