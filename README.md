@@ -10,4 +10,6 @@ The name `oks-page` is final (decision D144, 11 November 2026).
 
 Security: please report a problem in private, as `SECURITY.md` says.
 
+Contributing: see `CONTRIBUTING.md` (every commit needs a `Signed-off-by` line).
+
 Licence: MIT (see `LICENSE`).

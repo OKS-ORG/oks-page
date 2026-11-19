@@ -26,8 +26,9 @@ Please test only on **your own installation**, never on someone else's site, and
 
 ## What happens next
 
-- **We answer within days.** You will hear from a maintainer to say we got it and whether we can repeat it.
-- **We fix the problem, and we fix critical ones fast.** Critical means that someone can take over a site, run code, or read data they must not see. We will tell you when a fix is ready.
+- **We answer within 3 days.** You will hear from a maintainer to say we got it and whether we can repeat it.
+- **We have a fix, or a clear plan with a date, within 30 days.** Critical problems (someone can take over a site, run code, or read data they must not see) are fixed faster. We will tell you when a fix is ready.
+- **We make the problem public within 90 days at the latest.** If the fix is ready sooner, the notice comes with it. If attackers are already using the problem, we shorten these times.
 - **We tell the people who run sites.** A fix for a security problem is published together with a notice that says which versions are affected and which version fixes it (a GitHub security advisory). An urgent security update path in the update checks is planned for this; until it exists, the notice is the way.
 - **We ask you to keep the report private until the fix is out**, and we are glad to name you in the notice if you want to be named.
 
