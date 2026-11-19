@@ -283,3 +283,124 @@ export async function sendAccountChangeEmail(
     now,
   );
 }
+
+/** The people of a site who hold a capability (for a content type, or for all of them), with an address. */
+async function membersWith(
+  runner: SqlRunner,
+  siteId: string,
+  capability: string,
+  typeKey: string,
+): Promise<{ userId: string; name: string; email: string }[]> {
+  const rows = await runner.all(
+    `select distinct u."id", u."name", u."email" from "site_members" m
+       join "users" u on u."id" = m."user_id" join "roles" r on r."id" = m."role_id"
+      where m."site_id" = ? and (r."key" = 'administrator' or exists (
+        select 1 from "role_capabilities" c where c."role_id" = r."id" and c."capability" = ?
+          and (c."scope_type_key" is null or c."scope_type_key" = '' or c."scope_type_key" = ?)))
+      order by u."email"`,
+    [siteId, capability, typeKey],
+  );
+  return rows.map((r) => ({
+    userId: String(r["id"]),
+    name: String(r["name"]),
+    email: String(r["email"]),
+  }));
+}
+
+/** At most this many people are told about one page (a site with many editors does not flood). */
+export const REVIEW_EMAIL_RECIPIENTS = 20;
+
+/**
+ * A page was handed in for review: everyone who may publish it (except the person who handed it in) gets an email with
+ * a link to it. Returns how many emails were queued; nothing is queued while email is not set up.
+ */
+export async function sendReviewWaitingEmails(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: {
+    typeKey: string;
+    title: string;
+    author: string;
+    authorId: string;
+    siteName: string;
+    link: string;
+  },
+  now: () => number = Date.now,
+): Promise<number> {
+  const people = (await membersWith(runner, siteId, "content.publish_any", input.typeKey))
+    .filter((p) => p.userId !== input.authorId)
+    .slice(0, REVIEW_EMAIL_RECIPIENTS);
+  let queued = 0;
+  for (const p of people) {
+    const result = await sendText(
+      runner,
+      siteId,
+      secrets,
+      "review-waiting",
+      p.email,
+      {
+        name: p.name || p.email,
+        site: input.siteName,
+        title: input.title,
+        author: input.author,
+        link: input.link,
+      },
+      now,
+    );
+    if (result.sent) queued += 1;
+  }
+  return queued;
+}
+
+/**
+ * A comment is waiting: everyone who may moderate comments gets an email, but only one an hour each, with the number
+ * waiting, so a flood of comments does not flood the inbox. Returns how many emails were queued.
+ */
+export async function sendCommentWaitingEmails(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: { postTitle: string; commenter: string; siteName: string; link: string },
+  now: () => number = Date.now,
+): Promise<number> {
+  const waiting = Number(
+    (
+      await runner.all(
+        `select count(*) as n from "comments" where "site_id" = ? and "status" = 'pending'`,
+        [siteId],
+      )
+    )[0]?.["n"] ?? 0,
+  );
+  const people = (await membersWith(runner, siteId, "comments.moderate", "")).slice(
+    0,
+    REVIEW_EMAIL_RECIPIENTS,
+  );
+  let queued = 0;
+  for (const p of people) {
+    const recent = await runner.all(
+      `select count(*) as n from "email_log" where "site_id" = ? and "email_key" = 'comment-waiting'
+        and lower("to_address") = ? and "created_at" >= ?`,
+      [siteId, p.email.trim().toLowerCase(), new Date(now() - 60 * 60 * 1000)],
+    );
+    if (Number(recent[0]?.["n"] ?? 0) > 0) continue;
+    const result = await sendText(
+      runner,
+      siteId,
+      secrets,
+      "comment-waiting",
+      p.email,
+      {
+        name: p.name || p.email,
+        site: input.siteName,
+        post: input.postTitle,
+        commenter: input.commenter,
+        count: waiting === 1 ? "1 comment is" : `${waiting} comments are`,
+        link: input.link,
+      },
+      now,
+    );
+    if (result.sent) queued += 1;
+  }
+  return queued;
+}

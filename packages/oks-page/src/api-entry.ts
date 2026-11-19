@@ -3,11 +3,13 @@
 // deletes one that is already in the trash); PATCH with {"action": "restore"} brings it back as a draft.
 import {
   deleteForever,
+  loadGeneralSettings,
   mayPublishAnyway,
   publishProblems,
   recordPublishOverride,
   restoreEntry,
   saveContent,
+  sendReviewWaitingEmails,
   setCoverProvider,
   setMapCoverProvider,
   trashEntry,
@@ -18,7 +20,9 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { STATUS_OF, isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { kickEmailJobs, siteSecrets } from "./mail";
 import { refreshEntry } from "./refresh-cache";
+import { siteOrigin } from "./site-origin";
 import { mapCoverProvider, videoCoverProvider } from "./video-cover";
 
 // A video or map block is given the picture it shows before a click when the page is saved (PB-94).
@@ -39,7 +43,9 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   }
   const runner = getRunner();
   const before = (
-    await runner.all(`select "slug", "status" from "entries" where "id" = ?`, [id])
+    await runner.all(`select "slug", "status", "type_key", "title" from "entries" where "id" = ?`, [
+      id,
+    ])
   )[0];
   const actor = await actorOf(member);
   // Going live (published or scheduled) checks what a reader would miss. An administrator may go on anyway: the problems
@@ -87,6 +93,25 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   if (setAside.length > 0) await recordPublishOverride(runner, actor, member.siteId, id, setAside);
   refreshEntry(id, result.slug, String(before?.["slug"] ?? result.slug));
+  // Handed in for review: the people who may publish it are told. A failure here never stops the save.
+  if (result.status === "pending" && before?.["status"] !== "pending") {
+    try {
+      const typeKey = String(before?.["type_key"] ?? "");
+      const where =
+        typeKey === "post" ? "posts" : typeKey === "page" ? "pages" : `content/${typeKey}`;
+      const sent = await sendReviewWaitingEmails(runner, member.siteId, siteSecrets(), {
+        typeKey,
+        title: String(input["title"] ?? before?.["title"] ?? ""),
+        author: member.user.name,
+        authorId: member.user.id,
+        siteName: (await loadGeneralSettings(runner, member.siteId)).siteName,
+        link: `${siteOrigin(request)}/admin/${where}/${id}`,
+      });
+      if (sent > 0) kickEmailJobs();
+    } catch (error) {
+      console.error("[oks] The review email could not be queued:", error);
+    }
+  }
   return NextResponse.json({
     revision: result.revision,
     repairs: result.repairs,

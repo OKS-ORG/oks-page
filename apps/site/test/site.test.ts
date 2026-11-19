@@ -9625,6 +9625,112 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     expect(refused).not.toContain("magic-link/verify");
     await ownerPage.close();
   });
+
+  test("EM-30: a page handed in for review and a comment waiting each send an email to the people who may act on them", async () => {
+    const page = await signedIn(owner);
+    let uid = 0;
+    const b = (
+      type: string,
+      props: Record<string, unknown> = {},
+      children: unknown[] = [],
+      content: unknown = null,
+    ) => ({ id: `em30${++uid}x`, type, props, content, children });
+    const words = (value: string) => [{ type: "text", text: value, styles: {} }];
+    const on = await page.request.put(site.base + "/api/admin/settings/email", {
+      headers: { origin: site.base },
+      data: {
+        provider: "other",
+        host: "localhost",
+        port: smtpPort,
+        security: "starttls",
+        username: "anna",
+        password: "smtp-password",
+        fromName: "Anna's Garden",
+        fromAddress: "hello@annas-garden.example",
+        testTo: "anna@example.com",
+      },
+    });
+    expect(on.status()).toBe(200);
+    const withSubject = (to: string, subject: string) =>
+      received.filter((m) => m.to.includes(to) && m.data.includes(`Subject: ${subject}`));
+    const arrived = async (to: string, subject: string, count: number) => {
+      await expect.poll(() => withSubject(to, subject).length, { timeout: 15_000 }).toBe(count);
+    };
+
+    // Cara (an editor) hands a post in for review: the owner is told, and Cara, who wrote it, is not.
+    const writer = (await signedIn(cara)) as { request: typeof page.request };
+    const made = await writer.request.post(site.base + "/api/admin/entries", {
+      headers: { origin: site.base },
+      data: { type: "post", title: "Spring jobs" },
+    });
+    expect(made.status()).toBe(200);
+    const draft = (await made.json()) as { id: string; slug: string; revision: number };
+    const save = (revision: number) =>
+      writer.request.put(site.base + `/api/admin/entries/${draft.id}`, {
+        headers: { origin: site.base },
+        data: {
+          title: "Spring jobs",
+          slugPart: draft.slug.split("/").pop(),
+          status: "pending",
+          blocks: [b("paragraph", {}, [], words("What to do in the garden."))],
+          revision,
+        },
+      });
+    const handedIn = await save(draft.revision);
+    expect(handedIn.status(), await handedIn.text()).toBe(200);
+    await arrived(owner.email, "Waiting for review: Spring jobs", 1);
+    expect(withSubject(cara.email, "Waiting for review: Spring jobs")).toHaveLength(0);
+    const mail = withSubject(owner.email, "Waiting for review: Spring jobs")[0]!.data;
+    expect(mail.replace(/=\r?\n/g, "").replace(/=3D/g, "=")).toContain(`/admin/posts/${draft.id}`);
+    // Saving it again while it still waits sends nothing more.
+    const saved = (await handedIn.json()) as { revision: number };
+    expect((await save(saved.revision)).status()).toBe(200);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(withSubject(owner.email, "Waiting for review: Spring jobs")).toHaveLength(1);
+
+    // A comment on a published post tells the moderators, once an hour each.
+    const post = await page.request.post(site.base + "/api/admin/entries", {
+      headers: { origin: site.base },
+      data: { type: "post", title: "Talk about it" },
+    });
+    const live = (await post.json()) as { id: string; slug: string; revision: number };
+    const published = await page.request.put(site.base + `/api/admin/entries/${live.id}`, {
+      headers: { origin: site.base },
+      data: {
+        title: "Talk about it",
+        slugPart: live.slug.split("/").pop(),
+        status: "published",
+        blocks: [b("paragraph", {}, [], words("A post to talk about."))],
+        revision: live.revision,
+      },
+    });
+    expect(published.status(), await published.text()).toBe(200);
+    expect(
+      (
+        await page.request.put(site.base + "/api/admin/comments", {
+          headers: { origin: site.base },
+          data: { enabled: true },
+        })
+      ).status(),
+    ).toBe(200);
+    const subject = "A comment waits for approval: Anna's Garden";
+    for (const name of ["Carla", "Carl"]) {
+      const sent = await fetch(site.base + "/api/comments", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: site.base },
+        body: JSON.stringify({ entryId: live.id, name, content: "Lovely post" }),
+      });
+      expect(sent.status).toBe(200);
+    }
+    await arrived(owner.email, subject, 1);
+    // Cara's address may have changed in the earlier tests: the site writes to the one she has now.
+    const caraNow = String(
+      (await db.run("select email from users where name = 'Cara'"))[0]!["email"],
+    );
+    await arrived(caraNow, subject, 1);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(withSubject(owner.email, subject)).toHaveLength(1);
+  });
 });
 
 describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_000 }, () => {

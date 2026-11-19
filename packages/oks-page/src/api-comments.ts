@@ -1,10 +1,12 @@
 // POST /api/comments: a visitor's comment on a published post. The comment waits until someone approves it.
 // A plain form (no script needed) or JSON. A hidden field a person never fills in catches simple spam robots, and each
 // visitor address may send only a few comments an hour (counted in memory only: nothing about the visitor is stored).
-import { addComment } from "@oks-page/core";
+import { addComment, loadGeneralSettings, sendCommentWaitingEmails } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { isSameOrigin } from "./api-entries";
 import { getRunner, getSiteId } from "./db";
+import { kickEmailJobs, siteSecrets } from "./mail";
+import { siteOrigin } from "./site-origin";
 
 const LIMIT = 5;
 const HOUR = 60 * 60 * 1000;
@@ -95,5 +97,27 @@ export async function POST(request: Request) {
           { status: 400 },
         )
       : page("Not sent", result.message, back, 400);
+  // The people who moderate are told (at most one email an hour each). A failure here never stops the comment.
+  try {
+    const runner = getRunner();
+    const siteId = await getSiteId();
+    const post = (
+      await runner.all(`select "title" from "entries" where "id" = ? and "site_id" = ?`, [
+        String(input["entryId"] ?? ""),
+        siteId,
+      ])
+    )[0];
+    const sent = await sendCommentWaitingEmails(runner, siteId, siteSecrets(), {
+      postTitle: String(post?.["title"] ?? ""),
+      commenter: String(input["name"] ?? "")
+        .trim()
+        .slice(0, 80),
+      siteName: (await loadGeneralSettings(runner, siteId)).siteName,
+      link: `${siteOrigin(request)}/admin/comments`,
+    });
+    if (sent > 0) kickEmailJobs();
+  } catch (error) {
+    console.error("[oks] The comment email could not be queued:", error);
+  }
   return thanks();
 }
