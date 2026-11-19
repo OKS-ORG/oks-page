@@ -536,6 +536,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, PUT } from ${from("api-settings-security")};\n`,
     },
     {
+      path: "app/api/csp-report/route.ts",
+      content: `export { POST } from ${from("api-csp-report")};\n`,
+    },
+    {
       path: "app/api/admin/licences/route.ts",
       content: `export { GET, POST, DELETE } from ${from("api-licences")};\n`,
     },

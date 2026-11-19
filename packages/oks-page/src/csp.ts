@@ -7,7 +7,10 @@
 export const BASE_POLICY =
   "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'";
 
-/** The policy of a public page: the base rules plus the rule about stylesheets. */
+/** Where a browser sends a report when it refuses a stylesheet (ADR 0038: the admin says which host was blocked). */
+export const REPORT_PATH = "/api/csp-report";
+
+/** The policy of a public page: the base rules, the rule about stylesheets, and where refusals are reported. */
 export function publicPolicy(styleRule: string): string {
-  return `${BASE_POLICY}; ${styleRule}`;
+  return `${BASE_POLICY}; ${styleRule}; report-uri ${REPORT_PATH}`;
 }

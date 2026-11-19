@@ -8,6 +8,11 @@
 //        Prints one licence key. A normal key is either yearly (--until) or lifetime for a major version (--max-major).
 //   node scripts/licence.mjs check <key> --public <file>
 //        Reads a key back in plain words, as a site would, so you can test it before you send it.
+//   node scripts/licence.mjs sign-list --private <file> --list <list.json> [--seq <n>] [--issued <date and time>]
+//        Signs the update list (ADR 0039, spec 14): prints one `OKU1.…` line to publish. The list file has the core
+//        versions, the plug-ins and themes and the security warnings; the sequence number must rise with every list.
+//   node scripts/licence.mjs check-list <list> --public <file>[,<file>]
+//        Reads a signed list back, with the current and the next public key, before you publish it.
 import { Buffer } from "node:buffer";
 import {
   createPrivateKey,
@@ -23,6 +28,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PREFIX = "OKS1";
+export const LIST_PREFIX = "OKU1";
 export const PRIVATE_FILE = "oks-licence-private.key";
 export const PUBLIC_FILE = "oks-licence-public.key";
 
@@ -168,6 +174,104 @@ export function explainKey(token, publicKeyBase64) {
   return { ok: true, payload, lines };
 }
 
+const isVersion = (v) => typeof v === "string" && /^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(v);
+const isText = (v, max = 500) => typeof v === "string" && v !== "" && v.length <= max;
+const isHttps = (v) => {
+  try {
+    return typeof v === "string" && v.length <= 500 && new URL(v).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+/** What is wrong with an update list, in plain words, or null when a site would accept its shape (as core does). */
+export function listProblem(o) {
+  if (!o || typeof o !== "object" || Array.isArray(o) || o.v !== 1)
+    return "The list must have v: 1.";
+  if (!Number.isInteger(o.seq) || o.seq < 1)
+    return "The list needs a sequence number (seq) from 1.";
+  if (typeof o.issued !== "string" || Number.isNaN(Date.parse(o.issued)))
+    return "The list needs a date (issued).";
+  if (!o.core || typeof o.core !== "object" || Array.isArray(o.core))
+    return "The list needs core versions.";
+  for (const [major, version] of Object.entries(o.core))
+    if (!/^\d+$/.test(major) || !isVersion(version) || !version.startsWith(`${major}.`))
+      return `The core version for ${major} is not valid.`;
+  if (!Array.isArray(o.items) || o.items.length > 5000)
+    return "The list of plug-ins and themes is not valid.";
+  for (const i of o.items) {
+    const unsafe = i?.unsafe ?? [];
+    if (
+      !isText(i?.key, 100) ||
+      (i.kind !== "plugin" && i.kind !== "theme") ||
+      !isVersion(i.latest) ||
+      !Array.isArray(unsafe) ||
+      !unsafe.every(isVersion)
+    )
+      return `The entry ${JSON.stringify(i?.key ?? i)} is not valid.`;
+  }
+  const warnings = o.warnings ?? [];
+  if (!Array.isArray(warnings) || warnings.length > 1000)
+    return "The security warnings are not valid.";
+  for (const w of warnings)
+    if (
+      !isText(w?.id, 100) ||
+      !isText(w.affects, 100) ||
+      !isText(w.versions, 100) ||
+      !isVersion(w.fixed) ||
+      !["low", "medium", "high", "critical"].includes(w.severity) ||
+      !isText(w.summary) ||
+      !isHttps(w.link)
+    )
+      return `The security warning ${JSON.stringify(w?.id ?? w)} is not valid.`;
+  return null;
+}
+
+/** Signs an update list: `OKU1.<payload>.<signature>`. */
+export function signList(list, privateKeyBase64) {
+  const body = `${LIST_PREFIX}.${Buffer.from(JSON.stringify(list), "utf8").toString("base64url")}`;
+  const key = createPrivateKey({
+    key: Buffer.from(privateKeyBase64.trim(), "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  return `${body}.${edSign(null, Buffer.from(body, "utf8"), key).toString("base64url")}`;
+}
+
+/** Reads a signed list with one or more public keys (the current and the next one). */
+export function explainList(token, publicKeys) {
+  const parts = String(token).trim().split(".");
+  if (parts.length !== 3 || parts[0] !== LIST_PREFIX)
+    return { ok: false, reason: "This is not an update list." };
+  const signedBy = publicKeys.findIndex((publicKey) => {
+    try {
+      return edVerify(
+        null,
+        Buffer.from(`${parts[0]}.${parts[1]}`, "utf8"),
+        createPublicKey({
+          key: Buffer.from(publicKey.trim(), "base64"),
+          format: "der",
+          type: "spki",
+        }),
+        Buffer.from(parts[2], "base64url"),
+      );
+    } catch {
+      return false;
+    }
+  });
+  if (signedBy < 0)
+    return { ok: false, reason: "This list was not signed with these keys, or it was changed." };
+  let list;
+  try {
+    list = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return { ok: false, reason: "The list could not be read." };
+  }
+  const problem = listProblem(list);
+  if (problem) return { ok: false, reason: problem };
+  return { ok: true, list, signedBy };
+}
+
 const flag = (args, name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -178,6 +282,8 @@ const USAGE = [
   "       node scripts/licence.mjs sign --private <file> --covers <item,item | *> --sites <n> --kind <normal|trial|development>",
   "                                     (--until <YYYY-MM-DD> | --max-major <n>) [--holder <text>] [--id <text>] [--issued <YYYY-MM-DD>]",
   "       node scripts/licence.mjs check <key> --public <file>",
+  "       node scripts/licence.mjs sign-list --private <file> --list <list.json> [--seq <n>] [--issued <date and time>]",
+  "       node scripts/licence.mjs check-list <list> --public <file>[,<file>]",
 ].join("\n");
 
 /** Runs one command and returns the exit code: 0 done, 1 refused, 2 not understood. */
@@ -253,6 +359,54 @@ export function run(argv, out) {
         return 1;
       }
       for (const line of result.lines) out(line);
+      return 0;
+    }
+    if (command === "sign-list") {
+      const privateFile = flag(rest, "--private");
+      const listFile = flag(rest, "--list");
+      if (!privateFile || !listFile) {
+        out(USAGE);
+        return 2;
+      }
+      const list = JSON.parse(readFileSync(listFile, "utf8"));
+      if (flag(rest, "--seq") !== undefined) list.seq = Number(flag(rest, "--seq"));
+      list.issued = flag(rest, "--issued") ?? list.issued ?? new Date().toISOString();
+      list.v = 1;
+      const problem = listProblem(list);
+      if (problem) {
+        out(`Problem: ${problem}`);
+        return 1;
+      }
+      out(
+        signList(
+          { ...list, issued: new Date(list.issued).toISOString() },
+          readFileSync(privateFile, "utf8"),
+        ),
+      );
+      return 0;
+    }
+    if (command === "check-list") {
+      const publicFiles = flag(rest, "--public");
+      const token = rest.find((a, i) => !a.startsWith("--") && rest[i - 1] !== "--public");
+      if (!publicFiles || !token) {
+        out(USAGE);
+        return 2;
+      }
+      const keys = publicFiles.split(",").map((f) => readFileSync(f, "utf8"));
+      const result = explainList(token, keys);
+      if (!result.ok) {
+        out(`Refused: ${result.reason}`);
+        return 1;
+      }
+      const { list } = result;
+      out(`Sequence number: ${list.seq}`);
+      out(`Made: ${list.issued}`);
+      out(
+        `Signed with: ${result.signedBy === 0 ? "the first key (current)" : `key number ${result.signedBy + 1} (next)`}`,
+      );
+      out(`Core: ${Object.values(list.core).join(", ") || "none"}`);
+      out(`Plug-ins and themes: ${list.items.length}`);
+      out(`Security warnings: ${(list.warnings ?? []).length}`);
       return 0;
     }
   } catch (error) {

@@ -1,5 +1,5 @@
 // Settings > Security, for a signed-in member who may manage the settings.
-import { isSetupDone, loadSecuritySettings } from "@oks-page/core";
+import { isSetupDone, listBlockedStyles, loadSecuritySettings } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -32,7 +32,10 @@ export default async function SecuritySettingsPage() {
       breadcrumbs={[{ label: "Settings" }, { label: "Security" }]}
     >
       <SettingsLinks current="security" />
-      <SecuritySettingsFormScreen initial={settings} />
+      <SecuritySettingsFormScreen
+        initial={settings}
+        blocked={await listBlockedStyles(getRunner(), member.siteId)}
+      />
     </AdminFrame>
   );
 }

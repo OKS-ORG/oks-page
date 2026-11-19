@@ -46,6 +46,16 @@ export function AdminDashboard({
           <a href="/admin/settings/email">Open the email settings</a>
         </p>
       ) : null}
+      {canManageSettings && data.blockedStyles.length > 0 ? (
+        <p role="note">
+          <strong>A stylesheet was blocked on a public page.</strong> Visitors' browsers refused to
+          load styles from {data.blockedStyles.slice(0, 3).join(", ")}
+          {data.blockedStyles.length > 3 ? ` and ${data.blockedStyles.length - 3} more` : ""}. If
+          you trust {data.blockedStyles.length === 1 ? "that host" : "those hosts"}, you can allow{" "}
+          {data.blockedStyles.length === 1 ? "it" : "them"}.{" "}
+          <a href="/admin/settings/security">Open the security settings</a>
+        </p>
+      ) : null}
       <Card>
         <CardHeader>{data.siteName}</CardHeader>
         <CardBody>

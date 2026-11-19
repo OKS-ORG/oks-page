@@ -1,5 +1,5 @@
 // What the dashboard shows (spec 07, "Home"): counts of the site's content and the latest edits.
-import { emailHealth, emailWorks, loadGeneralSettings } from "@oks-page/core";
+import { emailHealth, emailWorks, listBlockedStyles, loadGeneralSettings } from "@oks-page/core";
 import { getRunner } from "./db";
 
 export interface DashboardData {
@@ -13,6 +13,8 @@ export interface DashboardData {
   emailWorks: boolean;
   /** Set when emails keep failing (spec 13, section 7: the dashboard says so). */
   emailProblem: string | null;
+  /** Hosts whose stylesheets a browser refused on a public page (ADR 0038); the dashboard tells the owner. */
+  blockedStyles: string[];
 }
 
 const toIso = (value: unknown): string =>
@@ -45,6 +47,7 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
     timeZone: general.timeZone,
     emailWorks: await emailWorks(runner, siteId),
     emailProblem: health.problem ? health.message : null,
+    blockedStyles: (await listBlockedStyles(runner, siteId)).map((b) => b.host),
     counts,
     recent: recent.map((row) => ({
       id: String(row["id"]),

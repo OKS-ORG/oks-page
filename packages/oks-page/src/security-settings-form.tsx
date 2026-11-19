@@ -1,13 +1,21 @@
 "use client";
 // The security settings form: whether administrators must use two-factor sign-in.
-import type { SecuritySettings } from "@oks-page/core";
+import type { BlockedStyle, SecuritySettings } from "@oks-page/core";
 import { Alert, Button, RadioGroupField } from "oks-ui";
 import { useState, type FormEvent } from "react";
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
 
-export function SecuritySettingsFormScreen({ initial }: { initial: SecuritySettings }) {
+export function SecuritySettingsFormScreen({
+  initial,
+  blocked: initialBlocked = [],
+}: {
+  initial: SecuritySettings;
+  blocked?: BlockedStyle[];
+}) {
+  const [blocked, setBlocked] = useState(initialBlocked);
+  const [saved, setSaved] = useState(initial.styleHosts);
   const [rule, setRule] = useState(initial.requireTwoFactorForAdmins ? "on" : "off");
   const [hosts, setHosts] = useState(initial.styleHosts.join("\n"));
   const [note, setNote] = useState("");
@@ -42,6 +50,33 @@ export function SecuritySettingsFormScreen({ initial }: { initial: SecuritySetti
     }
   }
 
+  // "Allow" adds one blocked host to the saved list; "Not now" forgets it. Both answer with the list that is left.
+  async function decide(host: string, allow: boolean) {
+    setProblem(null);
+    setNote("Saving…");
+    try {
+      const response = await fetch("/api/admin/settings/security", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(allow ? { styleHosts: [...saved, host] } : { dismissBlocked: host }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        settings?: SecuritySettings;
+        blocked?: BlockedStyle[];
+      } | null;
+      if (!response.ok) throw new Error(failure(body, "It could not be saved."));
+      if (body?.settings) {
+        setSaved(body.settings.styleHosts);
+        setHosts(body.settings.styleHosts.join("\n"));
+      }
+      setBlocked(body?.blocked ?? []);
+      setNote(allow ? `${host} is allowed now.` : `${host} stays blocked.`);
+    } catch (error) {
+      setNote("");
+      setProblem((error as Error).message);
+    }
+  }
+
   return (
     <form className="oks-security-settings" onSubmit={(event) => void save(event)}>
       <RadioGroupField
@@ -61,6 +96,30 @@ export function SecuritySettingsFormScreen({ initial }: { initial: SecuritySetti
         You need two-factor on for your own account first. Set it up on{" "}
         <a href="/admin/account">Your account</a>.
       </p>
+      {blocked.length > 0 ? (
+        <section aria-labelledby="blocked-styles-title">
+          <h2 id="blocked-styles-title">Stylesheets that were blocked</h2>
+          <p>
+            A visitor's browser refused to load styles from these hosts, because they are not on the
+            list below. If you know and trust a host, allow it. If you do not know it, leave it
+            blocked: it may be something a visitor's own browser added.
+          </p>
+          <ul>
+            {blocked.map((b) => (
+              <li key={b.host}>
+                <strong>{b.host}</strong>
+                {b.page ? ` on ${b.page}` : ""}, {b.count === 1 ? "once" : `${b.count} times`}{" "}
+                <Button type="button" onPress={() => void decide(b.host, true)}>
+                  Allow {b.host}
+                </Button>{" "}
+                <Button type="button" onPress={() => void decide(b.host, false)}>
+                  Not now
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <p>
         <label htmlFor="style-hosts">Other hosts that may serve stylesheets</label>
         <br />

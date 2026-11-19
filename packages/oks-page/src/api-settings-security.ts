@@ -1,5 +1,10 @@
 // /api/admin/settings/security: GET the security settings, PUT to change them. Only people who manage the settings.
-import { loadSecuritySettings, saveSecuritySettings } from "@oks-page/core";
+import {
+  dismissBlockedStyle,
+  listBlockedStyles,
+  loadSecuritySettings,
+  saveSecuritySettings,
+} from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
@@ -12,7 +17,10 @@ export async function GET() {
   const actor = await actorOf(member);
   if (!actor.can("settings.manage"))
     return reply({ code: "forbidden", message: "You may not see the settings." }, 403);
-  return NextResponse.json({ settings: await loadSecuritySettings(getRunner(), member.siteId) });
+  return NextResponse.json({
+    settings: await loadSecuritySettings(getRunner(), member.siteId),
+    blocked: await listBlockedStyles(getRunner(), member.siteId),
+  });
 }
 
 export async function PUT(request: Request) {
@@ -26,6 +34,20 @@ export async function PUT(request: Request) {
   } catch {
     return reply({ code: "invalid", message: "The request was not understood." }, 400);
   }
+  // "Not now" on a blocked host: forget it (the host stays blocked).
+  if ("dismissBlocked" in input) {
+    const gone = await dismissBlockedStyle(
+      getRunner(),
+      await actorOf(member),
+      member.siteId,
+      input["dismissBlocked"],
+    );
+    if (!gone.ok) return reply(gone, gone.code === "forbidden" ? 403 : 400);
+    return NextResponse.json({
+      ok: true,
+      blocked: await listBlockedStyles(getRunner(), member.siteId),
+    });
+  }
   const patch: { requireTwoFactorForAdmins?: boolean; styleHosts?: string[] } = {};
   if ("requireTwoFactorForAdmins" in input)
     patch.requireTwoFactorForAdmins = input["requireTwoFactorForAdmins"] as boolean;
@@ -38,5 +60,9 @@ export async function PUT(request: Request) {
     patch,
   );
   if (!result.ok) return reply(result, result.code === "forbidden" ? 403 : 400);
-  return NextResponse.json({ ok: true, settings: result.settings });
+  return NextResponse.json({
+    ok: true,
+    settings: result.settings,
+    blocked: await listBlockedStyles(getRunner(), member.siteId),
+  });
 }

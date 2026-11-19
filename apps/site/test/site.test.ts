@@ -7683,7 +7683,7 @@ describe.skipIf(!findBrowser())(
         const res = await fetch(site.base + path);
         // A public page also says where stylesheets may come from (TH-49): the site itself, and no other host yet.
         expect(res.headers.get("content-security-policy"), path).toBe(
-          path === "/" ? `${rules}; style-src-elem 'self'` : rules,
+          path === "/" ? `${rules}; style-src-elem 'self'; report-uri /api/csp-report` : rules,
         );
         expect(res.headers.get("x-frame-options"), path).toBe("SAMEORIGIN");
         expect(res.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
@@ -7847,10 +7847,60 @@ describe.skipIf(!findBrowser())(
         if (!policy?.includes("assets.example.com")) await new Promise((r) => setTimeout(r, 250));
       }
       expect(policy).toBe(
-        "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; style-src-elem 'self' https://assets.example.com",
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; style-src-elem 'self' https://assets.example.com; report-uri /api/csp-report",
       );
       const admin = await fetch(site.base + "/admin/login");
       expect(admin.headers.get("content-security-policy")).not.toContain("style-src-elem");
+      expect((await put({ styleHosts: [] })).status).toBe(200);
+
+      // A browser reports a refused stylesheet: it is kept once, and the admin says which host (ADR 0038, point 5).
+      const report = (host: string) =>
+        fetch(site.base + "/api/csp-report", {
+          method: "POST",
+          headers: { "content-type": "application/csp-report" },
+          body: JSON.stringify({
+            "csp-report": {
+              "document-uri": `${site.base}/about?x=1`,
+              "effective-directive": "style-src-elem",
+              "blocked-uri": `https://${host}/a.css`,
+            },
+          }),
+        });
+      expect((await report("cdn.example.net")).status).toBe(204);
+      expect((await report("cdn.example.net")).status).toBe(204);
+      expect((await report("*.bad")).status).toBe(204);
+      expect(
+        (await fetch(site.base + "/api/csp-report", { method: "POST", body: "not json" })).status,
+      ).toBe(204);
+      await page.goto(site.base + "/admin/settings/security");
+      await page.getByRole("heading", { name: "Stylesheets that were blocked" }).waitFor();
+      await page.getByText("cdn.example.net", { exact: true }).waitFor();
+      expect(await page.getByText("*.bad").count()).toBe(0);
+      expect(await axeViolations(page)).toEqual([]);
+      await page.goto(site.base + "/admin");
+      await page.getByText("A stylesheet was blocked on a public page.").waitFor();
+      // "Not now" forgets it; a later report brings it back; "Allow" adds it to the list and clears it.
+      await page.goto(site.base + "/admin/settings/security");
+      await page.getByRole("button", { name: "Not now" }).click();
+      await page.getByText("cdn.example.net stays blocked.").waitFor();
+      expect(
+        await page.getByRole("heading", { name: "Stylesheets that were blocked" }).count(),
+      ).toBe(0);
+      // The host is told once every few minutes at most, so the same host is not noted again right away.
+      expect((await report("cdn.example.net")).status).toBe(204);
+      expect((await report("fonts.example.org")).status).toBe(204);
+      await page.goto(site.base + "/admin/settings/security");
+      await page.getByRole("button", { name: "Allow fonts.example.org" }).click();
+      await page.getByText("fonts.example.org is allowed now.").waitFor();
+      expect(await page.getByLabel("Other hosts that may serve stylesheets").inputValue()).toBe(
+        "fonts.example.org",
+      );
+      let allowed: string | null = null;
+      for (let i = 0; i < 40 && !allowed?.includes("fonts.example.org"); i += 1) {
+        allowed = (await fetch(site.base + "/")).headers.get("content-security-policy");
+        if (!allowed?.includes("fonts.example.org")) await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(allowed).toContain("style-src-elem 'self' https://fonts.example.org;");
       expect((await put({ styleHosts: [] })).status).toBe(200);
     });
 
