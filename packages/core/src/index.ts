@@ -11,6 +11,7 @@ export * from "./media.js";
 export * from "./media-html.js";
 export * from "./media-settings.js";
 export * from "./security.js";
+export * from "./licence.js";
 export * from "./taxonomies.js";
 export * from "./entry-terms.js";
 export * from "./menus.js";

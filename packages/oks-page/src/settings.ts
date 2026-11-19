@@ -9,6 +9,8 @@ import {
   SEO_SETTINGS_KEY,
   readMaintenanceSettings,
   readSeoSettings,
+  readSecuritySettings,
+  SECURITY_SETTINGS_KEY,
   type MaintenanceSettings,
   type SeoSettings,
 } from "@oks-page/core";
@@ -70,6 +72,11 @@ export async function readingRoutes(): Promise<ReadingRoutes> {
   const value = await loadReadingRoutes(getRunner(), await getSiteId());
   cache.set("reading-routes", { value, at: Date.now() });
   return value;
+}
+
+/** The extra hosts public pages may load stylesheets from (Settings > Security, TH-49). Usually none. */
+export async function styleHosts(): Promise<string[]> {
+  return readSecuritySettings(await readSetting(SECURITY_SETTINGS_KEY)).styleHosts;
 }
 
 /** The "I use a CDN" setting (decision D81). Off unless the owner turns it on. */

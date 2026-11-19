@@ -26,9 +26,11 @@ export async function PUT(request: Request) {
   } catch {
     return reply({ code: "invalid", message: "The request was not understood." }, 400);
   }
-  const patch: { requireTwoFactorForAdmins?: boolean } = {};
+  const patch: { requireTwoFactorForAdmins?: boolean; styleHosts?: string[] } = {};
   if ("requireTwoFactorForAdmins" in input)
     patch.requireTwoFactorForAdmins = input["requireTwoFactorForAdmins"] as boolean;
+  // Checked in the core (a wildcard, http, a port or a path is refused with the reason).
+  if ("styleHosts" in input) patch.styleHosts = input["styleHosts"] as string[];
   const result = await saveSecuritySettings(
     getRunner(),
     await actorOf(member),

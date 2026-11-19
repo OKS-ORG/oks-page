@@ -1,7 +1,13 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { createHmac, randomBytes } from "node:crypto";
+import {
+  createHmac,
+  createPrivateKey,
+  generateKeyPairSync,
+  randomBytes,
+  sign as edSign,
+} from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -36,6 +42,25 @@ async function withLook(base: string, html: string): Promise<string> {
 }
 
 beforeAll(() => buildSite(), 300_000);
+
+// A throwaway signing key for the licence screen (ADR 0037): the site trusts its public half through the environment.
+const licenceKeys = generateKeyPairSync("ed25519");
+const licencePublic = licenceKeys.publicKey
+  .export({ format: "der", type: "spki" })
+  .toString("base64");
+const licencePrivate = licenceKeys.privateKey
+  .export({ format: "der", type: "pkcs8" })
+  .toString("base64");
+/** A signed key in the format of packages/core/src/licence.ts. */
+function signedLicence(payload: Record<string, unknown>, privateKey = licencePrivate): string {
+  const body = `OKS1.${Buffer.from(JSON.stringify({ v: 1, ...payload })).toString("base64url")}`;
+  const key = createPrivateKey({
+    key: Buffer.from(privateKey, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  return `${body}.${edSign(null, Buffer.from(body), key).toString("base64url")}`;
+}
 
 for (const { kind, skip } of openers) {
   describe.skipIf(skip)(`${kind}: the site`, () => {
@@ -5547,7 +5572,10 @@ describe.skipIf(!findBrowser())(
 
     beforeAll(async () => {
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
-      site = await startSite("sqlite", db, { OKS_SECRET: "l".repeat(40) });
+      site = await startSite("sqlite", db, {
+        OKS_SECRET: "l".repeat(40),
+        OKS_LICENCE_PUBLIC_KEYS: licencePublic,
+      });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -7653,7 +7681,10 @@ describe.skipIf(!findBrowser())(
         "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'";
       for (const path of ["/", "/admin/login", "/api/admin/settings/theme", "/robots.txt"]) {
         const res = await fetch(site.base + path);
-        expect(res.headers.get("content-security-policy"), path).toBe(rules);
+        // A public page also says where stylesheets may come from (TH-49): the site itself, and no other host yet.
+        expect(res.headers.get("content-security-policy"), path).toBe(
+          path === "/" ? `${rules}; style-src-elem 'self'` : rules,
+        );
         expect(res.headers.get("x-frame-options"), path).toBe("SAMEORIGIN");
         expect(res.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
         expect(res.headers.get("permissions-policy"), path).toBe(
@@ -7670,6 +7701,157 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       const live = await page.goto(site.base + "/admin/settings/look");
       expect(live!.headers()["content-security-policy"]).toBe(rules);
+    });
+
+    test("LIC-01: Settings > Licence keys: a signed key is added and listed, a forged one is refused, an ended key keeps working, a key can be removed, and an editor has no access", async () => {
+      const page = await signedIn(owner);
+      await page.goto(site.base + "/admin/settings/licences");
+      await page.getByRole("heading", { name: "Licence keys", level: 1 }).waitFor();
+      await page.getByText("No keys yet.").waitFor();
+      expect(await axeViolations(page)).toEqual([]);
+      const add = async (token: string) => {
+        await page.getByLabel("Add a licence key").fill(token);
+        await page.getByRole("button", { name: "Add key" }).click();
+      };
+
+      // A key made with another signing key is refused, in plain words, and is not listed.
+      const other = generateKeyPairSync("ed25519");
+      await add(
+        signedLicence(
+          {
+            id: "forged",
+            kind: "normal",
+            covers: ["shop"],
+            sites: 1,
+            updatesUntil: "2099-12-31",
+            maxMajor: null,
+            issued: "2026-11-19",
+          },
+          other.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+        ),
+      );
+      await page.getByText("This key was not made by us, or it was changed.").waitFor();
+      expect(await page.getByRole("row", { name: /forged/ }).count()).toBe(0);
+
+      // A yearly key and an ended one are listed; the ended one says it keeps working.
+      await add(
+        signedLicence({
+          id: "year-key",
+          kind: "normal",
+          covers: ["shop"],
+          sites: 3,
+          updatesUntil: "2099-12-31",
+          maxMajor: null,
+          issued: "2026-11-19",
+          holder: "Anna",
+        }),
+      );
+      await page.getByRole("row", { name: /year-key/ }).waitFor();
+      await add(
+        signedLicence({
+          id: "old-key",
+          kind: "normal",
+          covers: ["*"],
+          sites: 1,
+          updatesUntil: "2020-01-01",
+          maxMajor: null,
+          issued: "2019-01-01",
+        }),
+      );
+      const oldRow = page.getByRole("row", { name: /old-key/ });
+      await oldRow.waitFor();
+      expect(await oldRow.textContent()).toContain("keeps working");
+      const yearRow = page.getByRole("row", { name: /year-key/ });
+      expect(await yearRow.textContent()).toContain("Updates until 2099-12-31.");
+      expect(await yearRow.textContent()).toContain("3");
+      // The same key twice is refused.
+      await add(
+        signedLicence({
+          id: "year-key",
+          kind: "normal",
+          covers: ["shop"],
+          sites: 3,
+          updatesUntil: "2099-12-31",
+          maxMajor: null,
+          issued: "2026-11-19",
+          holder: "Anna",
+        }),
+      );
+      await page.getByText("This key is already added.").waitFor();
+
+      // The keys are kept, and one can be removed.
+      await page.reload();
+      await page.getByRole("row", { name: /year-key/ }).waitFor();
+      await page.getByRole("button", { name: "Remove key old-key" }).click();
+      await page.getByText("The key is removed.").waitFor();
+      expect(await page.getByRole("row", { name: /old-key/ }).count()).toBe(0);
+      await page.reload();
+      await page.getByRole("row", { name: /year-key/ }).waitFor();
+      expect(await page.getByRole("row", { name: /old-key/ }).count()).toBe(0);
+
+      // An editor may not see or change the keys.
+      const editor = await signedIn(cara);
+      await editor.goto(site.base + "/admin/settings/licences");
+      await editor.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const refused = await editor.evaluate(
+        async () => (await fetch("/api/admin/licences")).status,
+      );
+      expect(refused).toBe(403);
+    });
+
+    test("TH-49: public pages load stylesheets only from the site and the hosts an administrator named; a bad host is refused in plain words", async () => {
+      const page = await signedIn(owner);
+      const put = (body: unknown) =>
+        page.evaluate(async (b) => {
+          const r = await fetch("/api/admin/settings/security", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(b),
+          });
+          return { status: r.status, body: (await r.json()) as { error?: { message?: string } } };
+        }, body);
+      // The admin must be open first, so the fetch above has the session cookie.
+      await page.goto(site.base + "/admin/settings/security");
+      const refused = await put({ styleHosts: ["*.example.com"] });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error?.message).toContain("wildcard");
+      expect((await put({ styleHosts: ["http://cdn.example.com"] })).status).toBe(400);
+
+      // No page of the public site breaks its own rule: no stylesheet or style element is blocked.
+      for (const path of ["/", "/search?q=a"]) {
+        const visitor = await browser.newPage();
+        await visitor.addInitScript(() => {
+          (window as unknown as { __blocked: string[] }).__blocked = [];
+          document.addEventListener("securitypolicyviolation", (event) => {
+            (window as unknown as { __blocked: string[] }).__blocked.push(
+              `${event.violatedDirective} ${event.blockedURI}`,
+            );
+          });
+        });
+        await visitor.goto(site.base + path);
+        await visitor.waitForLoadState("load");
+        await visitor.waitForTimeout(500);
+        expect(
+          await visitor.evaluate(() => (window as unknown as { __blocked: string[] }).__blocked),
+          path,
+        ).toEqual([]);
+        await visitor.close();
+      }
+
+      // A named host reaches the header of public pages, and only public pages.
+      const saved = await put({ styleHosts: ["Assets.Example.com"] });
+      expect(saved.status).toBe(200);
+      let policy: string | null = null;
+      for (let i = 0; i < 40 && !policy?.includes("assets.example.com"); i += 1) {
+        policy = (await fetch(site.base + "/")).headers.get("content-security-policy");
+        if (!policy?.includes("assets.example.com")) await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(policy).toBe(
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; style-src-elem 'self' https://assets.example.com",
+      );
+      const admin = await fetch(site.base + "/admin/login");
+      expect(admin.headers.get("content-security-policy")).not.toContain("style-src-elem");
+      expect((await put({ styleHosts: [] })).status).toBe(200);
     });
 
     test("contrast warning: a theme whose text color is weak in dark mode is flagged on the Look screen, only for the modes a visitor can reach", async () => {
@@ -8514,6 +8696,8 @@ describe.skipIf(!findBrowser())(
         ["tablet", "desktop"],
         ["phone", "tablet", "desktop"],
       ];
+      // A blank page of its own: the site's page says (TH-49) that a style element inside it is not allowed.
+      await visitor.goto("about:blank");
       await visitor.setContent(
         `<style>${css}</style>` +
           mixes

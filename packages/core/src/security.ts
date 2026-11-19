@@ -8,9 +8,80 @@ export const SECURITY_SETTINGS_KEY = "security";
 export interface SecuritySettings {
   /** Administrators must have two-factor sign-in on; one without it can only reach their own account screen. */
   requireTwoFactorForAdmins: boolean;
+  /**
+   * Hosts, besides the site's own address, that a public page may load stylesheets from (TH-49, ADR 0038). Plain host
+   * names such as "assets.example.com", checked by `normalizeStyleHost`. Empty unless an administrator adds one.
+   */
+  styleHosts: string[];
 }
 
-export const DEFAULT_SECURITY_SETTINGS: SecuritySettings = { requireTwoFactorForAdmins: false };
+export const DEFAULT_SECURITY_SETTINGS: SecuritySettings = {
+  requireTwoFactorForAdmins: false,
+  styleHosts: [],
+};
+
+/** At most this many extra hosts: a short list is easier to trust. */
+export const MAX_STYLE_HOSTS = 10;
+
+const HOST_NAME =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * One host for the stylesheet rule, or a plain-words reason why not. An address with `https://` and a closing slash is
+ * accepted and cleaned. Never allowed: a wildcard, `http:`, a port, a path, a name with no dot (such as `localhost`) and
+ * a number address.
+ */
+export function normalizeStyleHost(
+  raw: unknown,
+): { ok: true; host: string } | { ok: false; message: string } {
+  if (typeof raw !== "string")
+    return {
+      ok: false,
+      message: "A host must be written as text, for example assets.example.com.",
+    };
+  let host = raw.trim().toLowerCase();
+  if (host.includes("*"))
+    return { ok: false, message: "A wildcard (*) is not allowed. Write the exact host." };
+  if (host.startsWith("http://"))
+    return { ok: false, message: "Only https is allowed. A host on http is not safe." };
+  if (host.startsWith("https://")) host = host.slice("https://".length);
+  host = host.replace(/\/+$/, "");
+  if (host === "") return { ok: false, message: "Write a host, for example assets.example.com." };
+  if (/[/:@?#\s]/.test(host))
+    return {
+      ok: false,
+      message: `"${raw.trim()}" must be a host name only: no path, no port and no sign-in part.`,
+    };
+  if (/^[0-9.]+$/.test(host))
+    return { ok: false, message: "A number address is not allowed. Write a host name." };
+  if (host.length > 253 || !HOST_NAME.test(host))
+    return {
+      ok: false,
+      message: `"${raw.trim()}" is not a valid host name. Write it like assets.example.com (letters, numbers, dots and hyphens).`,
+    };
+  return { ok: true, host };
+}
+
+/** The checked, de-duplicated list, or the reason the first bad entry or the size was refused. */
+export function checkStyleHosts(
+  raw: unknown,
+): { ok: true; hosts: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(raw)) return { ok: false, message: "The hosts must be a list." };
+  const hosts: string[] = [];
+  for (const item of raw) {
+    const one = normalizeStyleHost(item);
+    if (!one.ok) return one;
+    if (!hosts.includes(one.host)) hosts.push(one.host);
+  }
+  if (hosts.length > MAX_STYLE_HOSTS)
+    return { ok: false, message: `At most ${MAX_STYLE_HOSTS} extra hosts are allowed.` };
+  return { ok: true, hosts };
+}
+
+/** The rule about where stylesheets may come from: the site itself and the named hosts, all over https. */
+export function styleSrcElemRule(hosts: readonly string[]): string {
+  return ["style-src-elem 'self'", ...hosts.map((h) => `https://${h}`)].join(" ");
+}
 
 export type SecurityResult<T> =
   ({ ok: true } & T) | { ok: false; code: "forbidden" | "invalid"; message: string };
@@ -37,8 +108,22 @@ export async function loadSecuritySettings(
     `select "value" from "settings" where "site_id" = ? and "key" = ?`,
     [siteId, SECURITY_SETTINGS_KEY],
   );
-  const saved = rows[0] ? asObject(rows[0]["value"]) : {};
-  return { requireTwoFactorForAdmins: saved["requireTwoFactorForAdmins"] === true };
+  return readSecuritySettings(rows[0] ? rows[0]["value"] : null);
+}
+
+/** The settings from a saved value; anything damaged falls back to the safe default (rule off, no extra host). */
+export function readSecuritySettings(raw: unknown): SecuritySettings {
+  const saved = asObject(raw);
+  const hosts = Array.isArray(saved["styleHosts"])
+    ? (saved["styleHosts"] as unknown[]).flatMap((h) => {
+        const one = normalizeStyleHost(h);
+        return one.ok ? [one.host] : [];
+      })
+    : [];
+  return {
+    requireTwoFactorForAdmins: saved["requireTwoFactorForAdmins"] === true,
+    styleHosts: [...new Set(hosts)].slice(0, MAX_STYLE_HOSTS),
+  };
 }
 
 async function hasTwoFactor(runner: SqlRunner, userId: string): Promise<boolean> {
@@ -61,12 +146,24 @@ export async function saveSecuritySettings(
   if (!actor.can("settings.manage"))
     return { ok: false, code: "forbidden", message: "You may not change the settings." };
   const current = await loadSecuritySettings(runner, siteId);
+  let styleHosts = current.styleHosts;
+  if (input.styleHosts !== undefined) {
+    const checked = checkStyleHosts(input.styleHosts);
+    if (!checked.ok) return { ok: false, code: "invalid", message: checked.message };
+    styleHosts = checked.hosts;
+  }
   const next: SecuritySettings = {
     requireTwoFactorForAdmins: input.requireTwoFactorForAdmins ?? current.requireTwoFactorForAdmins,
+    styleHosts,
   };
   if (typeof next.requireTwoFactorForAdmins !== "boolean")
     return { ok: false, code: "invalid", message: "The rule must be on or off." };
-  if (next.requireTwoFactorForAdmins && !(await hasTwoFactor(runner, actor.userId)))
+  // The lock-out check is only for turning the rule on now, not for saving the hosts of a site where it is already on.
+  if (
+    input.requireTwoFactorForAdmins === true &&
+    !current.requireTwoFactorForAdmins &&
+    !(await hasTwoFactor(runner, actor.userId))
+  )
     return {
       ok: false,
       code: "invalid",

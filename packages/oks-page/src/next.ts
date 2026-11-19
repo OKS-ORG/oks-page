@@ -1,6 +1,7 @@
 // `withOksPage(config)`: the Next.js settings a project of this package needs, added to the project's own config.
-// Loaded by Node when Next.js reads next.config.mjs, so this file imports nothing of its own.
+// Loaded by Node when Next.js reads next.config.mjs, so it imports only csp.ts, which imports nothing.
 import type { NextConfig } from "next";
+import { BASE_POLICY } from "./csp.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -14,15 +15,13 @@ const unique = <T>(list: T[]): T[] => [...new Set(list)];
 /**
  * The rules every page and API answer carries (spec 05, section 5; step one of the content security policy). They
  * decide where a page may be framed, which address it is based on, where its forms may send data and that no plug-in
- * object runs: none of them needs a decision about scripts or styles, so they cannot break a page. The rules about
- * scripts and styles come with the CSS served as a file (TH-49). Files under /uploads and /fonts set their own, stricter
- * policy and are left out.
+ * object runs: none of them needs a decision about scripts or styles, so they cannot break a page. The rule about
+ * stylesheets (TH-49, ADR 0038) depends on a setting, so the proxy adds it for public pages (proxy.ts). The rule about
+ * scripts still waits for Next.js's own inline scripts. Files under /uploads and /fonts set their own, stricter policy
+ * and are left out.
  */
 export const SECURITY_HEADERS = [
-  {
-    key: "Content-Security-Policy",
-    value: "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'",
-  },
+  { key: "Content-Security-Policy", value: BASE_POLICY },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

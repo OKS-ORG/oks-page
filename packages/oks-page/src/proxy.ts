@@ -3,9 +3,10 @@
 //     trashed or a scheduled entry is not reachable (SEO-50), and a made-up address does not fill the cache.
 //     The lookup is one indexed read (SEO-51: under 5 ms at the 95th percentile).
 //  2. The cache headers for a CDN (decision D81): see headers.ts.
-import { countRedirectHit } from "@oks-page/core";
+import { countRedirectHit, styleSrcElemRule } from "@oks-page/core";
 import { NextResponse, type NextRequest } from "next/server";
 import { findAddress, findTermArchive, listPages, slugOf } from "./data/entries";
+import { publicPolicy } from "./csp";
 import { getRunner, getSiteId, NO_SITE } from "./db";
 import {
   NOT_FOUND_CACHE_HEADER,
@@ -17,7 +18,13 @@ import {
 import { mayPassMaintenance } from "./maintenance-gate";
 import { pagePath, pagingOf } from "./paging";
 import { mayPreview } from "./preview-gate";
-import { cdnEnabled, maintenanceSettings, readingRoutes, seoSettings } from "./settings";
+import {
+  cdnEnabled,
+  maintenanceSettings,
+  readingRoutes,
+  seoSettings,
+  styleHosts,
+} from "./settings";
 
 /** Every page shows the header and footer menus, so a CDN purge of a menu reaches every page. */
 const MENU_TAGS = ["menu:primary", "menu:footer"];
@@ -43,14 +50,16 @@ export async function proxy(request: NextRequest) {
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
   let seo: Awaited<ReturnType<typeof seoSettings>>;
   let reading: Awaited<ReturnType<typeof readingRoutes>>;
+  let hosts: string[];
   try {
-    [address, cdn, maintenance, seo, reading] = await Promise.all([
+    [address, cdn, maintenance, seo, reading, hosts] = await Promise.all([
       // The entry and the redirect in one round trip.
       findAddress(slug, path),
       cdnEnabled(),
       maintenanceSettings(),
       seoSettings(),
       readingRoutes(),
+      styleHosts(),
     ]);
     found = address.entry;
     // Not an entry: it may be a category or tag archive. Only addresses of that shape cost a second read.
@@ -77,8 +86,10 @@ export async function proxy(request: NextRequest) {
   const stayAway: Record<string, string> = seo.discourageIndexing
     ? { "x-robots-tag": "noindex, nofollow" }
     : {};
+  // The policy of a public page: stylesheets only from the site itself and the hosts an administrator named (TH-49).
+  const policy = { "content-security-policy": publicPolicy(styleSrcElemRule(hosts)) };
   const apply = (response: NextResponse, headers: Record<string, string>) => {
-    for (const [name, value] of Object.entries({ ...stayAway, ...headers }))
+    for (const [name, value] of Object.entries({ ...policy, ...stayAway, ...headers }))
       response.headers.set(name, value);
     return response;
   };

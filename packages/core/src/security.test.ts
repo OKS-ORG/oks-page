@@ -3,7 +3,12 @@ import { openers, type TestDb } from "@oks-page/db/testing";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Actor } from "./content.js";
 import { DEFAULT_ROLES } from "./roles.js";
-import { loadSecuritySettings, mustSetUpTwoFactor, saveSecuritySettings } from "./security.js";
+import {
+  loadSecuritySettings,
+  mustSetUpTwoFactor,
+  saveSecuritySettings,
+  styleSrcElemRule,
+} from "./security.js";
 import { runSetup } from "./setup.js";
 
 const T = new Date(1_700_000_000_000);
@@ -60,6 +65,7 @@ for (const { kind, open, skip } of openers) {
     test("the rule is off at first", async () => {
       expect(await loadSecuritySettings(db.runner, siteId)).toEqual({
         requireTwoFactorForAdmins: false,
+        styleHosts: [],
       });
       expect(await mustSetUpTwoFactor(db.runner, siteId, anna.userId)).toBe(false);
     });
@@ -110,6 +116,76 @@ for (const { kind, open, skip } of openers) {
       expect(await mustSetUpTwoFactor(db.runner, siteId, eve.userId)).toBe(false);
       // Someone who is not a member of the site has nothing to set up.
       expect(await mustSetUpTwoFactor(db.runner, siteId, newId())).toBe(false);
+    });
+
+    test("extra stylesheet hosts are checked, cleaned and kept (TH-49)", async () => {
+      const saved = await saveSecuritySettings(db.runner, anna, siteId, {
+        styleHosts: ["Assets.Example.com", "https://cdn.example.org/", "assets.example.com"],
+      });
+      expect(saved).toMatchObject({
+        ok: true,
+        settings: { styleHosts: ["assets.example.com", "cdn.example.org"] },
+      });
+      expect((await loadSecuritySettings(db.runner, siteId)).styleHosts).toEqual([
+        "assets.example.com",
+        "cdn.example.org",
+      ]);
+      // Saving only the rule keeps the hosts.
+      await setTwoFactor(anna.userId, true);
+      await saveSecuritySettings(db.runner, anna, siteId, { requireTwoFactorForAdmins: true });
+      expect((await loadSecuritySettings(db.runner, siteId)).styleHosts).toHaveLength(2);
+      // Saving the hosts of a site where the rule is on does not ask for two-factor again.
+      await setTwoFactor(anna.userId, false);
+      expect(
+        await saveSecuritySettings(db.runner, anna, siteId, { styleHosts: ["a.example.com"] }),
+      ).toMatchObject({ ok: true });
+    });
+
+    test("a wildcard, http, a port, a path, a number address and a name with no dot are refused", async () => {
+      for (const bad of [
+        "*.example.com",
+        "*",
+        "http://cdn.example.com",
+        "cdn.example.com:8080",
+        "cdn.example.com/styles",
+        "https://user@cdn.example.com",
+        "127.0.0.1",
+        "localhost",
+        "",
+        "bad host.com",
+        "-bad.example.com",
+      ]) {
+        const result = await saveSecuritySettings(db.runner, anna, siteId, { styleHosts: [bad] });
+        expect(result, bad).toMatchObject({ ok: false, code: "invalid" });
+      }
+      expect((await loadSecuritySettings(db.runner, siteId)).styleHosts).toEqual([]);
+    });
+
+    test("at most ten hosts, only the settings manager may set them, and damaged saved hosts are dropped", async () => {
+      const many = Array.from({ length: 11 }, (_, i) => `h${i}.example.com`);
+      expect(
+        await saveSecuritySettings(db.runner, anna, siteId, { styleHosts: many }),
+      ).toMatchObject({
+        ok: false,
+        code: "invalid",
+      });
+      expect(
+        await saveSecuritySettings(db.runner, eve, siteId, { styleHosts: ["a.example.com"] }),
+      ).toMatchObject({ ok: false, code: "forbidden" });
+      await db.run(
+        "insert into settings (site_id, key, value, revision, updated_at) values (?, 'security', ?, 1, ?)",
+        [siteId, JSON.stringify({ styleHosts: ["ok.example.com", "*", "http://x.com", 5] }), T],
+      );
+      expect((await loadSecuritySettings(db.runner, siteId)).styleHosts).toEqual([
+        "ok.example.com",
+      ]);
+    });
+
+    test("the rule lists the site itself and the named hosts, all over https", () => {
+      expect(styleSrcElemRule([])).toBe("style-src-elem 'self'");
+      expect(styleSrcElemRule(["a.example.com", "b.example.org"])).toBe(
+        "style-src-elem 'self' https://a.example.com https://b.example.org",
+      );
     });
 
     test("a damaged saved value means the rule is off", async () => {
