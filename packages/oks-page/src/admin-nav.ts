@@ -23,6 +23,13 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["content.create", "content.edit_own", "content.edit_any"],
   },
   {
+    key: "content",
+    label: "Content",
+    href: "/admin/content",
+    needs: ["content_types.manage", "content.edit_any"],
+  },
+  { key: "comments", label: "Comments", href: "/admin/comments", needs: ["comments.moderate"] },
+  {
     key: "taxonomies",
     label: "Categories and tags",
     href: "/admin/categories",

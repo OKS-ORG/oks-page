@@ -2,6 +2,7 @@
 import {
   insertableSections,
   isSetupDone,
+  listContentTypes,
   loadForEdit,
   loadGeneralSettings,
   loadScreenSizes,
@@ -34,7 +35,13 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
   const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
   const savedSections = await insertableSections(getRunner(), member.siteId);
   const screens = await loadScreenSizes(getRunner(), member.siteId);
-  const segment = entry.type === "post" ? "posts" : "pages";
+  const typeInfo = (await listContentTypes(getRunner(), member.siteId)).find(
+    (t) => t.key === entry.type,
+  );
+  const custom = entry.type !== "post" && entry.type !== "page";
+  const segment = entry.type === "post" ? "posts" : custom ? `content/${entry.type}` : "pages";
+  const listLabel =
+    entry.type === "post" ? "Posts" : custom ? (typeInfo?.label ?? entry.type) : "Pages";
   const canPublish =
     actor.can("content.publish_any", entry.type) ||
     (actor.can("content.publish_own", entry.type) && entry.authorId === actor.userId);
@@ -44,12 +51,9 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
-      selectedKey={segment}
+      selectedKey={custom ? "content" : segment}
       title={`Edit: ${entry.title}`}
-      breadcrumbs={[
-        { label: segment === "posts" ? "Posts" : "Pages", href: `/admin/${segment}` },
-        { label: entry.title },
-      ]}
+      breadcrumbs={[{ label: listLabel, href: `/admin/${segment}` }, { label: entry.title }]}
     >
       <EntryEditScreen
         id={entry.id}
@@ -73,6 +77,8 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         screens={screens}
         timeZone={timeZone}
         listHref={`/admin/${segment}`}
+        fieldDefs={entry.fieldDefs}
+        fieldValues={entry.fieldValues}
       />
     </AdminFrame>
   );

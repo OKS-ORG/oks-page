@@ -20,6 +20,7 @@ import { Pager } from "./pager";
 import { pagePath, pagingOf } from "./paging";
 import { PostsList } from "./posts-list";
 import { PublicFrame } from "./public-frame";
+import { CommentsSection } from "./comments-section";
 import { ThemedPage, type ThemedPageInfo } from "./theme-layout";
 
 type Props = { params: Promise<{ slug?: string[] }> };
@@ -65,7 +66,12 @@ export default async function Page({ params }: Props) {
     { kind: "entry", type: entry.type, slug, chosen: entry.layout },
     {
       title: entry.title,
-      content: <article dangerouslySetInnerHTML={{ __html: entry.html }} />,
+      content: (
+        <>
+          <article dangerouslySetInnerHTML={{ __html: entry.html }} />
+          {entry.type === "post" ? <CommentsSection entryId={entry.id} slug={slug} /> : null}
+        </>
+      ),
       meta:
         entry.type === "post"
           ? { publishedAt: entry.publishedAt, authorName: entry.authorName }
@@ -94,6 +100,7 @@ export default async function Page({ params }: Props) {
             <article dangerouslySetInnerHTML={{ __html: entry.html }} />
           </CardBody>
         </Card>
+        {entry.type === "post" ? <CommentsSection entryId={entry.id} slug={slug} /> : null}
       </main>
       <EntryJsonLd entry={entry} site={site} />
     </PublicFrame>

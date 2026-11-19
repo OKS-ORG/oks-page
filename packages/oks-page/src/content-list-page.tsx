@@ -38,7 +38,7 @@ export async function ContentListPage({
       user={member.user}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
-      selectedKey={kind.segment}
+      selectedKey={kind.segment.startsWith("content/") ? "content" : kind.segment}
       title={kind.title}
       breadcrumbs={[{ label: kind.title }]}
     >

@@ -17,13 +17,16 @@ import { loadScreenSizes } from "./screen-sizes.js";
 import { addCovers } from "./video-covers.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
+import { cleanFieldValues, fieldsOfType, type FieldDef } from "./content-types.js";
+
 export interface Actor {
   userId: string;
   can(capability: string, typeKey?: string): boolean;
 }
 
-export type ContentStatus = "draft" | "scheduled" | "published";
-export const STATUSES: ContentStatus[] = ["draft", "scheduled", "published"];
+/** "pending" is "waiting for review": a writer who may not publish hands the entry to an editor (spec 04, workflow). */
+export type ContentStatus = "draft" | "pending" | "scheduled" | "published";
+export const STATUSES: ContentStatus[] = ["draft", "pending", "scheduled", "published"];
 
 /** Addresses the site keeps for itself (spec 03, "Slugs"). */
 const RESERVED = new Set([
@@ -260,6 +263,9 @@ export interface EntryForEdit {
   authorId: string;
   /** Which editor opens it: the writing editor, or the layout editor (spec 06, section 13). */
   editor: "writing" | "layout";
+  /** The custom fields of this entry's type, and the values saved in them. */
+  fieldDefs: FieldDef[];
+  fieldValues: Record<string, unknown>;
 }
 
 const mayEdit = (actor: Actor, type: string, authorId: string): boolean =>
@@ -288,7 +294,7 @@ export async function loadForEdit(
 ): Promise<ContentResult<{ entry: EntryForEdit }>> {
   const row = (
     await runner.all(
-      `select "id", "type_key", "title", "slug", "status", "revision", "body", "meta", "author_id", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "id", "type_key", "title", "slug", "status", "revision", "body", "meta", "author_id", "scheduled_at", "fields" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -300,6 +306,7 @@ export async function loadForEdit(
   const slug = String(row["slug"]);
   const body = parseJson(row["body"]) as { blocks?: Block[] } | Block[] | null;
   const blocks = Array.isArray(body) ? body : Array.isArray(body?.blocks) ? body.blocks : [];
+  const fieldDefs = await fieldsOfType(runner, siteId, type);
   return {
     ok: true,
     entry: {
@@ -314,6 +321,8 @@ export async function loadForEdit(
       blocks,
       authorId,
       editor: editorOf(parseJson(row["meta"]), blocks),
+      fieldDefs,
+      fieldValues: (parseJson(row["fields"]) ?? {}) as Record<string, unknown>,
     },
   };
 }
@@ -327,6 +336,8 @@ export interface SaveInput {
   blocks: unknown;
   /** The revision the editor loaded. */
   revision: number;
+  /** The values of the custom fields of the entry's type (a type without fields ignores it). */
+  fields?: unknown;
 }
 
 export interface SavedContent {
@@ -391,12 +402,14 @@ export async function saveContent(
   if (RESERVED.has(slugPart))
     return fail("invalid", "This address is kept for the site itself.", { field: "slug" });
   if (!(STATUSES as string[]).includes(input.status))
-    return fail("invalid", "Choose draft, scheduled or published.", { field: "status" });
+    return fail("invalid", "Choose draft, waiting for review, scheduled or published.", {
+      field: "status",
+    });
   const publishing = input.status === "published";
   const mayPublish =
     actor.can("content.publish_any", type) ||
     (actor.can("content.publish_own", type) && authorId === actor.userId);
-  if (input.status !== "draft" && !mayPublish)
+  if (input.status !== "draft" && input.status !== "pending" && !mayPublish)
     return fail("forbidden", "You may not publish this.", { field: "status" });
   let scheduledAt: Date | null = null;
   if (input.status === "scheduled") {
@@ -432,6 +445,14 @@ export async function saveContent(
   const linked = await sectionsForContent(runner, siteId, checked.body.blocks);
   if (!linked.ok) return fail("invalid", linked.message, { field: "blocks" });
   const written = writeContentBlocks(checked.body.blocks, linked.sections);
+  // The custom fields of this type: checked and cleaned, or the save is refused with the field named.
+  const defs = await fieldsOfType(runner, siteId, type);
+  let fieldChange: { fields: Record<string, unknown> } | undefined;
+  if (defs.length > 0 && input.fields !== undefined) {
+    const cleaned = cleanFieldValues(defs, input.fields);
+    if (!cleaned.ok) return fail("invalid", cleaned.message, { field: cleaned.field });
+    fieldChange = { fields: cleaned.fields };
+  }
   const at = new Date(now());
   const saved = await saveEntry(runner, {
     entryId: id,
@@ -443,6 +464,7 @@ export async function saveContent(
       scheduled_at: scheduledAt,
       ...(JSON.stringify(meta) !== JSON.stringify(oldMeta) ? { meta } : {}),
       body: checked.body,
+      ...fieldChange,
       html: written.html,
       plain_text: written.plainText,
       ...(publishing && row["published_at"] == null ? { published_at: at } : {}),

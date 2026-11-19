@@ -956,7 +956,7 @@ describe.skipIf(!findBrowser())("the admin sign-in and the dashboard", () => {
     );
     expect(
       (await page.locator('dl[aria-label="Your content"]').innerText()).replace(/\s+/g, " "),
-    ).toBe("Pages 3 Posts 1 Drafts 0");
+    ).toBe("Pages 3 Posts 1 Drafts 0 Waiting for review 0");
     expect(await page.locator("footer").innerText()).toMatch(/Developed with .+ · Version /);
     await page.close();
   });
@@ -1180,7 +1180,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
     await page.getByRole("heading", { name: "Edit: Cara's draft", level: 1 }).waitFor();
-    await page.getByText("An editor publishes it.").waitFor();
+    await page.getByRole("radio", { name: /Waiting for review/ }).waitFor();
     expect(await page.getByLabel("Published (everyone sees it)").count()).toBe(0);
 
     const id = page.url().split("/").pop()!;
@@ -7235,6 +7235,209 @@ describe.skipIf(!findBrowser())(
         await call(page, "PUT", "/api/admin/settings/screens", {
           sizes: ["base", "tablet", "desktop"],
         });
+      }
+    });
+
+    test("CT-01: a content type made in Settings gets its own list, its fields on the edit screen, and its own address", async () => {
+      const page = await signedIn(owner);
+      {
+        await page.goto(site.base + "/admin/settings/content-types");
+        await page.getByRole("button", { name: "Add a content type" }).click();
+        await page.getByLabel("Name", { exact: true }).fill("Gadget");
+        // The key follows the name until it is set by hand.
+        expect(await page.getByLabel(/^Key/).inputValue()).toBe("gadget");
+        await page.getByLabel("Address prefix").fill("shop/");
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByLabel("Field name").fill("Price");
+        expect(await page.getByLabel("Field key").inputValue()).toBe("price");
+        await page.getByLabel("Kind").selectOption("number");
+        await page.getByLabel("Required").check();
+        await page.getByRole("button", { name: "Save content type" }).click();
+        await page.getByText('"Gadget" is saved.').waitFor();
+
+        // The Content menu lists the new type, and its list opens.
+        await page.goto(site.base + "/admin/content");
+        await page.getByRole("link", { name: "Gadget" }).click();
+        await page.getByRole("heading", { name: "Gadget" }).first().waitFor();
+
+        const made = await call(page, "POST", "/api/admin/entries", {
+          type: "gadget",
+          title: "Red gadget",
+        });
+        expect(made.status, JSON.stringify(made.json)).toBe(200);
+        expect(made.json!["slug"]).toBe("shop/red-gadget");
+        const id = String(made.json!["id"]);
+
+        await page.goto(site.base + `/admin/content/gadget/${id}`);
+        const price = page.getByLabel(/^Price/);
+        await price.waitFor();
+        // A required field left empty stops the save and names the field.
+        await page.getByRole("button", { name: "Save" }).first().click();
+        await page
+          .getByText(/Fill in .Price./)
+          .first()
+          .waitFor();
+        await price.fill("49.9");
+        await page.getByRole("button", { name: "Save" }).first().click();
+        await page.getByText("Saved.").first().waitFor();
+        // The value is kept: opening the screen again shows it.
+        await page.reload();
+        expect(await page.getByLabel(/^Price/).inputValue()).toBe("49.9");
+
+        // Published, the entry has the address with the prefix.
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Red gadget",
+          slugPart: "red-gadget",
+          status: "published",
+          blocks: [b("paragraph", {}, [], words("A red gadget."))],
+          revision: 2,
+          fields: { price: 49.9 },
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const publicPage = await fetch(site.base + "/shop/red-gadget");
+        expect(publicPage.status).toBe(200);
+
+        // A type with an entry cannot be deleted.
+        const refused = await call(page, "DELETE", "/api/admin/content-types?key=gadget");
+        expect(refused.status).toBe(400);
+        // Out of the way of the other tests: the entry goes to the trash.
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    });
+
+    test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "post",
+        title: "Comment target",
+      });
+      expect(made.status).toBe(200);
+      const id = String(made.json!["id"]);
+      const slug = String(made.json!["slug"]);
+      const live = await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Comment target",
+        slugPart: slug.split("/").pop(),
+        status: "published",
+        blocks: [b("paragraph", {}, [], words("A post to talk about."))],
+        revision: made.json!["revision"],
+      });
+      expect(live.status, JSON.stringify(live.json)).toBe(200);
+      const visitor = await browser.newContext();
+      const reader = await visitor.newPage();
+      // A post is drawn in pieces after a change, so each look opens it again until what it waits for is there.
+      const onPost = async (ok: () => Promise<boolean>) => {
+        for (let i = 0; i < 12; i++) {
+          await reader.goto(site.base + "/" + slug);
+          await reader.getByRole("heading", { name: "Comment target" }).first().waitFor();
+          if (await ok()) return true;
+          await reader.waitForTimeout(500);
+        }
+        return false;
+      };
+      const formShown = () =>
+        reader
+          .getByRole("form", { name: "Leave a comment" })
+          .waitFor({ timeout: 2000 })
+          .then(
+            () => true,
+            () => false,
+          );
+      try {
+        // Off for a new site: no form, and the server refuses a comment sent anyway.
+        await reader.goto(site.base + "/" + slug);
+        await reader.getByRole("heading", { name: "Comment target" }).first().waitFor();
+        expect(await reader.getByRole("form", { name: "Leave a comment" }).count()).toBe(0);
+        const refused = await fetch(site.base + "/api/comments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ entryId: id, name: "Zed", content: "Too early" }),
+        });
+        expect(refused.status).toBe(400);
+
+        // Switch them on in the admin.
+        await page.goto(site.base + "/admin/comments");
+        // The box changes after the server has saved it, so it is clicked, not "checked".
+        await page.getByRole("checkbox", { name: /Let visitors comment/ }).click();
+        await page.getByText("Comments are on for posts.").waitFor();
+
+        // The visitor writes a comment with the plain form; it waits.
+        expect(await onPost(formShown)).toBe(true);
+        await reader.getByLabel("Name", { exact: true }).fill("Ann");
+        await reader.getByLabel("Comment", { exact: true }).fill("Nice <b>post</b>!");
+        await reader.getByRole("button", { name: "Send comment" }).click();
+        await reader.getByRole("heading", { name: "Thank you" }).waitFor();
+        // A robot that fills the hidden box gets the same thanks, and nothing is saved.
+        const robot = await fetch(site.base + "/api/comments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ entryId: id, name: "Bot", content: "Buy now", website: "x" }),
+        });
+        expect(robot.status).toBe(200);
+        expect(await onPost(formShown)).toBe(true);
+        expect(await reader.getByText("Nice").count()).toBe(0);
+
+        // The editor sees one comment waiting, and approves it.
+        await page.goto(site.base + "/admin/comments");
+        const item = page.getByRole("list", { name: "Comments" }).getByRole("listitem");
+        await item.first().waitFor();
+        expect(await item.count()).toBe(1);
+        expect(await item.first().innerText()).toContain("Ann");
+        await item.first().getByRole("button", { name: "Approve" }).click();
+        await page.getByText("The comment is approved and shows on the post.").waitFor();
+
+        // The post shows it, as text (the tags are not drawn as HTML).
+        expect(
+          await onPost(() =>
+            reader
+              .getByText("Nice <b>post</b>!")
+              .waitFor({ timeout: 2000 })
+              .then(
+                () => true,
+                () => false,
+              ),
+          ),
+        ).toBe(true);
+        expect(await reader.locator("#comments b").count()).toBe(0);
+
+        // Switched off again, the post shows no comments.
+        await call(page, "PUT", "/api/admin/comments", { enabled: false });
+        expect(await onPost(async () => (await reader.locator("#comments").count()) === 0)).toBe(
+          true,
+        );
+      } finally {
+        await call(page, "PUT", "/api/admin/comments", { enabled: false });
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+        await visitor.close();
+      }
+    });
+
+    test("WF-01: a post sent for review is counted on the dashboard and shows its status on the edit screen", async () => {
+      const page = await signedIn(owner);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "post",
+        title: "For review",
+      });
+      expect(made.status).toBe(200);
+      const id = String(made.json!["id"]);
+      try {
+        const sent = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "For review",
+          slugPart: String(made.json!["slug"]).split("/").pop(),
+          status: "pending",
+          blocks: [b("paragraph", {}, [], words("Please look."))],
+          revision: made.json!["revision"],
+        });
+        expect(sent.status, JSON.stringify(sent.json)).toBe(200);
+        await page.goto(site.base + "/admin");
+        const waiting = page.getByRole("term").filter({ hasText: "Waiting for review" });
+        await waiting.waitFor();
+        await page.goto(site.base + `/admin/posts/${id}`);
+        await page.getByRole("radio", { name: /Waiting for review/ }).waitFor();
+        expect(await page.getByRole("radio", { name: /Waiting for review/ }).isChecked()).toBe(
+          true,
+        );
+      } finally {
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
       }
     });
 

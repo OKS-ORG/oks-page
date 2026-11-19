@@ -1,5 +1,7 @@
 export const packageName = "core";
 export * from "./content.js";
+export * from "./content-types.js";
+export * from "./comments.js";
 export * from "./admin-search.js";
 export * from "./roles.js";
 export * from "./setup.js";

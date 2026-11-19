@@ -55,6 +55,15 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
 
 import { listArchiveSlugs, listPublishedSlugs } from "./entries";
 
+/** A static site has nothing to receive comments, so it shows none. */
+export async function getComments(entryId: string) {
+  void entryId;
+  return {
+    enabled: false,
+    comments: [] as { id: string; name: string; content: string; createdAt: string }[],
+  };
+}
+
 export async function getSiteMenu(place: string): Promise<PublicMenuItem[]> {
   return loadSiteMenu(place);
 }

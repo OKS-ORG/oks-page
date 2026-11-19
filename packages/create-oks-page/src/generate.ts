@@ -187,6 +187,26 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("settings-reading-page")};\n`,
     },
     {
+      path: "app/admin/settings/content-types/page.tsx",
+      content: `export { default, metadata } from ${from("settings-content-types-page")};\n`,
+    },
+    {
+      path: "app/admin/content/page.tsx",
+      content: `export { default, metadata } from ${from("content-hub-page")};\n`,
+    },
+    {
+      path: "app/admin/content/[type]/page.tsx",
+      content: `export { default, metadata } from ${from("content-type-list-page")};\n`,
+    },
+    {
+      path: "app/admin/content/[type]/[id]/page.tsx",
+      content: `export { default, metadata } from ${from("entry-edit-page")};\n`,
+    },
+    {
+      path: "app/admin/comments/page.tsx",
+      content: `export { default, metadata } from ${from("comments-page")};\n`,
+    },
+    {
       path: "app/admin/settings/screens/page.tsx",
       content: `export { default, metadata } from ${from("settings-screens-page")};\n`,
     },
@@ -345,6 +365,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/settings/email/route.ts",
       content: `export { DELETE, GET, PUT } from ${from("api-settings-email")};\n`,
+    },
+    {
+      path: "app/api/admin/content-types/route.ts",
+      content: `export { DELETE, GET, PUT } from ${from("api-content-types")};\n`,
+    },
+    {
+      path: "app/api/comments/route.ts",
+      content: `export { POST } from ${from("api-comments")};\n`,
+    },
+    {
+      path: "app/api/admin/comments/route.ts",
+      content: `export { GET, PATCH, PUT } from ${from("api-admin-comments")};\n`,
     },
     {
       path: "app/api/admin/settings/screens/route.ts",

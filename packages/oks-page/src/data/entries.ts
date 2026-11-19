@@ -1,5 +1,6 @@
 // The queries behind both data modules (server and export). No caching here.
 import {
+  approvedComments,
   directionOf,
   pageCssOfBody,
   pageStyleUrl,
@@ -179,6 +180,11 @@ function readBody(raw: unknown): unknown {
   } catch {
     return null;
   }
+}
+
+/** The approved comments of a post, and whether comments are on. */
+export async function loadComments(entryId: string) {
+  return approvedComments(getRunner(), await getSiteId(), entryId);
 }
 
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {

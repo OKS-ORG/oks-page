@@ -1,7 +1,7 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
 import { EntryEditor, LayoutEditor } from "@oks-page/admin";
-import type { InsertableSection } from "@oks-page/core";
+import type { FieldDef, InsertableSection } from "@oks-page/core";
 import { utcToZonedLocal, zonedLocalToUtc } from "@oks-page/core/timezone";
 import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
@@ -48,6 +48,9 @@ export interface EntryEditScreenProps {
   showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
   listHref: string;
+  /** The custom fields of this entry's type, and the values saved in them (a custom content type). */
+  fieldDefs?: FieldDef[];
+  fieldValues?: Record<string, unknown>;
   /** The site's time zone, or null when it is automatic (each person's own browser). */
   timeZone?: string | null;
 }
@@ -265,11 +268,15 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
   const [title, setTitle] = useState(props.title);
   const [slugPart, setSlugPart] = useState(props.slugPart);
   const [status, setStatus] = useState(
-    props.status === "published" || props.status === "scheduled" ? props.status : "draft",
+    props.status === "published" || props.status === "scheduled" || props.status === "pending"
+      ? props.status
+      : "draft",
   );
   const [scheduledAt, setScheduledAt] = useState(
     toLocalInput(props.scheduledAt, props.timeZone ?? null),
   );
+  const defs = props.fieldDefs ?? [];
+  const [values, setValues] = useState<Record<string, unknown>>(props.fieldValues ?? {});
   const revision = useRef(props.revision);
   const [revisionNo, setRevisionNo] = useState(props.revision);
   const [trashing, setTrashing] = useState(false);
@@ -332,6 +339,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           status === "scheduled" ? fromLocalInput(scheduledAt, props.timeZone ?? null) : null,
         blocks,
         revision: revision.current,
+        ...(defs.length > 0 ? { fields: values } : {}),
         ...(publishAnyway ? { publishAnyway: true } : {}),
       }),
     });
@@ -404,6 +412,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           label="Status"
           options={[
             { label: "Draft (only you see it)", value: "draft" },
+            { label: "Waiting for review (an editor looks at it)", value: "pending" },
             { label: "Scheduled (goes live at the time you choose)", value: "scheduled" },
             { label: "Published (everyone sees it)", value: "published" },
           ]}
@@ -411,7 +420,19 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           onChange={(value: string) => setStatus(value)}
         />
       ) : (
-        <p>Status: draft. An editor publishes it.</p>
+        <RadioGroupField
+          name="status"
+          label="Status"
+          options={[
+            { label: "Draft (only you see it)", value: "draft" },
+            {
+              label: "Waiting for review (an editor looks at it, and publishes it)",
+              value: "pending",
+            },
+          ]}
+          value={status === "pending" ? "pending" : "draft"}
+          onChange={(value: string) => setStatus(value)}
+        />
       )}
       {props.canPublish && status === "scheduled" ? (
         <div>
@@ -514,6 +535,52 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           />
         </>
       )}
+      {defs.length > 0 ? (
+        <fieldset aria-label="Details" style={{ margin: "1rem 0" }}>
+          <legend>
+            <strong>Details</strong>
+          </legend>
+          {defs.map((d) => (
+            <p key={d.key}>
+              {d.type === "true / false" ? (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={values[d.key] === true}
+                    onChange={(event) => setValues({ ...values, [d.key]: event.target.checked })}
+                  />{" "}
+                  {d.label}
+                </label>
+              ) : (
+                <label>
+                  {d.label}
+                  {d.required ? " (required)" : ""}
+                  <br />
+                  {d.type === "long text" ? (
+                    <textarea
+                      rows={4}
+                      style={{ inlineSize: "100%", maxInlineSize: "40rem" }}
+                      value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
+                      onChange={(event) => setValues({ ...values, [d.key]: event.target.value })}
+                    />
+                  ) : (
+                    <input
+                      type={d.type === "number" ? "number" : d.type === "date" ? "date" : "text"}
+                      step={d.type === "number" ? "any" : undefined}
+                      value={
+                        typeof values[d.key] === "string" || typeof values[d.key] === "number"
+                          ? String(values[d.key])
+                          : ""
+                      }
+                      onChange={(event) => setValues({ ...values, [d.key]: event.target.value })}
+                    />
+                  )}
+                </label>
+              )}
+            </p>
+          ))}
+        </fieldset>
+      ) : null}
       <EntryAccessibility
         blocks={blocksNow.current}
         onMarkDecorative={(blockId) =>

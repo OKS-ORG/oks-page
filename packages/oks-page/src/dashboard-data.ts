@@ -7,7 +7,7 @@ export interface DashboardData {
   /** The site's time zone, or null when it is automatic (each person's own browser). */
   timeZone: string | null;
   /** Published pages, published posts, and entries still in draft (any type). */
-  counts: { pages: number; posts: number; drafts: number };
+  counts: { pages: number; posts: number; drafts: number; waiting: number };
   recent: { id: string; title: string; type: string; status: string; updatedAt: string }[];
   /** False while email is not set up (spec 13, section 3: the dashboard says so). */
   emailWorks: boolean;
@@ -26,10 +26,11 @@ export async function loadDashboard(siteId: string): Promise<DashboardData> {
       where "site_id" = ? and "status" <> 'trash' group by "type_key", "status"`,
     [siteId],
   );
-  const counts = { pages: 0, posts: 0, drafts: 0 };
+  const counts = { pages: 0, posts: 0, drafts: 0, waiting: 0 };
   for (const row of groups) {
     const n = Number(row["n"]); // PostgreSQL returns a count as text
     if (row["status"] === "draft") counts.drafts += n;
+    else if (row["status"] === "pending") counts.waiting += n;
     else if (row["status"] === "published" && row["type_key"] === "page") counts.pages += n;
     else if (row["status"] === "published" && row["type_key"] === "post") counts.posts += n;
   }

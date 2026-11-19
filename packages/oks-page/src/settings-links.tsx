@@ -4,6 +4,7 @@ const GROUPS = [
   { key: "reading", label: "Reading", href: "/admin/settings/reading" },
   { key: "writing", label: "Writing", href: "/admin/settings/writing" },
   { key: "languages", label: "Languages", href: "/admin/settings/languages" },
+  { key: "content-types", label: "Content types", href: "/admin/settings/content-types" },
   { key: "screens", label: "Screen sizes", href: "/admin/settings/screens" },
   { key: "email", label: "Email", href: "/admin/settings/email" },
   { key: "privacy", label: "Privacy", href: "/admin/settings/privacy" },

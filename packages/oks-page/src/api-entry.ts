@@ -79,6 +79,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       scheduledAt: input["scheduledAt"] == null ? null : String(input["scheduledAt"]),
       blocks: input["blocks"],
       revision: Number(input["revision"]),
+      ...(input["fields"] !== undefined ? { fields: input["fields"] } : {}),
     },
     undefined,
     setAside.length > 0 ? { publishAnyway: true } : {},

@@ -4,6 +4,7 @@ import { cacheTag } from "next/cache";
 import type { FeedItem, PublicMenuItem, ThemeLayouts } from "@oks-page/core";
 import { slugTag } from "../cache-tags";
 import {
+  loadComments,
   loadPostsPage,
   loadPublishedEntry,
   loadReading,
@@ -83,6 +84,13 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
  * The header or footer menu. Tagged `menus` (refreshed whenever a menu, a page's address or status, or a term changes)
  * and `menu:<place>`.
  */
+/** The approved comments of one post. Tagged with the entry, so approving a comment refreshes the post. */
+export async function getComments(entryId: string) {
+  "use cache";
+  cacheTag("site", "settings", `entry:${entryId}`);
+  return loadComments(entryId);
+}
+
 export async function getSiteMenu(place: string): Promise<PublicMenuItem[]> {
   "use cache";
   cacheTag("site", "menus", `menu:${place}`);

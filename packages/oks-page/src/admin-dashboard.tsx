@@ -56,6 +56,8 @@ export function AdminDashboard({
             <dd>{data.counts.posts}</dd>
             <dt>Drafts</dt>
             <dd>{data.counts.drafts}</dd>
+            <dt>Waiting for review</dt>
+            <dd>{data.counts.waiting}</dd>
           </dl>
         </CardBody>
       </Card>
