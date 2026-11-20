@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { localAdapter, migrateFiles, s3Adapter, s3OptionsFromEnv } from "@oks-page/media";
 import { checkPlugin, formatCheck } from "./check.js";
 import { packPlugin } from "./pack.js";
+import { folderTarget, publishSite, zipTarget } from "./publish.js";
 import { exportSite } from "./export.js";
 import { checkExport, formatExportCheck } from "./export-check.js";
 import type { Redirect } from "@oks-page/seo";
@@ -15,6 +16,7 @@ import type { Redirect } from "@oks-page/seo";
 const USAGE = [
   "Usage: oks check [folder]   Check a plugin before you publish it.",
   "       oks pack [folder] [--out file]   Check a plugin, then write it as one .oksplugin file to upload in Tools > Plugins.",
+  "       oks publish [folder] --zip file | --folder dir\n                            Send an exported site (default folder: out) to a zip file or a folder, sending only what changed.",
   "       oks export [folder] [--check] [--out folder] [--redirects file.json] [--uploads folder]",
   "                            Check a site, then write it as plain files.",
   "       oks media migrate --to s3|local [--uploads folder]",
@@ -116,7 +118,13 @@ export async function runCli(
       : commands.userResetCommand(rest.slice(1), out, env);
   }
   if (command === "media" && rest[0] === "migrate") return migrate(rest.slice(1), out, env);
-  const values = new Set([flag(rest, "--out"), flag(rest, "--redirects"), flag(rest, "--uploads")]);
+  const values = new Set([
+    flag(rest, "--out"),
+    flag(rest, "--redirects"),
+    flag(rest, "--uploads"),
+    flag(rest, "--zip"),
+    flag(rest, "--folder"),
+  ]);
   const folder = rest.find((a) => !a.startsWith("--") && !values.has(a));
   if (command === "check") {
     const result = await checkPlugin(folder ?? ".");
@@ -127,6 +135,34 @@ export async function runCli(
     const result = await packPlugin(folder ?? ".", flag(rest, "--out"));
     out(result.report);
     return result.ok ? 0 : 1;
+  }
+  if (command === "publish") {
+    const zip = flag(rest, "--zip");
+    const to = flag(rest, "--folder");
+    if ((zip === undefined) === (to === undefined)) {
+      out("Problem: say where to publish to: --zip <file> or --folder <dir>.");
+      return 2;
+    }
+    const site = path.resolve(folder ?? "out");
+    if (!existsSync(site)) {
+      out(`Problem: ${site} was not found. Run "oks export" first.`);
+      return 1;
+    }
+    const report = await publishSite(site, zip !== undefined ? zipTarget(zip) : folderTarget(to!));
+    if (!report.ok) {
+      out(
+        `Problem: ${report.problem} (${report.done.length} of ${report.planned} steps were done; the place still works as it was.)`,
+      );
+      return 1;
+    }
+    const puts = report.done.filter((o) => o.kind === "put").length;
+    const deletes = report.done.length - puts;
+    out(
+      report.planned === 0
+        ? "Nothing changed: the place already has this site."
+        : `Published: ${puts} file${puts === 1 ? "" : "s"} sent, ${deletes} removed.`,
+    );
+    return 0;
   }
   if (command === "export") {
     if (rest.includes("--check")) {

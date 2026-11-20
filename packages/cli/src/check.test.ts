@@ -223,7 +223,7 @@ describe("PL-41 oks check", () => {
         ),
       ).toBe(1);
       expect(lines.at(-1)).toMatch(/did not pass the check/);
-      expect(await runCli(["publish"], (t) => lines.push(t))).toBe(2);
+      expect(await runCli(["frobnicate"], (t) => lines.push(t))).toBe(2);
       expect(lines.at(-1)).toMatch(/Usage: oks check/);
     },
     T,
