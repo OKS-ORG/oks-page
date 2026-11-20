@@ -36,6 +36,11 @@ import {
   startSftpServer,
   type TestSftpServer,
 } from "@oks-page/core/testing/sftp-server";
+import {
+  TEST_GITHUB_TOKEN,
+  startGithubServer,
+  type TestGithubServer,
+} from "@oks-page/core/testing/github-server";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
 /** The page's HTML followed by the owner's look, which the page links to as a file (`/site-style/<fingerprint>.css`). */
@@ -5620,6 +5625,7 @@ describe.skipIf(!findBrowser())(
     const liveDir = join(mkdtempSync(join(tmpdir(), "oks-live-")), "site");
     const zipDir = mkdtempSync(join(tmpdir(), "oks-zips-"));
     let sftp: TestSftpServer;
+    let github: TestGithubServer;
 
     beforeAll(async () => {
       registry = createHttpServer((request, response) => {
@@ -5646,6 +5652,7 @@ describe.skipIf(!findBrowser())(
       });
       await new Promise<void>((done) => registry.listen(0, "127.0.0.1", done));
       sftp = await startSftpServer();
+      github = await startGithubServer();
       registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
       site = await startSite("sqlite", db, {
@@ -5654,6 +5661,7 @@ describe.skipIf(!findBrowser())(
         OKS_NPM_REGISTRY: registryUrl,
         OKS_EXPORT_DIR: exportDir,
         OKS_PUBLISH_DIR: zipDir,
+        OKS_GITHUB_API: github.base,
       });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
@@ -5687,6 +5695,7 @@ describe.skipIf(!findBrowser())(
       await db?.close();
       registry?.close();
       await sftp?.close();
+      await github?.close();
       for (const dir of [exportDir, join(liveDir, ".."), zipDir])
         rmSync(dir, { recursive: true, force: true });
     });
@@ -8104,6 +8113,58 @@ describe.skipIf(!findBrowser())(
       await row.getByRole("button", { name: "Remove" }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("Client SFTP is removed.").waitFor();
+    });
+
+    test("PG-08: a GitHub Pages place keeps its token sealed, and the site is sent to it as one commit", async () => {
+      const page = await signedIn(owner);
+      mkdirSync(join(exportDir, "about"), { recursive: true });
+      writeFileSync(join(exportDir, "index.html"), "<p>home</p>");
+      writeFileSync(join(exportDir, "about/index.html"), "<p>about</p>");
+      rmSync(join(exportDir, "news"), { recursive: true, force: true });
+      await page.goto(site.base + "/admin/tools/publish");
+      await page.getByRole("button", { name: "Add a place" }).click();
+      await page.getByLabel("Name").fill("Pages");
+      await page.getByLabel("Kind").selectOption("github");
+      await page.getByLabel("Repository (owner/name)").fill("ada");
+      await page.getByLabel("Token", { exact: true }).fill(TEST_GITHUB_TOKEN);
+      // A repository needs the owner and the name.
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText(/Give the repository as owner\/name/).waitFor();
+      await page.getByLabel("Repository (owner/name)").fill("ada/site");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Pages is saved.").waitFor();
+
+      // The token is in neither the page, the API's answer nor the stored text.
+      const listed = await page.context().request.get(site.base + "/api/admin/publish");
+      expect(await listed.text()).not.toContain(TEST_GITHUB_TOKEN);
+      expect(await page.content()).not.toContain(TEST_GITHUB_TOKEN);
+      const stored = JSON.stringify(
+        await db.run("select value from settings where key = 'publish-targets'"),
+      );
+      expect(stored).not.toContain(TEST_GITHUB_TOKEN);
+
+      const row = page.getByRole("row", { name: /Pages/ });
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row.getByText(/Published: 2 files sent, 0 removed\./).waitFor({ timeout: 60_000 });
+      const files = github.files("gh-pages")!;
+      expect(files.get("about/index.html")).toBe("<p>about</p>");
+      expect(files.has(".nojekyll")).toBe(true);
+      expect(github.commits("gh-pages")).toBe(1);
+
+      // A wrong token is a plain sentence, and the branch stays as it was.
+      await row.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Token", { exact: true }).fill("not the token");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Pages is saved.").waitFor();
+      writeFileSync(join(exportDir, "index.html"), "<p>home 2</p>");
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row.getByText(/GitHub refused the token/).waitFor({ timeout: 60_000 });
+      expect(github.files("gh-pages")!.get("index.html")).toBe("<p>home</p>");
+      expect(github.commits("gh-pages")).toBe(1);
+
+      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("Pages is removed.").waitFor();
     });
 
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {

@@ -3,6 +3,7 @@
 // last publish is kept, so it is still there after a restart.
 import {
   folderTarget,
+  githubPagesTarget,
   publishSite,
   recordPublishLast,
   secretPlace,
@@ -61,6 +62,22 @@ function targetFor(config: PublishTargetConfig): PublishTarget {
       ...(password !== undefined ? { password } : {}),
       ...(privateKey !== undefined ? { privateKey } : {}),
       ...(passphrase !== undefined ? { passphrase } : {}),
+    });
+  }
+  if (config.kind === "github" && config.github) {
+    const token = config.secrets?.token
+      ? siteSecrets().open(config.secrets.token, secretPlace(config.id, "token"))
+      : "";
+    // The address of GitHub's API can be changed by the operator (GitHub Enterprise): https, or the loopback address.
+    const api = process.env["OKS_GITHUB_API"];
+    if (api && !/^https:\/\/|^http:\/\/(?:127\.0\.0\.1|localhost)(?::|\/|$)/.test(api))
+      throw new Error("OKS_GITHUB_API must be an https address.");
+    return githubPagesTarget({
+      owner: config.github.owner,
+      repo: config.github.repo,
+      branch: config.github.branch,
+      token,
+      ...(api ? { apiBase: api } : {}),
     });
   }
   return folderTarget(config.path);

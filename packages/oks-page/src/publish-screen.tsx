@@ -28,8 +28,11 @@ interface Draft {
   password: string;
   privateKey: string;
   passphrase: string;
+  /** GitHub Pages: the branch the site is committed to, and the token. */
+  branch: string;
+  token: string;
   /** The saved secrets of the place being changed. */
-  has: { password: boolean; privateKey: boolean; passphrase: boolean };
+  has: { password: boolean; privateKey: boolean; passphrase: boolean; token: boolean };
   /** The fingerprint the server showed, waiting for the owner to confirm it. */
   seen: string;
   confirmed: boolean;
@@ -39,6 +42,7 @@ const KIND: Record<string, string> = {
   folder: "A folder",
   zip: "A zip file",
   sftp: "An SFTP server",
+  github: "GitHub Pages",
 };
 
 const when = (at: number) => new Date(at).toISOString().replace("T", " ").slice(0, 16) + " UTC";
@@ -56,7 +60,9 @@ const blank = (): Draft => ({
   password: "",
   privateKey: "",
   passphrase: "",
-  has: { password: false, privateKey: false, passphrase: false },
+  branch: "gh-pages",
+  token: "",
+  has: { password: false, privateKey: false, passphrase: false, token: false },
   seen: "",
   confirmed: false,
 });
@@ -68,6 +74,7 @@ const draftOf = (t: PublicPublishTarget): Draft => ({
   label: t.label,
   path: t.path,
   has: t.has,
+  ...(t.github ? { branch: t.github.branch } : {}),
   ...(t.sftp
     ? {
         host: t.sftp.host,
@@ -84,7 +91,9 @@ const where = (t: PublicPublishTarget, zipFolder: string): string =>
     ? `${zipFolder}/${t.path}`
     : t.kind === "sftp" && t.sftp
       ? `${t.sftp.username}@${t.sftp.host}:${t.sftp.port} ${t.path}`
-      : t.path;
+      : t.kind === "github" && t.github
+        ? `${t.path} (branch ${t.github.branch})`
+        : t.path;
 
 export function PublishScreen({ initial }: { initial: PublishState }) {
   const [state, setState] = useState(initial);
@@ -145,6 +154,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
             ...(editing.privateKey ? { privateKey: editing.privateKey } : {}),
             ...(editing.passphrase ? { passphrase: editing.passphrase } : {}),
           }
+        : {}),
+      ...(editing.kind === "github"
+        ? { branch: editing.branch, ...(editing.token ? { token: editing.token } : {}) }
         : {}),
     });
     if (answer) {
@@ -282,6 +294,7 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                 <option value="folder">A folder on this computer</option>
                 <option value="zip">A zip file</option>
                 <option value="sftp">An SFTP server</option>
+                <option value="github">GitHub Pages</option>
               </select>
             </label>
           </p>
@@ -437,13 +450,53 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
               )}
             </>
           ) : null}
+          {editing.kind === "github" ? (
+            <>
+              <p>
+                <label>
+                  Branch
+                  <br />
+                  <input
+                    value={editing.branch}
+                    onChange={(event) => setEditing({ ...editing, branch: event.target.value })}
+                  />
+                </label>
+                <br />
+                <small>
+                  The site is committed to this branch, which GitHub Pages serves (Settings, Pages
+                  in the repository).
+                </small>
+              </p>
+              <p>
+                <label>
+                  Token
+                  <br />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={editing.token}
+                    placeholder={editing.has.token ? "Leave empty to keep the saved one" : ""}
+                    onChange={(event) => setEditing({ ...editing, token: event.target.value })}
+                  />
+                </label>
+                <br />
+                <small>
+                  {editing.has.token
+                    ? "One is saved. It is never shown again."
+                    : "A fine-grained token that may write the contents of this repository. It is saved sealed, and never shown again."}
+                </small>
+              </p>
+            </>
+          ) : null}
           <p>
             <label>
               {editing.kind === "zip"
                 ? "File name"
                 : editing.kind === "sftp"
                   ? "Folder on the server"
-                  : "Folder (the whole path)"}
+                  : editing.kind === "github"
+                    ? "Repository (owner/name)"
+                    : "Folder (the whole path)"}
               <br />
               <input
                 value={editing.path}
@@ -452,7 +505,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                     ? "site.zip"
                     : editing.kind === "sftp"
                       ? "/var/www/site or public_html"
-                      : "/var/www/site"
+                      : editing.kind === "github"
+                        ? "ada/my-site"
+                        : "/var/www/site"
                 }
                 onChange={(event) => setEditing({ ...editing, path: event.target.value })}
               />
@@ -461,7 +516,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
             <small>
               {editing.kind === "zip"
                 ? `The zip file is written in ${state.zipFolder}.`
-                : "Every file of the site is written here, and files that are no longer in the site are removed from it."}
+                : editing.kind === "github"
+                  ? "The site becomes one commit on the branch; visitors see the old site or the new one, never a mixture."
+                  : "Every file of the site is written here, and files that are no longer in the site are removed from it."}
             </small>
           </p>
           <p>

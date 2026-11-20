@@ -27,6 +27,10 @@
       "types": "./dist/timezone.d.ts",
       "default": "./dist/timezone.js"
     },
+    "./testing/github-server": {
+      "types": "./dist/testing/github-server.d.ts",
+      "default": "./dist/testing/github-server.js"
+    },
     "./testing/sftp-server": {
       "types": "./dist/testing/sftp-server.d.ts",
       "default": "./dist/testing/sftp-server.js"

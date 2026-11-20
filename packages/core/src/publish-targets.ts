@@ -10,11 +10,11 @@ export const PUBLISH_TARGETS_KEY = "publish-targets";
 export const PUBLISH_LAST_KEY = "publish-last";
 export const MAX_PUBLISH_TARGETS = 10;
 
-export const PUBLISH_KINDS = ["folder", "zip", "sftp"] as const;
+export const PUBLISH_KINDS = ["folder", "zip", "sftp", "github"] as const;
 export type PublishKind = (typeof PUBLISH_KINDS)[number];
 
-export const SFTP_SECRETS = ["password", "privateKey", "passphrase"] as const;
-export type SftpSecret = (typeof SFTP_SECRETS)[number];
+export const TARGET_SECRETS = ["password", "privateKey", "passphrase", "token"] as const;
+export type TargetSecret = (typeof TARGET_SECRETS)[number];
 
 /** What an SFTP place needs besides its secrets. */
 export interface SftpConfig {
@@ -25,6 +25,13 @@ export interface SftpConfig {
   hostKey: string;
   /** How the account signs in. */
   auth: "password" | "key";
+}
+
+/** What a GitHub Pages place needs besides its token. */
+export interface GithubConfig {
+  owner: string;
+  repo: string;
+  branch: string;
 }
 
 export interface PublishTargetConfig {
@@ -38,13 +45,14 @@ export interface PublishTargetConfig {
    */
   path: string;
   sftp?: SftpConfig;
+  github?: GithubConfig;
   /** Sealed secrets by name (never sent to a browser). */
-  secrets?: Partial<Record<SftpSecret, string>>;
+  secrets?: Partial<Record<TargetSecret, string>>;
 }
 
 /** A place as the screen sees it: no secret, only which ones are saved. */
 export type PublicPublishTarget = Omit<PublishTargetConfig, "secrets"> & {
-  has: Record<SftpSecret, boolean>;
+  has: Record<TargetSecret, boolean>;
 };
 
 export const publicTarget = (t: PublishTargetConfig): PublicPublishTarget => {
@@ -55,12 +63,13 @@ export const publicTarget = (t: PublishTargetConfig): PublicPublishTarget => {
       password: Boolean(secrets?.password),
       privateKey: Boolean(secrets?.privateKey),
       passphrase: Boolean(secrets?.passphrase),
+      token: Boolean(secrets?.token),
     },
   };
 };
 
 /** Where a sealed secret is bound: it opens only for this place and this name. */
-export const secretPlace = (id: string, name: SftpSecret): string => `publish:${id}:${name}`;
+export const secretPlace = (id: string, name: TargetSecret): string => `publish:${id}:${name}`;
 
 export interface PublishLast {
   at: number;
@@ -147,10 +156,23 @@ export function readTargets(raw: unknown): PublishTargetConfig[] {
         hostKey: s["hostKey"],
         auth: s["auth"],
       };
+    }
+    if (target.kind === "github") {
+      const g = t["github"] as Record<string, unknown> | null;
+      if (
+        !g ||
+        typeof g["owner"] !== "string" ||
+        typeof g["repo"] !== "string" ||
+        typeof g["branch"] !== "string"
+      )
+        continue;
+      target.github = { owner: g["owner"], repo: g["repo"], branch: g["branch"] };
+    }
+    if (target.kind === "sftp" || target.kind === "github") {
       const sealed = t["secrets"] as Record<string, unknown> | null;
       if (sealed && typeof sealed === "object") {
         target.secrets = {};
-        for (const name of SFTP_SECRETS)
+        for (const name of TARGET_SECRETS)
           if (typeof sealed[name] === "string") target.secrets[name] = sealed[name];
       }
     }
@@ -195,6 +217,12 @@ export function cleanTargetPath(
       };
     return { path };
   }
+  if (kind === "github") {
+    // The repository, written as owner/name.
+    if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(path) || path.endsWith(".git"))
+      return { problem: "Give the repository as owner/name, such as ada/my-site." };
+    return { path };
+  }
   // A zip file is written in the project's own `publish` folder: only its name is chosen.
   if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,100}\.zip$/.test(path))
     return { problem: "The zip file needs a plain name ending in .zip, such as site.zip." };
@@ -212,7 +240,7 @@ export async function savePublishTarget(
   if (!actor.can("settings.manage")) return fail("forbidden", "You may not change the settings.");
   const kind = String(input["kind"] ?? "");
   if (!(PUBLISH_KINDS as readonly string[]).includes(kind))
-    return fail("invalid", "Choose a folder, a zip file or an SFTP server.");
+    return fail("invalid", "Choose a folder, a zip file, an SFTP server or GitHub Pages.");
   const label = String(input["label"] ?? "").trim();
   if (label === "" || label.length > 60)
     return fail("invalid", "Give it a name of at most 60 characters.");
@@ -249,8 +277,8 @@ export async function savePublishTarget(
       );
     const auth = input["auth"] === "key" ? "key" : "password";
     // The secrets: left out keeps the saved one, an empty one removes it, anything else replaces it.
-    const secrets: Partial<Record<SftpSecret, string>> = { ...(before?.secrets ?? {}) };
-    for (const name of SFTP_SECRETS) {
+    const secrets: Partial<Record<TargetSecret, string>> = { ...(before?.secrets ?? {}) };
+    for (const name of TARGET_SECRETS) {
       const value = input[name];
       if (value === undefined) continue;
       if (typeof value !== "string" || value.length > 20_000)
@@ -281,6 +309,37 @@ export async function savePublishTarget(
     }
     target.sftp = { host, port, username, hostKey, auth };
     target.secrets = secrets;
+  }
+
+  if (kind === "github") {
+    const [owner = "", repo = ""] = cleaned.path.split("/");
+    const branch = String(input["branch"] ?? "").trim() || "gh-pages";
+    if (
+      !/^[A-Za-z0-9._/-]{1,100}$/.test(branch) ||
+      branch.startsWith("/") ||
+      branch.endsWith("/") ||
+      branch.includes("//") ||
+      branch.includes("..")
+    )
+      return fail("invalid", "The branch is a name such as gh-pages.");
+    const secrets: Partial<Record<TargetSecret, string>> = { ...(before?.secrets ?? {}) };
+    const token = input["token"];
+    if (token !== undefined) {
+      if (typeof token !== "string" || token.length > 500)
+        return fail("invalid", "The token is not valid.");
+      if (token === "") delete secrets.token;
+      else {
+        if (!box)
+          return fail(
+            "invalid",
+            "A token can be saved only when the site's OKS_SECRET (at least 32 characters) is set in its .env file.",
+          );
+        secrets.token = box.seal(token, secretPlace(target.id, "token"));
+      }
+    }
+    if (!secrets.token) return fail("invalid", "Give the token.");
+    target.github = { owner, repo, branch };
+    target.secrets = { token: secrets.token };
   }
 
   await store(

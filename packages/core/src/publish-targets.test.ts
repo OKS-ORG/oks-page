@@ -35,6 +35,18 @@ describe("the path of a place", () => {
       "/a\0b",
     ])
       expect(cleanTargetPath("folder", bad), bad).toHaveProperty("problem");
+    expect(cleanTargetPath("github", "ada/my-site.v2")).toEqual({ path: "ada/my-site.v2" });
+    for (const bad of [
+      "",
+      "ada",
+      "ada/",
+      "/ada/site",
+      "a b/site",
+      "ada/site.git",
+      "ada/site/extra",
+      "-/x/y",
+    ])
+      expect(cleanTargetPath("github", bad), bad).toHaveProperty("problem");
     expect(cleanTargetPath("zip", "site.zip")).toEqual({ path: "site.zip" });
     for (const bad of [
       "site",
@@ -283,6 +295,68 @@ for (const { kind, open, skip } of openers) {
         });
       // Without a long enough OKS_SECRET a password cannot be sealed, and the words say what to set.
       expect(await save({}, null)).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("OKS_SECRET"),
+      });
+    });
+
+    test("a GitHub Pages place keeps its token sealed, never shows it, keeps a saved one when it is left out, and checks the repository and the branch", async () => {
+      const box = new SiteSecrets("a-site-secret-that-is-long-enough-0123456789");
+      const save = (over: Record<string, unknown> = {}, sealing: SiteSecrets | null = box) =>
+        savePublishTarget(
+          db.runner,
+          admin,
+          siteId,
+          {
+            kind: "github",
+            label: "Pages",
+            path: "ada/site",
+            token: "ghp_abcdefghijklmnop",
+            ...over,
+          },
+          sealing ?? undefined,
+        );
+      const added = await save();
+      if (!added.ok) throw new Error(added.message);
+      // The branch is gh-pages when none is given.
+      expect(added.target.github).toEqual({ owner: "ada", repo: "site", branch: "gh-pages" });
+      const sealed = added.target.secrets!.token!;
+      expect(box.open(sealed, secretPlace(added.target.id, "token"))).toBe("ghp_abcdefghijklmnop");
+      expect(() => box.open(sealed, secretPlace("another", "token"))).toThrow();
+      expect(
+        JSON.stringify(
+          await db.run('select "value" from settings where key = ?', ["publish-targets"]),
+        ),
+      ).not.toContain("ghp_abcdefghijklmnop");
+      expect(publicTarget(added.target).has).toEqual({
+        password: false,
+        privateKey: false,
+        passphrase: false,
+        token: true,
+      });
+      expect(JSON.stringify(publicTarget(added.target))).not.toContain(sealed);
+      // A change without a token keeps the saved one; an empty token removes it, and one is needed.
+      const kept = await save({ id: added.target.id, token: undefined, branch: "pages/live" });
+      expect(kept.ok && kept.target.secrets!.token).toBe(sealed);
+      expect(kept.ok && kept.target.github!.branch).toBe("pages/live");
+      expect(await save({ id: added.target.id, token: "" })).toMatchObject({
+        ok: false,
+        message: "Give the token.",
+      });
+      for (const over of [
+        { path: "ada" },
+        { path: "ada/site.git" },
+        { branch: "/x" },
+        { branch: "a//b" },
+        { branch: "a/../b" },
+        { branch: "has space" },
+      ])
+        expect(await save(over), JSON.stringify(over)).toMatchObject({
+          ok: false,
+          code: "invalid",
+        });
+      // Without a long enough OKS_SECRET the token cannot be sealed, and the words say what to set.
+      expect(await save({ label: "Other" }, null)).toMatchObject({
         ok: false,
         message: expect.stringContaining("OKS_SECRET"),
       });
