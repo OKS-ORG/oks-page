@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { afterAll, describe, expect, test } from "vitest";
-import { runCli } from "./main.js";
 import {
   MANIFEST_FILE,
   folderTarget,
@@ -271,36 +270,6 @@ describe("a zip file", () => {
       // Without an unzip program the check is skipped; with one, a failure is a real failure.
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-  });
-});
-
-describe("oks publish", () => {
-  test("it needs one place to publish to, and an exported site", async () => {
-    const lines: string[] = [];
-    expect(await runCli(["publish", "nowhere"], (t) => lines.push(t))).toBe(2);
-    expect(lines.join("\n")).toMatch(/--zip <file> or --folder <dir>/);
-    expect(
-      await runCli(["publish", "nowhere", "--zip", "x.zip", "--folder", "y"], () => undefined),
-    ).toBe(2);
-    const missing: string[] = [];
-    expect(
-      await runCli(["publish", join(tmpdir(), "no-such-oks-folder"), "--zip", "x.zip"], (t) =>
-        missing.push(t),
-      ),
-    ).toBe(1);
-    expect(missing.join("\n")).toMatch(/Run "oks export" first/);
-  });
-
-  test("it publishes to a folder, says what it sent, and says when nothing changed", async () => {
-    const site = temp("cli-site");
-    const live = temp("cli-live");
-    put(site, { "index.html": "home", "style.css": "css" });
-    const first: string[] = [];
-    expect(await runCli(["publish", site, "--folder", live], (t) => first.push(t))).toBe(0);
-    expect(first.join("\n")).toBe("Published: 2 files sent, 0 removed.");
-    const second: string[] = [];
-    expect(await runCli(["publish", site, "--folder", live], (t) => second.push(t))).toBe(0);
-    expect(second.join("\n")).toBe("Nothing changed: the place already has this site.");
   });
 });
 

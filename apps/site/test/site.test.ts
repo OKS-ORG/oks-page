@@ -11,9 +11,11 @@ import {
 } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -5607,6 +5609,10 @@ describe.skipIf(!findBrowser())(
     const tarball = tarOf("package/npm-hello-1.0.0.oksplugin", pluginText);
     let registry: Server;
     let registryUrl = "";
+    // The publish test: an exported site, a place to publish to, and where a zip file is written.
+    const exportDir = mkdtempSync(join(tmpdir(), "oks-export-"));
+    const liveDir = join(mkdtempSync(join(tmpdir(), "oks-live-")), "site");
+    const zipDir = mkdtempSync(join(tmpdir(), "oks-zips-"));
 
     beforeAll(async () => {
       registry = createHttpServer((request, response) => {
@@ -5638,6 +5644,8 @@ describe.skipIf(!findBrowser())(
         OKS_SECRET: "l".repeat(40),
         OKS_LICENCE_PUBLIC_KEYS: licencePublic,
         OKS_NPM_REGISTRY: registryUrl,
+        OKS_EXPORT_DIR: exportDir,
+        OKS_PUBLISH_DIR: zipDir,
       });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
@@ -5670,6 +5678,8 @@ describe.skipIf(!findBrowser())(
       site?.server.kill();
       await db?.close();
       registry?.close();
+      for (const dir of [exportDir, join(liveDir, ".."), zipDir])
+        rmSync(dir, { recursive: true, force: true });
     });
 
     type Page = Awaited<ReturnType<Browser["newPage"]>>;
@@ -7952,6 +7962,77 @@ describe.skipIf(!findBrowser())(
       expect((await metaOf()).keyLength).toBe(0);
       await call(page, "DELETE", "/api/admin/plugins?id=settled");
       await call(page, "DELETE", `/api/admin/entries/${id}`);
+    });
+
+    test("PG-06: places to publish to are added in Tools > Publish, and the exported site is sent to them, only what changed", async () => {
+      const page = await signedIn(owner);
+      // Not signed in: nothing is shown or started.
+      expect((await fetch(site.base + "/api/admin/publish")).status).toBe(401);
+      const writeExport = (files: Record<string, string>) => {
+        for (const [path, text] of Object.entries(files)) {
+          mkdirSync(join(exportDir, path, ".."), { recursive: true });
+          writeFileSync(join(exportDir, path), text);
+        }
+      };
+      await page.goto(site.base + "/admin/tools/publish");
+      await page.getByRole("heading", { name: "Publish", level: 2 }).waitFor();
+      // No export yet: the screen says so and does not offer to publish.
+      await page.getByText(/It is not there yet/).waitFor();
+      writeExport({
+        "index.html": "<p>home</p>",
+        "about/index.html": "<p>about</p>",
+        "style.css": "css",
+      });
+      await page.reload();
+      await page.getByText("It is ready.").waitFor();
+      await page.getByText("There is no place to publish to yet.").waitFor();
+
+      // A relative folder is refused in plain words; a whole path is saved.
+      await page.getByRole("button", { name: "Add a place" }).click();
+      await page.getByLabel("Name").fill("Live folder");
+      await page.getByLabel(/Folder \(the whole path\)/).fill("site");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText(/A folder needs the whole path/).waitFor();
+      await page.getByLabel(/Folder \(the whole path\)/).fill(liveDir);
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Live folder is saved.").waitFor();
+      // And a zip file.
+      await page.getByRole("button", { name: "Add a place" }).click();
+      await page.getByLabel("Name").fill("Download");
+      await page.getByLabel("Kind").selectOption("zip");
+      await page.getByLabel("File name").fill("site.zip");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Download is saved.").waitFor();
+
+      // Publish to the folder: every file is sent, and the page says what was done.
+      const live = page.getByRole("row", { name: /Live folder/ });
+      await live.getByRole("button", { name: "Publish now" }).click();
+      await live.getByText(/Published: 3 files sent, 0 removed\./).waitFor({ timeout: 30_000 });
+      expect(readFileSync(join(liveDir, "about/index.html"), "utf8")).toBe("<p>about</p>");
+      // Nothing changed: nothing is sent.
+      await live.getByRole("button", { name: "Publish now" }).click();
+      await live.getByText(/Nothing changed/).waitFor({ timeout: 30_000 });
+      // One file changed, one added and one gone: three steps.
+      writeExport({ "index.html": "<p>home 2</p>", "news/index.html": "<p>news</p>" });
+      rmSync(join(exportDir, "style.css"));
+      await live.getByRole("button", { name: "Publish now" }).click();
+      await live.getByText(/Published: 2 files sent, 1 removed\./).waitFor({ timeout: 30_000 });
+      expect(readFileSync(join(liveDir, "index.html"), "utf8")).toBe("<p>home 2</p>");
+      expect(existsSync(join(liveDir, "style.css"))).toBe(false);
+
+      // The zip file is written in the folder the server keeps for zip files, whole.
+      const zip = page.getByRole("row", { name: /Download/ });
+      await zip.getByRole("button", { name: "Publish now" }).click();
+      await zip.getByText(/Published: 3 files sent/).waitFor({ timeout: 30_000 });
+      expect(readFileSync(join(zipDir, "site.zip")).subarray(0, 2).toString()).toBe("PK");
+
+      // A place can be removed, and the list says so after a reload.
+      await zip.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("Download is removed.").waitFor();
+      await live.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("There is no place to publish to yet.").waitFor();
     });
 
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {

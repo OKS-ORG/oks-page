@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@oks-page/core": "workspace:*",
     "@oks-page/db": "workspace:*",
     "@oks-page/media": "workspace:*",
     "@oks-page/sandbox": "workspace:*",

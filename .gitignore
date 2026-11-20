@@ -17,3 +17,4 @@ apps/site/out/
 .e2e-generated-*/
 apps/site/uploads/
 .oks/
+apps/site/publish/

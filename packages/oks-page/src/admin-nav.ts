@@ -45,6 +45,7 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
   { key: "users", label: "Users", href: "/admin/users", needs: ["users.manage"] },
   { key: "tools", label: "Tools", href: "/admin/tools/search", needs: ["settings.manage"] },
   { key: "plugins", label: "Plugins", href: "/admin/tools/plugins", needs: ["plugins.manage"] },
+  { key: "publish", label: "Publish", href: "/admin/tools/publish", needs: ["settings.manage"] },
   {
     key: "settings",
     label: "Settings",

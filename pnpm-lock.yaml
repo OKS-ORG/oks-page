@@ -158,6 +158,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@oks-page/core':
+        specifier: workspace:*
+        version: link:../core
       '@oks-page/db':
         specifier: workspace:*
         version: link:../db

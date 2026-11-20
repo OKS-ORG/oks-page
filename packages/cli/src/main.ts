@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { localAdapter, migrateFiles, s3Adapter, s3OptionsFromEnv } from "@oks-page/media";
 import { checkPlugin, formatCheck } from "./check.js";
 import { packPlugin } from "./pack.js";
-import { folderTarget, publishSite, zipTarget } from "./publish.js";
+import { folderTarget, publishSite, zipTarget } from "@oks-page/core";
 import { exportSite } from "./export.js";
 import { checkExport, formatExportCheck } from "./export-check.js";
 import type { Redirect } from "@oks-page/seo";
