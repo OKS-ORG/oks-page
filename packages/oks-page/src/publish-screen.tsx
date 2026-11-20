@@ -43,6 +43,7 @@ const KIND: Record<string, string> = {
   zip: "A zip file",
   sftp: "An SFTP server",
   github: "GitHub Pages",
+  netlify: "Netlify",
 };
 
 const when = (at: number) => new Date(at).toISOString().replace("T", " ").slice(0, 16) + " UTC";
@@ -93,7 +94,9 @@ const where = (t: PublicPublishTarget, zipFolder: string): string =>
       ? `${t.sftp.username}@${t.sftp.host}:${t.sftp.port} ${t.path}`
       : t.kind === "github" && t.github
         ? `${t.path} (branch ${t.github.branch})`
-        : t.path;
+        : t.kind === "netlify"
+          ? `${t.path} on Netlify`
+          : t.path;
 
 export function PublishScreen({ initial }: { initial: PublishState }) {
   const [state, setState] = useState(initial);
@@ -158,6 +161,7 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
       ...(editing.kind === "github"
         ? { branch: editing.branch, ...(editing.token ? { token: editing.token } : {}) }
         : {}),
+      ...(editing.kind === "netlify" && editing.token ? { token: editing.token } : {}),
     });
     if (answer) {
       setNote(`${editing.label} is saved.`);
@@ -295,6 +299,7 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                 <option value="zip">A zip file</option>
                 <option value="sftp">An SFTP server</option>
                 <option value="github">GitHub Pages</option>
+                <option value="netlify">Netlify</option>
               </select>
             </label>
           </p>
@@ -450,23 +455,25 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
               )}
             </>
           ) : null}
-          {editing.kind === "github" ? (
+          {editing.kind === "github" || editing.kind === "netlify" ? (
             <>
-              <p>
-                <label>
-                  Branch
+              {editing.kind === "github" ? (
+                <p>
+                  <label>
+                    Branch
+                    <br />
+                    <input
+                      value={editing.branch}
+                      onChange={(event) => setEditing({ ...editing, branch: event.target.value })}
+                    />
+                  </label>
                   <br />
-                  <input
-                    value={editing.branch}
-                    onChange={(event) => setEditing({ ...editing, branch: event.target.value })}
-                  />
-                </label>
-                <br />
-                <small>
-                  The site is committed to this branch, which GitHub Pages serves (Settings, Pages
-                  in the repository).
-                </small>
-              </p>
+                  <small>
+                    The site is committed to this branch, which GitHub Pages serves (Settings, Pages
+                    in the repository).
+                  </small>
+                </p>
+              ) : null}
               <p>
                 <label>
                   Token
@@ -483,7 +490,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                 <small>
                   {editing.has.token
                     ? "One is saved. It is never shown again."
-                    : "A fine-grained token that may write the contents of this repository. It is saved sealed, and never shown again."}
+                    : editing.kind === "netlify"
+                      ? "A personal access token from your Netlify account. It is saved sealed, and never shown again."
+                      : "A fine-grained token that may write the contents of this repository. It is saved sealed, and never shown again."}
                 </small>
               </p>
             </>
@@ -496,7 +505,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                   ? "Folder on the server"
                   : editing.kind === "github"
                     ? "Repository (owner/name)"
-                    : "Folder (the whole path)"}
+                    : editing.kind === "netlify"
+                      ? "Site (name or id)"
+                      : "Folder (the whole path)"}
               <br />
               <input
                 value={editing.path}
@@ -507,7 +518,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                       ? "/var/www/site or public_html"
                       : editing.kind === "github"
                         ? "ada/my-site"
-                        : "/var/www/site"
+                        : editing.kind === "netlify"
+                          ? "my-site.netlify.app"
+                          : "/var/www/site"
                 }
                 onChange={(event) => setEditing({ ...editing, path: event.target.value })}
               />
@@ -518,7 +531,9 @@ export function PublishScreen({ initial }: { initial: PublishState }) {
                 ? `The zip file is written in ${state.zipFolder}.`
                 : editing.kind === "github"
                   ? "The site becomes one commit on the branch; visitors see the old site or the new one, never a mixture."
-                  : "Every file of the site is written here, and files that are no longer in the site are removed from it."}
+                  : editing.kind === "netlify"
+                    ? "The site is deployed in one step; visitors see the old site or the new one, never a mixture."
+                    : "Every file of the site is written here, and files that are no longer in the site are removed from it."}
             </small>
           </p>
           <p>

@@ -47,6 +47,14 @@ describe("the path of a place", () => {
       "-/x/y",
     ])
       expect(cleanTargetPath("github", bad), bad).toHaveProperty("problem");
+    expect(cleanTargetPath("netlify", "my-site.netlify.app")).toEqual({
+      path: "my-site.netlify.app",
+    });
+    expect(cleanTargetPath("netlify", "0a1b2c3d-1111-2222-3333-444455556666")).toEqual({
+      path: "0a1b2c3d-1111-2222-3333-444455556666",
+    });
+    for (const bad of ["", "-site", "my site", "my/site", "a".repeat(101)])
+      expect(cleanTargetPath("netlify", bad), bad).toHaveProperty("problem");
     expect(cleanTargetPath("zip", "site.zip")).toEqual({ path: "site.zip" });
     for (const bad of [
       "site",
@@ -356,6 +364,46 @@ for (const { kind, open, skip } of openers) {
           code: "invalid",
         });
       // Without a long enough OKS_SECRET the token cannot be sealed, and the words say what to set.
+      expect(await save({ label: "Other" }, null)).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("OKS_SECRET"),
+      });
+    });
+
+    test("a Netlify place keeps its token sealed and never shows it, and needs a site and a token", async () => {
+      const box = new SiteSecrets("a-site-secret-that-is-long-enough-0123456789");
+      const save = (over: Record<string, unknown> = {}, sealing: SiteSecrets | null = box) =>
+        savePublishTarget(
+          db.runner,
+          admin,
+          siteId,
+          {
+            kind: "netlify",
+            label: "Netlify",
+            path: "my-site",
+            token: "nfp_abcdefghijklmnop",
+            ...over,
+          },
+          sealing ?? undefined,
+        );
+      const added = await save();
+      if (!added.ok) throw new Error(added.message);
+      expect(added.target.github).toBeUndefined();
+      const sealed = added.target.secrets!.token!;
+      expect(box.open(sealed, secretPlace(added.target.id, "token"))).toBe("nfp_abcdefghijklmnop");
+      expect(
+        JSON.stringify(
+          await db.run('select "value" from settings where key = ?', ["publish-targets"]),
+        ),
+      ).not.toContain("nfp_abcdefghijklmnop");
+      expect(publicTarget(added.target).has.token).toBe(true);
+      const kept = await save({ id: added.target.id, token: undefined, path: "other-site" });
+      expect(kept.ok && kept.target.secrets!.token).toBe(sealed);
+      expect(await save({ id: added.target.id, token: "" })).toMatchObject({
+        ok: false,
+        message: "Give the token.",
+      });
+      expect(await save({ path: "my site" })).toMatchObject({ ok: false, code: "invalid" });
       expect(await save({ label: "Other" }, null)).toMatchObject({
         ok: false,
         message: expect.stringContaining("OKS_SECRET"),

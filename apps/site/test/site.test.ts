@@ -37,6 +37,11 @@ import {
   type TestSftpServer,
 } from "@oks-page/core/testing/sftp-server";
 import {
+  TEST_NETLIFY_TOKEN,
+  startNetlifyServer,
+  type TestNetlifyServer,
+} from "@oks-page/core/testing/netlify-server";
+import {
   TEST_GITHUB_TOKEN,
   startGithubServer,
   type TestGithubServer,
@@ -5626,6 +5631,7 @@ describe.skipIf(!findBrowser())(
     const zipDir = mkdtempSync(join(tmpdir(), "oks-zips-"));
     let sftp: TestSftpServer;
     let github: TestGithubServer;
+    let netlify: TestNetlifyServer;
 
     beforeAll(async () => {
       registry = createHttpServer((request, response) => {
@@ -5653,6 +5659,7 @@ describe.skipIf(!findBrowser())(
       await new Promise<void>((done) => registry.listen(0, "127.0.0.1", done));
       sftp = await startSftpServer();
       github = await startGithubServer();
+      netlify = await startNetlifyServer();
       registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
       site = await startSite("sqlite", db, {
@@ -5662,6 +5669,7 @@ describe.skipIf(!findBrowser())(
         OKS_EXPORT_DIR: exportDir,
         OKS_PUBLISH_DIR: zipDir,
         OKS_GITHUB_API: github.base,
+        OKS_NETLIFY_API: netlify.base,
       });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
@@ -5696,6 +5704,7 @@ describe.skipIf(!findBrowser())(
       registry?.close();
       await sftp?.close();
       await github?.close();
+      await netlify?.close();
       for (const dir of [exportDir, join(liveDir, ".."), zipDir])
         rmSync(dir, { recursive: true, force: true });
     });
@@ -8165,6 +8174,53 @@ describe.skipIf(!findBrowser())(
       await row.getByRole("button", { name: "Remove" }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("Pages is removed.").waitFor();
+    });
+
+    test("PG-09: a Netlify place keeps its token sealed, and the site is deployed to it as one", async () => {
+      const page = await signedIn(owner);
+      mkdirSync(join(exportDir, "about"), { recursive: true });
+      writeFileSync(join(exportDir, "index.html"), "<p>home</p>");
+      writeFileSync(join(exportDir, "about/index.html"), "<p>about</p>");
+      rmSync(join(exportDir, "news"), { recursive: true, force: true });
+      await page.goto(site.base + "/admin/tools/publish");
+      await page.getByRole("button", { name: "Add a place" }).click();
+      await page.getByLabel("Name").fill("On Netlify");
+      await page.getByLabel("Kind").selectOption("netlify");
+      await page.getByLabel("Site (name or id)").fill("my site!");
+      await page.getByLabel("Token", { exact: true }).fill(TEST_NETLIFY_TOKEN);
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText(/Give the site's name or its id/).waitFor();
+      await page.getByLabel("Site (name or id)").fill("my-site");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("On Netlify is saved.").waitFor();
+
+      // The token is in neither the page, the API's answer nor the stored text.
+      expect(
+        await (await page.context().request.get(site.base + "/api/admin/publish")).text(),
+      ).not.toContain(TEST_NETLIFY_TOKEN);
+      expect(await page.content()).not.toContain(TEST_NETLIFY_TOKEN);
+      expect(
+        JSON.stringify(await db.run("select value from settings where key = 'publish-targets'")),
+      ).not.toContain(TEST_NETLIFY_TOKEN);
+
+      const row = page.getByRole("row", { name: /On Netlify/ });
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row.getByText(/Published: 2 files sent, 0 removed\./).waitFor({ timeout: 60_000 });
+      expect(netlify.live().get("about/index.html")).toBe("<p>about</p>");
+
+      // A wrong token is a plain sentence, and the live site stays.
+      await row.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Token", { exact: true }).fill("not the token");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("On Netlify is saved.").waitFor();
+      writeFileSync(join(exportDir, "index.html"), "<p>home 2</p>");
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row.getByText(/Netlify refused the token/).waitFor({ timeout: 60_000 });
+      expect(netlify.live().get("index.html")).toBe("<p>home</p>");
+
+      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("On Netlify is removed.").waitFor();
     });
 
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {

@@ -10,7 +10,7 @@ export const PUBLISH_TARGETS_KEY = "publish-targets";
 export const PUBLISH_LAST_KEY = "publish-last";
 export const MAX_PUBLISH_TARGETS = 10;
 
-export const PUBLISH_KINDS = ["folder", "zip", "sftp", "github"] as const;
+export const PUBLISH_KINDS = ["folder", "zip", "sftp", "github", "netlify"] as const;
 export type PublishKind = (typeof PUBLISH_KINDS)[number];
 
 export const TARGET_SECRETS = ["password", "privateKey", "passphrase", "token"] as const;
@@ -168,7 +168,7 @@ export function readTargets(raw: unknown): PublishTargetConfig[] {
         continue;
       target.github = { owner: g["owner"], repo: g["repo"], branch: g["branch"] };
     }
-    if (target.kind === "sftp" || target.kind === "github") {
+    if (target.kind === "sftp" || target.kind === "github" || target.kind === "netlify") {
       const sealed = t["secrets"] as Record<string, unknown> | null;
       if (sealed && typeof sealed === "object") {
         target.secrets = {};
@@ -223,6 +223,12 @@ export function cleanTargetPath(
       return { problem: "Give the repository as owner/name, such as ada/my-site." };
     return { path };
   }
+  if (kind === "netlify") {
+    // The site's name (my-site, my-site.netlify.app) or its id.
+    if (!/^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$/.test(path))
+      return { problem: "Give the site's name or its id, such as my-site or my-site.netlify.app." };
+    return { path };
+  }
   // A zip file is written in the project's own `publish` folder: only its name is chosen.
   if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,100}\.zip$/.test(path))
     return { problem: "The zip file needs a plain name ending in .zip, such as site.zip." };
@@ -240,7 +246,7 @@ export async function savePublishTarget(
   if (!actor.can("settings.manage")) return fail("forbidden", "You may not change the settings.");
   const kind = String(input["kind"] ?? "");
   if (!(PUBLISH_KINDS as readonly string[]).includes(kind))
-    return fail("invalid", "Choose a folder, a zip file, an SFTP server or GitHub Pages.");
+    return fail("invalid", "Choose a folder, a zip file, an SFTP server, GitHub Pages or Netlify.");
   const label = String(input["label"] ?? "").trim();
   if (label === "" || label.length > 60)
     return fail("invalid", "Give it a name of at most 60 characters.");
@@ -311,17 +317,21 @@ export async function savePublishTarget(
     target.secrets = secrets;
   }
 
-  if (kind === "github") {
-    const [owner = "", repo = ""] = cleaned.path.split("/");
-    const branch = String(input["branch"] ?? "").trim() || "gh-pages";
-    if (
-      !/^[A-Za-z0-9._/-]{1,100}$/.test(branch) ||
-      branch.startsWith("/") ||
-      branch.endsWith("/") ||
-      branch.includes("//") ||
-      branch.includes("..")
-    )
-      return fail("invalid", "The branch is a name such as gh-pages.");
+  if (kind === "github" || kind === "netlify") {
+    let github: GithubConfig | undefined;
+    if (kind === "github") {
+      const [owner = "", repo = ""] = cleaned.path.split("/");
+      const branch = String(input["branch"] ?? "").trim() || "gh-pages";
+      if (
+        !/^[A-Za-z0-9._/-]{1,100}$/.test(branch) ||
+        branch.startsWith("/") ||
+        branch.endsWith("/") ||
+        branch.includes("//") ||
+        branch.includes("..")
+      )
+        return fail("invalid", "The branch is a name such as gh-pages.");
+      github = { owner, repo, branch };
+    }
     const secrets: Partial<Record<TargetSecret, string>> = { ...(before?.secrets ?? {}) };
     const token = input["token"];
     if (token !== undefined) {
@@ -338,7 +348,7 @@ export async function savePublishTarget(
       }
     }
     if (!secrets.token) return fail("invalid", "Give the token.");
-    target.github = { owner, repo, branch };
+    if (github) target.github = github;
     target.secrets = { token: secrets.token };
   }
 

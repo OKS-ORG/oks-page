@@ -4,6 +4,7 @@
 import {
   folderTarget,
   githubPagesTarget,
+  netlifyTarget,
   publishSite,
   recordPublishLast,
   secretPlace,
@@ -79,6 +80,16 @@ function targetFor(config: PublishTargetConfig): PublishTarget {
       token,
       ...(api ? { apiBase: api } : {}),
     });
+  }
+  if (config.kind === "netlify") {
+    const token = config.secrets?.token
+      ? siteSecrets().open(config.secrets.token, secretPlace(config.id, "token"))
+      : "";
+    // The address of Netlify's API can be changed by the operator: https, or the loopback address.
+    const api = process.env["OKS_NETLIFY_API"];
+    if (api && !/^https:\/\/|^http:\/\/(?:127\.0\.0\.1|localhost)(?::|\/|$)/.test(api))
+      throw new Error("OKS_NETLIFY_API must be an https address.");
+    return netlifyTarget({ site: config.path, token, ...(api ? { apiBase: api } : {}) });
   }
   return folderTarget(config.path);
 }

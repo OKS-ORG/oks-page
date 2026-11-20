@@ -27,6 +27,10 @@
       "types": "./dist/timezone.d.ts",
       "default": "./dist/timezone.js"
     },
+    "./testing/netlify-server": {
+      "types": "./dist/testing/netlify-server.d.ts",
+      "default": "./dist/testing/netlify-server.js"
+    },
     "./testing/github-server": {
       "types": "./dist/testing/github-server.d.ts",
       "default": "./dist/testing/github-server.js"
