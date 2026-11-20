@@ -7825,6 +7825,135 @@ describe.skipIf(!findBrowser())(
       await call(page, "DELETE", `/api/admin/entries/${id}`);
     });
 
+    test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
+      const page = await signedIn(owner);
+      const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {
+        const key = await ctx.settings.get("api_key");
+        return { ...e, meta: { ...e.meta,
+          greeting: await ctx.settings.get("greeting"),
+          limit: await ctx.settings.get("limit"),
+          shout: await ctx.settings.get("shout"),
+          keyLength: key ? String(key).length : 0 } };
+      } } };`;
+      const manifest = {
+        id: "settled",
+        version: "1.0.0",
+        displayName: "Settled",
+        description: "Has settings.",
+        author: "Ada",
+        permissions: ["content:write"],
+        hooks: ["content:beforeSave"],
+        blocks: [],
+        settings: {
+          greeting: { type: "text", label: "Greeting" },
+          limit: { type: "number", label: "Limit" },
+          shout: { type: "boolean", label: "Shout" },
+          api_key: { type: "secret", label: "API key" },
+        },
+      };
+      const file = JSON.stringify({
+        format: 1,
+        manifest,
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      expect(
+        (
+          await call(page, "POST", "/api/admin/plugins", {
+            action: "install",
+            file,
+            approved: ["content:write"],
+          })
+        ).status,
+      ).toBe(200);
+      const secret = "sk-test-1234567890abcdef";
+
+      await page.goto(site.base + "/admin/tools/plugins");
+      const row = page.getByRole("row", { name: /Settled/ });
+      await row.getByRole("button", { name: "Settings" }).click();
+      await page.getByRole("heading", { name: "Settings of Settled" }).waitFor();
+      await page.getByLabel("Greeting").fill("Hi");
+      await page.getByLabel("Limit").fill("3");
+      await page.getByLabel("Shout").check();
+      await page.getByLabel("API key", { exact: true }).fill(secret);
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByText("The settings of Settled are saved.").waitFor();
+
+      // The form comes back with the plain values, and the secret only as a hint: never in the page or in the API answer.
+      await page.getByText("One is saved (••••cdef). It is never shown again.").waitFor();
+      expect(await page.getByLabel("Greeting").inputValue()).toBe("Hi");
+      expect(await page.getByLabel("API key", { exact: true }).inputValue()).toBe("");
+      expect(await page.content()).not.toContain(secret);
+      const asked = await page
+        .context()
+        .request.get(site.base + "/api/admin/plugins?settings=settled");
+      expect(await asked.text()).not.toContain(secret);
+
+      // The plugin reads them, the secret in full (it is never put in the page; the test only looks at its length).
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "post",
+        title: "Settings",
+      });
+      const id = String(made.json!["id"]);
+      const save = (revision: number) =>
+        call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Settings",
+          slugPart: "settings-post",
+          status: "draft",
+          blocks: [b("paragraph", {}, [], words("Text."))],
+          revision,
+        });
+      expect((await save(1)).status).toBe(200);
+      const metaOf = async () => {
+        const raw = (await db.run("select meta from entries where id = ?", [id]))[0]!["meta"];
+        return (typeof raw === "string" ? JSON.parse(raw) : raw).plugins.settled;
+      };
+      expect(await metaOf()).toEqual({
+        greeting: "Hi",
+        limit: 3,
+        shout: true,
+        keyLength: secret.length,
+      });
+
+      // The sealed value in the database is not the secret, and the log names the settings, not their values.
+      const stored = await db.run("select value from extension_settings where key = 'api_key'");
+      expect(JSON.stringify(stored)).not.toContain(secret);
+      const logged = JSON.stringify(
+        await db.run("select detail from audit_log where action = 'plugin.settings_changed'"),
+      );
+      expect(logged).toContain("api_key");
+      expect(logged).not.toContain(secret);
+      expect(logged).not.toContain("Hi");
+
+      // Saving with the secret left empty keeps it; a bad number and an unknown setting are refused.
+      await page.getByLabel("Greeting").fill("Hello");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByText("The settings of Settled are saved.").waitFor();
+      expect((await save(2)).status).toBe(200);
+      expect(await metaOf()).toMatchObject({ greeting: "Hello", keyLength: secret.length });
+      const badNumber = await call(page, "POST", "/api/admin/plugins", {
+        action: "saveSettings",
+        id: "settled",
+        values: { limit: "abc" },
+      });
+      expect(badNumber.status).toBe(400);
+      const unknown = await call(page, "POST", "/api/admin/plugins", {
+        action: "saveSettings",
+        id: "settled",
+        values: { nothing: "x" },
+      });
+      expect(unknown.status).toBe(400);
+
+      // The saved secret can be removed.
+      await page.getByLabel("Remove the saved one").check();
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await page.getByText("None is saved.").waitFor();
+      expect((await save(3)).status).toBe(200);
+      expect((await metaOf()).keyLength).toBe(0);
+      await call(page, "DELETE", "/api/admin/plugins?id=settled");
+      await call(page, "DELETE", `/api/admin/entries/${id}`);
+    });
+
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

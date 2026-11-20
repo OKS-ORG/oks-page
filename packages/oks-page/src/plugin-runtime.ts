@@ -1,7 +1,13 @@
 // The plugin sandbox of this site: one host per process, started when something first needs it (the Plugins screen, an
 // install). It loads every enabled plugin from the database (spec 04, section 10). Hooks, blocks and routes use it in
 // the next pieces of work; here it only keeps the plugins loaded and tells their state.
-import { SandboxHost, type ContentEntry, type ContentService } from "@oks-page/sandbox";
+import {
+  SandboxHost,
+  createPluginSettings,
+  type ContentEntry,
+  type ContentService,
+  type PluginSettings,
+} from "@oks-page/sandbox";
 import type { SqlRunner } from "@oks-page/db";
 import path from "node:path";
 import { getRunner, getSiteId } from "./db";
@@ -43,6 +49,14 @@ const content: ContentService = {
     return null;
   },
 };
+
+/** The plugins' saved settings, with secrets sealed by the site's OKS_SECRET (spec 04, section 9; PL-39). */
+export function pluginSettingsService(): PluginSettings {
+  return createPluginSettings({
+    runner: getRunner(),
+    siteSecret: process.env["OKS_SECRET"] ?? "",
+  });
+}
 
 /** Loads one installed plugin into the host (or switches it off there when it is not enabled). */
 export async function syncPlugin(
@@ -89,6 +103,7 @@ async function start(): Promise<SandboxHost> {
     runner,
     siteId,
     content,
+    pluginSettings: pluginSettingsService(),
     workDir: process.env["OKS_PLUGINS_DIR"] ?? path.join(process.cwd(), ".oks", "plugins"),
   });
   await host.listen();

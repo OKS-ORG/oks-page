@@ -4,6 +4,7 @@
 import { Alert, Button } from "oks-ui";
 import { useState } from "react";
 import type { PluginInfo, PluginPreview } from "./plugin-admin";
+import { PluginSettingsForm } from "./plugin-settings-form";
 
 const RISK: Record<string, string> = { low: "", medium: " (medium risk)", high: " (HIGH RISK)" };
 
@@ -35,6 +36,7 @@ export function PluginsScreen({
   const [npmVersion, setNpmVersion] = useState("");
   const [approved, setApproved] = useState<string[]>([]);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
 
   async function refresh() {
     const response = await fetch("/api/admin/plugins");
@@ -301,6 +303,13 @@ export function PluginsScreen({
                   )}
                 </td>
                 <td>
+                  {p.hasSettings ? (
+                    <>
+                      <Button onPress={() => setEditing(editing === p.id ? null : p.id)}>
+                        Settings
+                      </Button>{" "}
+                    </>
+                  ) : null}
                   <Button onPress={() => void toggle(p)}>
                     {p.status === "enabled" ? "Switch off" : "Switch on"}
                   </Button>{" "}
@@ -319,6 +328,14 @@ export function PluginsScreen({
           </tbody>
         </table>
       )}
+      {editing && plugins.some((p) => p.id === editing) ? (
+        <PluginSettingsForm
+          key={editing}
+          id={editing}
+          name={plugins.find((p) => p.id === editing)?.name ?? editing}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
     </section>
   );
 }

@@ -28,7 +28,14 @@ export function createPluginSettings(options: {
   clock?: () => Date;
 }): PluginSettings {
   const { runner } = options;
-  const box = new SecretBox(options.siteSecret);
+  // Made when a secret is first used: a plain setting never needs the site's secret key.
+  let sealed: SecretBox | undefined;
+  const box = {
+    seal: (plain: string, where: string) =>
+      (sealed ??= new SecretBox(options.siteSecret)).seal(plain, where),
+    open: (value: string, where: string) =>
+      (sealed ??= new SecretBox(options.siteSecret)).open(value, where),
+  };
   const now = options.clock ?? (() => new Date());
   const place = (extensionId: string, key: string) => `${extensionId}:${key}`;
   // SQLite keeps JSON as text; the PostgreSQL driver has already parsed jsonb.

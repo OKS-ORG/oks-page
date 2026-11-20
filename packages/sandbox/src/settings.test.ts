@@ -137,6 +137,13 @@ for (const { kind, open, skip } of openers) {
       });
     });
 
+    test("PL-39 with a short OKS_SECRET plain settings still work, and only a secret is refused", async () => {
+      const weak = createPluginSettings({ runner: db.runner, siteSecret: "short" });
+      await weak.save(ext("nosy"), SCHEMA, { units: "metric" });
+      expect(await weak.forAdmin(ext("nosy"), SCHEMA)).toMatchObject({ units: "metric" });
+      await expect(weak.save(ext("nosy"), SCHEMA, { apiKey: "x" })).rejects.toThrow(/at least 32/);
+    });
+
     test("PL-39 a setting the plugin did not declare is refused", async () => {
       await expect(settings.save(ext("secret-reader"), SCHEMA, { password: "x" })).rejects.toThrow(
         /not a setting/,

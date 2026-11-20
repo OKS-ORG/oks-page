@@ -8,7 +8,9 @@ import {
   permissionWords,
   readPluginFile,
   type PluginFile,
+  type PluginSettings,
   type SandboxHost,
+  type SettingsSchema,
 } from "@oks-page/sandbox";
 
 export interface PluginPermission {
@@ -29,6 +31,8 @@ export interface PluginInfo {
   permissions: PluginPermission[];
   hooks: string[];
   blocks: string[];
+  /** True when the plugin declares settings for the owner to fill in. */
+  hasSettings: boolean;
 }
 
 export type PluginResult<T> =
@@ -86,6 +90,10 @@ export async function listPlugins(
       permissions: words([...new Set([...asked, ...granted])], granted),
       hooks: Array.isArray(manifest["hooks"]) ? (manifest["hooks"] as string[]) : [],
       blocks: Array.isArray(manifest["blocks"]) ? (manifest["blocks"] as string[]) : [],
+      hasSettings:
+        manifest["settings"] !== null &&
+        typeof manifest["settings"] === "object" &&
+        Object.keys(manifest["settings"] as object).length > 0,
     });
   }
   return out;
@@ -237,6 +245,106 @@ export async function removePlugin(
   if (!row) return fail("not_found", "This plugin is not installed.");
   await runner.all(`delete from "extensions" where "id" = ?`, [String(row["id"])]);
   await note(runner, siteId, actor, "plugin.removed", key, {});
+  return { ok: true };
+}
+
+export interface PluginSettingsView {
+  fields: { key: string; label: string; type: "text" | "number" | "boolean" | "secret" }[];
+  /** Plain settings as saved (null when empty); a secret only as `{ set, hint }`. */
+  values: Record<string, unknown>;
+}
+
+/** The settings a plugin declares, and the extension they belong to. */
+async function schemaOf(
+  runner: SqlRunner,
+  siteId: string,
+  key: string,
+): Promise<{ extensionId: string; schema: SettingsSchema } | null> {
+  const row = (
+    await runner.all(
+      `select "id", "manifest" from "extensions" where "site_id" = ? and "key" = ? and "kind" = 'plugin'`,
+      [siteId, key],
+    )
+  )[0];
+  if (!row) return null;
+  const raw = parse(row["manifest"])["settings"];
+  const schema = raw && typeof raw === "object" ? (raw as SettingsSchema) : {};
+  return { extensionId: String(row["id"]), schema };
+}
+
+/** The settings form of a plugin: its fields and what is saved (a secret shows only that one is saved, and a hint). */
+export async function loadPluginSettings(
+  runner: SqlRunner,
+  actor: Actor,
+  siteId: string,
+  key: string,
+  service: PluginSettings,
+): Promise<PluginResult<{ settings: PluginSettingsView }>> {
+  if (!actor.can("plugins.manage")) return fail("forbidden", "You may not manage plugins.");
+  const found = await schemaOf(runner, siteId, key);
+  if (!found) return fail("not_found", "This plugin is not installed.");
+  const fields = Object.entries(found.schema).map(([k, f]) => ({
+    key: k,
+    label: f.label ?? k,
+    type: f.type,
+  }));
+  if (fields.length === 0) return fail("not_found", "This plugin has no settings.");
+  let values: Record<string, unknown>;
+  try {
+    values = await service.forAdmin(found.extensionId, found.schema);
+  } catch {
+    // A secret that cannot be opened (the site's secret key was changed): shown as not saved, and can be set again.
+    values = {};
+  }
+  return { ok: true, settings: { fields, values } };
+}
+
+/**
+ * Saves the owner's values. Each is checked against what the plugin declared (text up to 2,000 characters, a number, a
+ * yes or no). For a secret, a value that is left out keeps the saved one and an empty one removes it. The values never
+ * go to the audit log, only the names of the settings that were changed.
+ */
+export async function savePluginSettings(
+  runner: SqlRunner,
+  actor: Actor,
+  siteId: string,
+  key: string,
+  values: Record<string, unknown>,
+  service: PluginSettings,
+): Promise<PluginResult<object>> {
+  if (!actor.can("plugins.manage")) return fail("forbidden", "You may not manage plugins.");
+  const found = await schemaOf(runner, siteId, key);
+  if (!found) return fail("not_found", "This plugin is not installed.");
+  const clean: Record<string, unknown> = {};
+  for (const [k, value] of Object.entries(values)) {
+    const field = found.schema[k];
+    if (!field) return fail("invalid", `"${k}" is not a setting of this plugin.`);
+    const name = field.label ?? k;
+    if (field.type === "boolean") {
+      if (typeof value !== "boolean") return fail("invalid", `"${name}" must be yes or no.`);
+      clean[k] = value;
+    } else if (field.type === "number") {
+      if (value === "" || value === null) clean[k] = null;
+      else if (typeof value === "number" && Number.isFinite(value)) clean[k] = value;
+      else return fail("invalid", `"${name}" must be a number.`);
+    } else {
+      // text and secret
+      if (value === undefined) continue;
+      if (typeof value !== "string" || value.length > 2000)
+        return fail("invalid", `"${name}" must be text of at most 2,000 characters.`);
+      clean[k] = value;
+    }
+  }
+  const wantsSecret = Object.entries(clean).some(
+    ([k, v]) => found.schema[k]?.type === "secret" && v !== "" && v !== null,
+  );
+  if (wantsSecret && (process.env["OKS_SECRET"] ?? "").length < 32)
+    return fail(
+      "invalid",
+      "A secret setting can be saved only when the site's OKS_SECRET (at least 32 characters) is set in its .env file.",
+    );
+  await service.save(found.extensionId, found.schema, clean);
+  await note(runner, siteId, actor, "plugin.settings_changed", key, { keys: Object.keys(clean) });
   return { ok: true };
 }
 

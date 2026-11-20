@@ -12,11 +12,13 @@ import {
   hostFacts,
   installPlugin,
   listPlugins,
+  loadPluginSettings,
   previewPlugin,
   removePlugin,
+  savePluginSettings,
   setPluginEnabled,
 } from "./plugin-admin";
-import { pluginHost, syncPlugin } from "./plugin-runtime";
+import { pluginHost, pluginSettingsService, syncPlugin } from "./plugin-runtime";
 
 const STATUS = { forbidden: 403, invalid: 400, not_found: 404, taken: 409 } as const;
 
@@ -29,11 +31,24 @@ async function hostOrNull() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const member = await signedInMember();
   if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
   if (!(await actorOf(member)).can("plugins.manage"))
     return reply({ code: "forbidden", message: "You may not manage plugins." }, 403);
+  // ?settings=<plugin id>: the settings form of one plugin.
+  const wanted = new URL(request.url).searchParams.get("settings");
+  if (wanted) {
+    const result = await loadPluginSettings(
+      getRunner(),
+      await actorOf(member),
+      member.siteId,
+      wanted,
+      pluginSettingsService(),
+    );
+    if (!result.ok) return reply(result, STATUS[result.code]);
+    return NextResponse.json({ settings: result.settings });
+  }
   const host = await hostOrNull();
   return NextResponse.json({
     plugins: await listPlugins(
@@ -57,6 +72,8 @@ export async function POST(request: Request) {
     name?: unknown;
     version?: unknown;
     source?: unknown;
+    id?: unknown;
+    values?: unknown;
   };
   try {
     input = (await request.json()) as typeof input;
@@ -83,6 +100,24 @@ export async function POST(request: Request) {
       file: fetched.text,
       source: `npm:${fetched.name}@${fetched.version}`,
     });
+  }
+  if (input.action === "saveSettings") {
+    const body = input as { id?: unknown; values?: unknown };
+    const values =
+      body.values !== null && typeof body.values === "object" && !Array.isArray(body.values)
+        ? (body.values as Record<string, unknown>)
+        : null;
+    if (!values) return reply({ code: "invalid", message: "The request was not understood." }, 400);
+    const result = await savePluginSettings(
+      getRunner(),
+      actor,
+      member.siteId,
+      String(body.id ?? ""),
+      values,
+      pluginSettingsService(),
+    );
+    if (!result.ok) return reply(result, STATUS[result.code]);
+    return NextResponse.json({ ok: true });
   }
   if (input.action === "preview") {
     const result = await previewPlugin(getRunner(), actor, member.siteId, text);
