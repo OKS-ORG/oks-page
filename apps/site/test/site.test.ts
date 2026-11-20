@@ -2,6 +2,7 @@
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import {
+  createHash,
   createHmac,
   createPrivateKey,
   generateKeyPairSync,
@@ -7470,6 +7471,90 @@ describe.skipIf(!findBrowser())(
       const after = await (await fetch(site.base + "/tools/hammer")).text();
       expect(after).not.toContain('href="/makers/acme"');
       for (const e of [tool.id, bad.id]) await call(page, "DELETE", `/api/admin/entries/${e}`);
+    });
+
+    test("PG-01: a plugin file is added in Tools > Plugins with some permissions approved, switched off and on, and removed", async () => {
+      const page = await signedIn(owner);
+      const code = 'export default { hooks: { "content:afterSave": async (e) => e } };';
+      const manifest = {
+        id: "hello-plugin",
+        version: "1.0.0",
+        displayName: "Hello plugin",
+        description: "Says hello.",
+        author: "Ada",
+        permissions: ["content:read", "content:write"],
+        hooks: ["content:afterSave"],
+        blocks: [],
+      };
+      const fileOf = (c: string, integrityOf = c) =>
+        JSON.stringify({
+          format: 1,
+          manifest,
+          code: c,
+          integrity: createHash("sha256").update(integrityOf).digest("hex"),
+        });
+      const upload = (text: string) =>
+        page.getByLabel("Plugin file").setInputFiles({
+          name: "hello.oksplugin",
+          mimeType: "application/json",
+          buffer: Buffer.from(text),
+        });
+      // Nobody signed in may not see the plugins.
+      expect((await fetch(site.base + "/api/admin/plugins")).status).toBe(401);
+      await page.goto(site.base + "/admin/tools/plugins");
+      await page.getByRole("heading", { name: "Plugins", level: 2 }).waitFor();
+      await page.getByText("No plugins are installed.").waitFor();
+
+      // A file whose code was changed after it was made is refused in plain words.
+      await upload(fileOf(code + " ", code));
+      await page.getByText(/changed after it was made/).waitFor();
+
+      // A good file shows what it asks for in plain words; the owner approves only the first permission.
+      await upload(fileOf(code));
+      await page.getByRole("heading", { name: "Add Hello plugin 1.0.0" }).waitFor();
+      await page.getByLabel(/Read your published posts and pages/).waitFor();
+      await page.getByLabel(/Change posts and pages when they are saved/).uncheck();
+      await page.getByRole("button", { name: "Add plugin" }).click();
+      await page.getByText("Hello plugin is added and switched on.").waitFor();
+      const row = page.getByRole("row", { name: /Hello plugin/ });
+      await row.waitFor();
+      expect(await row.innerText()).toContain("On");
+      expect(await row.innerText()).toContain(
+        "Change posts and pages when they are saved (not approved)",
+      );
+
+      // The server kept only the approved permission.
+      const listed = (await (
+        await page.context().request.get(site.base + "/api/admin/plugins")
+      ).json()) as {
+        plugins: {
+          id: string;
+          status: string;
+          permissions: { permission: string; approved: boolean }[];
+        }[];
+      };
+      expect(listed.plugins.map((x) => x.id)).toEqual(["hello-plugin"]);
+      expect(
+        listed.plugins[0]!.permissions.filter((x) => x.approved).map((x) => x.permission),
+      ).toEqual(["content:read"]);
+
+      // The same plugin cannot be added twice.
+      await upload(fileOf(code));
+      await page.getByText("This plugin is already installed.").waitFor();
+      expect(await page.getByRole("button", { name: "Add plugin" }).isDisabled()).toBe(true);
+      await page.getByRole("button", { name: "Cancel" }).click();
+
+      // Off and on again.
+      await row.getByRole("button", { name: "Switch off" }).click();
+      await page.getByText("Hello plugin is off.").waitFor();
+      expect(await row.innerText()).toContain("Off");
+      await row.getByRole("button", { name: "Switch on" }).click();
+      await page.getByText("Hello plugin is on.").waitFor();
+
+      // Removing asks first, then takes the plugin away.
+      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("No plugins are installed.").waitFor();
     });
 
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {

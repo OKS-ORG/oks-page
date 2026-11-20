@@ -78,6 +78,13 @@
       "when": 1794720686256,
       "tag": "0010_known_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795147476780,
+      "tag": "0011_calm_lockjaw",
+      "breakpoints": true
     }
   ]
 }

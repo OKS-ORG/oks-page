@@ -23,6 +23,8 @@ export interface CheckResult {
   issues: CheckIssue[];
   /** The size of the production bundle, when it could be built. */
   bundleBytes?: number;
+  /** The production bundle, when the check passed (`oks pack` writes it into the plugin file). */
+  code?: string;
 }
 
 export interface CheckOptions {
@@ -303,7 +305,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     };
     for (const h of shape.hooks) await run("hook", h);
     for (const b of shape.blocks) await run("block", b);
-    return result({ bundleBytes });
+    return result({ bundleBytes, code });
   } finally {
     await host.close();
     db.close();

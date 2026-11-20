@@ -217,6 +217,7 @@ describe("sqlite migrations", () => {
       "0008_search_terms",
       "0009_search_index",
       "0010_known_devices",
+      "0011_calm_lockjaw",
     ]);
   });
 });
@@ -358,6 +359,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0008_search_terms",
       "0009_search_index",
       "0010_known_devices",
+      "0011_sloppy_the_hunter",
     ]);
   });
 });

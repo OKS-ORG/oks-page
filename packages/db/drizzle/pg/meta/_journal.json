@@ -78,6 +78,13 @@
       "when": 1794720687059,
       "tag": "0010_known_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795147477498,
+      "tag": "0011_sloppy_the_hunter",
+      "breakpoints": true
     }
   ]
 }

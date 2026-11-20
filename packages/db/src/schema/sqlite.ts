@@ -732,6 +732,9 @@ export const extensions = sqliteTable(
     // tests that only need the row to exist, not a real plugin to start.
     code: text("code"),
     integrity: text("integrity"),
+    // What the plugin file says about the plugin (name, description, author, hooks, blocks, settings), for the
+    // Plugins screen; the permissions the owner approved are in `extension_permissions`.
+    manifest: text("manifest", { mode: "json" }),
     installedAt: integer("installed_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [

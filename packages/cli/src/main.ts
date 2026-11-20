@@ -7,12 +7,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { localAdapter, migrateFiles, s3Adapter, s3OptionsFromEnv } from "@oks-page/media";
 import { checkPlugin, formatCheck } from "./check.js";
+import { packPlugin } from "./pack.js";
 import { exportSite } from "./export.js";
 import { checkExport, formatExportCheck } from "./export-check.js";
 import type { Redirect } from "@oks-page/seo";
 
 const USAGE = [
   "Usage: oks check [folder]   Check a plugin before you publish it.",
+  "       oks pack [folder] [--out file]   Check a plugin, then write it as one .oksplugin file to upload in Tools > Plugins.",
   "       oks export [folder] [--check] [--out folder] [--redirects file.json] [--uploads folder]",
   "                            Check a site, then write it as plain files.",
   "       oks media migrate --to s3|local [--uploads folder]",
@@ -119,6 +121,11 @@ export async function runCli(
   if (command === "check") {
     const result = await checkPlugin(folder ?? ".");
     out(formatCheck(result));
+    return result.ok ? 0 : 1;
+  }
+  if (command === "pack") {
+    const result = await packPlugin(folder ?? ".", flag(rest, "--out"));
+    out(result.report);
     return result.ok ? 0 : 1;
   }
   if (command === "export") {

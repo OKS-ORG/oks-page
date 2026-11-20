@@ -25,6 +25,9 @@ const PLAIN: Record<string, string> = {
   cron: "Run tasks on a schedule",
 };
 
+/** Every exact permission of the list in spec 04, section 4.2 (a network permission names its host after a colon). */
+export const KNOWN_PERMISSIONS = Object.keys(PLAIN);
+
 /** The plain sentence for an exact permission; a permission the table does not know is shown as it is. */
 export function permissionWords(permission: string): string {
   const host = /^network:fetch:(.+)$/.exec(permission)?.[1];
@@ -44,4 +47,34 @@ export function developerMessage(
 ): string {
   const who = call ? `${call.kind === "hook" ? "Hook" : "Block"} "${call.name}"` : "This call";
   return `${who} needs "${permission}". Add it to "permissions" in the manifest.`;
+}
+
+/** How risky a permission is, as the owner sees it on the approval screen (spec 04, section 4.2). */
+export function permissionRisk(permission: string): "low" | "medium" | "high" {
+  if (permission.startsWith("network:fetch:")) return "high";
+  if (
+    [
+      "content:read_drafts",
+      "content:publish",
+      "content:delete",
+      "users:read_email",
+      "email:send",
+      "site:head",
+      "site:scripts",
+    ].includes(permission)
+  )
+    return "high";
+  if (
+    [
+      "content:write",
+      "media:write",
+      "comments:read",
+      "comments:moderate",
+      "menus:write",
+      "routes:public",
+      "cron",
+    ].includes(permission)
+  )
+    return "medium";
+  return "low";
 }

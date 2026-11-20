@@ -75,6 +75,8 @@ export function withOksPage(config: NextConfig = {}): NextConfig {
       ...((own["serverExternalPackages"] as string[] | undefined) ?? []),
       "better-sqlite3",
       "pg",
+      "@oks-page/sandbox",
+      "workerd",
       "sharp",
       "jsdom",
     ]),

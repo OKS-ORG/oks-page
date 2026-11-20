@@ -279,6 +279,9 @@ importers:
       '@oks-page/media':
         specifier: workspace:*
         version: link:../media
+      '@oks-page/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3

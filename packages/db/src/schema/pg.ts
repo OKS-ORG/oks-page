@@ -838,6 +838,8 @@ export const extensions = pgTable(
     // tests that only need the row to exist, not a real plugin to start.
     code: text("code"),
     integrity: text("integrity"),
+    // What the plugin file says about the plugin, for the Plugins screen (see the SQLite schema).
+    manifest: jsonb("manifest"),
     installedAt: timestamp("installed_at", {
       withTimezone: true,
       precision: 3,
