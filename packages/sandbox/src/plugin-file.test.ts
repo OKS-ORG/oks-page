@@ -75,6 +75,28 @@ describe("the plugin file", () => {
     expect(noName.ok && noName.file.manifest.displayName).toBe("reading-time");
   });
 
+  test("the name and fields of a plugin's blocks are kept, and a bad one is refused", () => {
+    const blockInfo = {
+      greeting: { label: "Greeting", settings: { name: { type: "text" as const, label: "Name" } } },
+    };
+    const ok = withManifest({ blocks: ["greeting"], blockInfo });
+    expect(ok.ok && ok.file.manifest.blockInfo).toEqual(blockInfo);
+    // A block that the plugin does not list, an empty or too long name, and a secret in a block are refused.
+    expect(withManifest({ blocks: [], blockInfo })).toMatchObject({ ok: false });
+    expect(
+      withManifest({ blocks: ["greeting"], blockInfo: { greeting: { label: "" } } }),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(
+      withManifest({
+        blocks: ["greeting"],
+        blockInfo: { greeting: { label: "G", settings: { key: { type: "secret" } } } },
+      }),
+    ).toMatchObject({ ok: false });
+    expect(withManifest({ blocks: ["greeting"], blockInfo: [] })).toMatchObject({ ok: false });
+  });
+
   test("a file bigger than the limit is refused", () => {
     expect(readPluginFile(" ".repeat(5 * 1024 * 1024 + 1))).toMatchObject({ ok: false });
   });

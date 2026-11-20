@@ -1,4 +1,5 @@
 // /admin/pages/[id] and /admin/posts/[id]: the edit screen. Anyone who may not edit this entry is sent back to the list.
+import { pluginBlockTypes } from "./plugin-blocks";
 import {
   insertableSections,
   isSetupDone,
@@ -35,6 +36,9 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
   const { timeZone } = await loadGeneralSettings(getRunner(), member.siteId);
   const savedSections = await insertableSections(getRunner(), member.siteId);
   const screens = await loadScreenSizes(getRunner(), member.siteId);
+  const pluginBlocks = (await pluginBlockTypes(getRunner(), member.siteId)).map(
+    ({ type, label, fields }) => ({ type, label, fields }),
+  );
   const typeInfo = (await listContentTypes(getRunner(), member.siteId)).find(
     (t) => t.key === entry.type,
   );
@@ -75,6 +79,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         editor={entry.editor}
         canLock={actor.can("themes.manage")}
         screens={screens}
+        pluginBlocks={pluginBlocks}
         timeZone={timeZone}
         listHref={`/admin/${segment}`}
         fieldDefs={entry.fieldDefs}

@@ -258,12 +258,25 @@ describe("media and other blocks", () => {
   test("a block type the writer does not know is left out and reported", () => {
     const written = writeBlocks([
       para(text("a")),
-      block("pricing-card"),
-      block("pricing-card"),
       block("weather"),
+      block("weather"),
+      block("clock"),
     ]);
     expect(written.html).toBe("<p>a</p>");
-    expect(written.skipped).toEqual(["pricing-card", "weather"]);
+    expect(written.skipped).toEqual(["clock", "weather"]);
+  });
+
+  test("a plugin's block (a type with the plugin's id, a hyphen and the block's name) leaves a marker with its type and id", () => {
+    const card = block("pricing-card", { id: "card1" });
+    const written = writeBlocks([para(text("a")), card]);
+    expect(written.html).toBe(
+      '<p>a</p><div data-oks-plugin-block="pricing-card" data-oks-block-id="card1"></div>',
+    );
+    // It is not reported as skipped: the site draws it when the page is shown.
+    expect(written.skipped).toEqual([]);
+    // Nothing from the block can break out of the marker.
+    const odd = writeBlocks([block('x-"><script>', { id: 'i"d' })]);
+    expect(odd.html).not.toContain("<script>");
   });
 });
 

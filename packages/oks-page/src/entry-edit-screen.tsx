@@ -46,6 +46,8 @@ export interface EntryEditScreenProps {
   canLock?: boolean;
   /** The screen sizes that are on for the site (Settings > Screen sizes). */
   screens?: string[];
+  /** The blocks that plugins add (spec 04, section 8), for the layout editor's list. */
+  pluginBlocks?: ComponentProps<typeof LayoutEditor>["pluginBlocks"];
   /** Posts have categories and tags; pages do not. */
   showTerms?: boolean;
   /** Where the list this entry belongs to is ("/admin/pages"). */
@@ -462,6 +464,7 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
           initialBlocks={props.blocks as unknown as LayoutBlocks}
           canLock={props.canLock === true}
           {...(props.screens ? { screens: props.screens } : {})}
+          {...(props.pluginBlocks ? { pluginBlocks: props.pluginBlocks } : {})}
           onChange={(next) => {
             blocksNow.current = next as unknown as Block[];
             setChanges((n) => n + 1);

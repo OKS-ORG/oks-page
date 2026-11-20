@@ -7,6 +7,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { refreshPlugins } from "./refresh-cache";
 import {
   hostFacts,
   installPlugin,
@@ -98,6 +99,7 @@ export async function POST(request: Request) {
     if (!result.ok) return reply(result, STATUS[result.code]);
     const host = await hostOrNull();
     if (host) await syncPlugin(getRunner(), host, member.siteId, result.extensionId);
+    refreshPlugins();
     return NextResponse.json({ ok: true, id: result.file.manifest.id, running: host !== null });
   }
   return reply({ code: "invalid", message: "The request was not understood." }, 400);
@@ -124,6 +126,7 @@ export async function PATCH(request: Request) {
   if (!result.ok) return reply(result, STATUS[result.code]);
   const host = await hostOrNull();
   if (host) await syncPlugin(getRunner(), host, member.siteId, result.extensionId);
+  refreshPlugins();
   return NextResponse.json({ ok: true });
 }
 
@@ -137,5 +140,6 @@ export async function DELETE(request: Request) {
   const result = await removePlugin(getRunner(), await actorOf(member), member.siteId, id);
   if (!result.ok) return reply(result, STATUS[result.code]);
   host?.disable(id);
+  refreshPlugins();
   return NextResponse.json({ ok: true });
 }

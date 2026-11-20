@@ -18,6 +18,8 @@ export interface PluginFileManifest {
   permissions: string[];
   hooks: string[];
   blocks: string[];
+  /** The name shown in the editor and the settings form of each block, by block name. */
+  blockInfo?: Record<string, { label: string; settings?: SettingsSchema }>;
   priority?: number;
   settings?: SettingsSchema;
 }
@@ -66,6 +68,31 @@ const list = (value: unknown, label: string, test: (s: string) => boolean): stri
   if (new Set(items).size !== items.length) return `"${label}" lists something twice.`;
   return items;
 };
+
+/** A list of settings, or the words for what is wrong with it. */
+function readSettings(value: unknown, where: string): SettingsSchema | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return `The plugin's ${where} are not valid.`;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 40) return `The plugin has too many ${where}.`;
+  const out: SettingsSchema = {};
+  for (const [key, field] of entries) {
+    const ft = field as { type?: unknown; label?: unknown } | null;
+    if (
+      !SETTING_KEY.test(key) ||
+      ft === null ||
+      typeof ft !== "object" ||
+      !["text", "number", "boolean", "secret"].includes(String(ft.type)) ||
+      (ft.label !== undefined && (typeof ft.label !== "string" || ft.label.length > 80))
+    )
+      return `The setting "${key}" is not valid.`;
+    out[key] = {
+      type: ft.type as "text" | "number" | "boolean" | "secret",
+      ...(typeof ft.label === "string" ? { label: ft.label } : {}),
+    };
+  }
+  return out;
+}
 
 /** Reads the text of a plugin file and checks every part of it. A bad file says in plain words what is wrong. */
 export function readPluginFile(text: string): PluginFileResult {
@@ -122,26 +149,37 @@ export function readPluginFile(text: string): PluginFileResult {
   }
   let settings: SettingsSchema | undefined;
   if (mm["settings"] !== undefined) {
-    const s = mm["settings"];
-    if (s === null || typeof s !== "object" || Array.isArray(s))
-      return bad('The plugin\'s "settings" are not valid.');
-    const entries = Object.entries(s as Record<string, unknown>);
-    if (entries.length > 40) return bad("The plugin has too many settings.");
-    settings = {};
-    for (const [key, field] of entries) {
-      const ft = field as { type?: unknown; label?: unknown } | null;
+    const read = readSettings(mm["settings"], "settings");
+    if (typeof read === "string") return bad(read);
+    settings = read;
+  }
+  let blockInfo: PluginFileManifest["blockInfo"];
+  if (mm["blockInfo"] !== undefined) {
+    const info = mm["blockInfo"];
+    if (info === null || typeof info !== "object" || Array.isArray(info))
+      return bad('The plugin\'s "blockInfo" is not valid.');
+    blockInfo = {};
+    for (const [name, entry] of Object.entries(info as Record<string, unknown>)) {
+      const e = entry as { label?: unknown; settings?: unknown } | null;
       if (
-        !SETTING_KEY.test(key) ||
-        ft === null ||
-        typeof ft !== "object" ||
-        !["text", "number", "boolean", "secret"].includes(String(ft.type)) ||
-        (ft.label !== undefined && (typeof ft.label !== "string" || ft.label.length > 80))
+        !blocks.includes(name) ||
+        e === null ||
+        typeof e !== "object" ||
+        typeof e.label !== "string" ||
+        e.label.length === 0 ||
+        e.label.length > 80
       )
-        return bad(`The setting "${key}" is not valid.`);
-      settings[key] = {
-        type: ft.type as "text" | "number" | "boolean" | "secret",
-        ...(typeof ft.label === "string" ? { label: ft.label } : {}),
-      };
+        return bad(`The information about the block "${name}" is not valid.`);
+      let blockSettings: SettingsSchema | undefined;
+      if (e.settings !== undefined) {
+        const read = readSettings(e.settings, `block "${name}"`);
+        if (typeof read === "string") return bad(read);
+        // A block's fields are drawn in the editor, where a secret has no place.
+        if (Object.values(read).some((f) => f.type === "secret"))
+          return bad(`The block "${name}" cannot have a secret setting.`);
+        blockSettings = read;
+      }
+      blockInfo[name] = { label: e.label, ...(blockSettings ? { settings: blockSettings } : {}) };
     }
   }
   return {
@@ -157,6 +195,7 @@ export function readPluginFile(text: string): PluginFileResult {
         permissions,
         hooks,
         blocks,
+        ...(blockInfo ? { blockInfo } : {}),
         ...(priority !== undefined ? { priority } : {}),
         ...(settings ? { settings } : {}),
       },

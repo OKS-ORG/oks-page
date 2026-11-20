@@ -47,6 +47,9 @@ export async function packPlugin(dir: string, outFile?: string): Promise<PackRes
     permissions: raw["permissions"] as string[],
     hooks: raw["hooks"] as string[],
     blocks: raw["blocks"] as string[],
+    ...(raw["blockInfo"] && typeof raw["blockInfo"] === "object"
+      ? { blockInfo: raw["blockInfo"] as NonNullable<PluginFileManifest["blockInfo"]> }
+      : {}),
     ...(typeof raw["priority"] === "number" ? { priority: raw["priority"] } : {}),
     ...(raw["settings"] && typeof raw["settings"] === "object"
       ? { settings: raw["settings"] as NonNullable<PluginFileManifest["settings"]> }

@@ -91,7 +91,8 @@ const count = (key: string) => {
 
 export async function getPublishedEntry(slug: string): Promise<EntryView | null> {
   "use cache";
-  cacheTag("site", slugTag(slug));
+  // The page draws the blocks of plugins when it is shown, so a plugin that changes is seen at once (tag "plugins").
+  cacheTag("site", "plugins", slugTag(slug));
   count(`entry:${slug}`);
   const entry = await loadPublishedEntry(slug);
   if (entry) {

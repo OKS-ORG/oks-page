@@ -27,6 +27,7 @@ import {
   type PublicMenuItem,
 } from "@oks-page/core";
 import { getRunner, getSiteId } from "../db";
+import { drawPluginBlocks } from "../plugin-blocks";
 import { mediaContext } from "../uploads";
 import { pageCount } from "../paging";
 import { styleFileUrl } from "../site-style";
@@ -219,7 +220,14 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
     title: String(r["title"]),
     slug: String(r["slug"]),
     type: String(r["type_key"]),
-    html: link + (await enhanceImages(getRunner(), siteId, written, mediaContext().storage)),
+    html:
+      link +
+      (await enhanceImages(
+        getRunner(),
+        siteId,
+        await drawPluginBlocks(written, readBody(r["body"])),
+        mediaContext().storage,
+      )),
     pageStyle: { css: pageCss, link },
     plainText: plain,
     updatedAt: ms(r["updated_at"]),

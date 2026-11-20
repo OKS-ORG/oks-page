@@ -7726,6 +7726,105 @@ describe.skipIf(!findBrowser())(
       await call(page, "DELETE", `/api/admin/entries/${id}`);
     });
 
+    test("PG-04: a plugin's block is in the editor's list, is drawn when the page is shown after the block checks, and goes when the plugin is off", async () => {
+      const page = await signedIn(owner);
+      const code = `export default { blocks: {
+        greeting: { render: async (props) => ({ type: "paragraph", props: {}, content: [{ type: "text", text: "Hello, " + String(props.name || "friend") + "!", styles: {} }], children: [] }) },
+        evil: { render: async () => ({ type: "button", props: { text: "Click me", href: "javascript:alert(1)", variant: "solid" }, content: null, children: [] }) },
+      } };`;
+      const manifest = {
+        id: "blocky",
+        version: "1.0.0",
+        displayName: "Blocky",
+        description: "Adds a greeting block.",
+        author: "Ada",
+        permissions: [],
+        hooks: [],
+        blocks: ["greeting", "evil"],
+        blockInfo: {
+          greeting: { label: "Greeting", settings: { name: { type: "text", label: "Name" } } },
+        },
+      };
+      const file = JSON.stringify({
+        format: 1,
+        manifest,
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: [],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Plugin page",
+      });
+      const id = String(made.json!["id"]);
+      const plain = (type: string, blockId: string, props: object) => ({
+        id: blockId,
+        type,
+        props,
+        content: null,
+        children: [],
+      });
+      const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Plugin page",
+        slugPart: "plugin-page",
+        status: "published",
+        blocks: [
+          b("paragraph", {}, [], words("Before.")),
+          plain("blocky-greeting", "g1", { name: "Ada" }),
+          plain("blocky-evil", "e1", {}),
+          plain("gone-block", "x1", {}),
+        ],
+        revision: 1,
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const html = () => fetch(site.base + "/plugin-page").then((r) => r.text());
+
+      // The block is drawn from the plugin; a hostile answer is repaired by the block checks; a block of a plugin that
+      // is not there leaves nothing, and no marker reaches the visitor.
+      const shown = await html();
+      expect(shown).toContain("Hello, Ada!");
+      expect(shown).toContain("Click me");
+      expect(shown).not.toContain("javascript:");
+      expect(shown).not.toContain("data-oks-plugin-block");
+
+      // Switched off, the block is gone at once, without saving the page again; switched on, it is back.
+      await call(page, "PATCH", "/api/admin/plugins", { id: "blocky", enabled: false });
+      const off = await html();
+      expect(off).not.toContain("Hello, Ada!");
+      expect(off).toContain("Before.");
+      expect(off).not.toContain("data-oks-plugin-block");
+      await call(page, "PATCH", "/api/admin/plugins", { id: "blocky", enabled: true });
+      expect(await html()).toContain("Hello, Ada!");
+
+      // The layout editor offers the block under its name, with its field.
+      await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Plugin page",
+        slugPart: "plugin-page",
+        status: "published",
+        blocks: [b("paragraph", {}, [], words("Before."))],
+        revision: 2,
+      });
+      await page.goto(site.base + `/admin/pages/${id}`);
+      await page.getByLabel("Add a block").waitFor();
+      await page.getByLabel("Add a block").selectOption({ label: "Greeting (blocky)" });
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByLabel("Name", { exact: true }).fill("Grace");
+      await page.getByRole("button", { name: "Save", exact: true }).first().click();
+      await page.getByText("Saved.").first().waitFor();
+      expect(await html()).toContain("Hello, Grace!");
+
+      // Removed, the plugin's block leaves nothing on the page.
+      await call(page, "DELETE", "/api/admin/plugins?id=blocky");
+      expect(await html()).not.toContain("Hello, Grace!");
+      await call(page, "DELETE", `/api/admin/entries/${id}`);
+    });
+
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

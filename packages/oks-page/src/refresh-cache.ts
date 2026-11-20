@@ -23,6 +23,11 @@ export function refreshArchives(): void {
   forgetSearchIndex();
 }
 
+/** A plugin was added, switched on or off, or removed: the pages that show its blocks are made fresh. */
+export function refreshPlugins(): void {
+  revalidateTag("plugins", { expire: 0 });
+}
+
 export function refreshEntry(id: string, ...slugs: string[]): void {
   revalidateTag(`entry:${id}`, { expire: 0 });
   for (const slug of new Set(slugs)) revalidateTag(slugTag(slug), { expire: 0 });

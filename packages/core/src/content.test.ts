@@ -202,14 +202,14 @@ for (const { kind, open, skip } of openers) {
               content: null,
               children: [],
             },
-            { id: "p", type: "pricing-card", props: {}, content: null, children: [] },
+            { id: "p", type: "weather", props: {}, content: null, children: [] },
           ],
         }),
       );
       expect(saved.ok).toBe(true);
       if (!saved.ok) return;
       expect(saved.repairs.length).toBeGreaterThan(0);
-      expect(saved.skippedBlocks).toEqual(["pricing-card"]);
+      expect(saved.skippedBlocks).toEqual(["weather"]);
       const row = (await db.run("select html, body from entries where id = ?", [made.id]))[0]!;
       const stored = String(row["html"]) + JSON.stringify(row["body"]);
       expect(stored).not.toContain("javascript:");

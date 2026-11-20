@@ -374,10 +374,17 @@ function blockHtml(block: Block, ctx: Context): string {
     case "slide":
       return `<div class="slide" role="group" aria-roledescription="slide">${children}</div>`;
     default:
+      // A plugin's block is `<plugin-id>-<block>`: it leaves a marker, and the site draws the block when the page is shown
+      // (the plugin may have changed or been switched off since the page was saved). Any other unknown type is skipped.
+      if (PLUGIN_BLOCK_TYPE.test(block.type))
+        return `<div data-oks-plugin-block="${escapeHtml(block.type)}" data-oks-block-id="${escapeHtml(block.id)}"></div>`;
       ctx.skipped.add(block.type);
       return "";
   }
 }
+
+/** The type of a block a plugin adds: the plugin's id, a hyphen and the block's name. */
+const PLUGIN_BLOCK_TYPE = /^[a-z0-9]+(?:-[a-z0-9]+)+$/;
 
 // ---- the style of a block: a class from the generated page CSS, never an inline style (spec 06, 4.3) ----
 

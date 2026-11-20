@@ -227,8 +227,17 @@ const NATURAL_DISPLAY: Record<string, string> = {
 const readStyle = (b: Block, sizes: readonly string[]): Style =>
   checkStyle(b.props["style"], sizes).style;
 
+/** A block a plugin adds: its type (`<plugin-id>-<block>`), its name in the list, and the fields of its settings. */
+export interface PluginBlockInfo {
+  type: string;
+  label: string;
+  fields: { key: string; label: string; type: "text" | "number" | "boolean" }[];
+}
+
 export interface LayoutEditorProps {
   label?: string;
+  /** The blocks the plugins that are switched on add (spec 04, section 8). */
+  pluginBlocks?: PluginBlockInfo[];
   initialBlocks: Block[];
   /** The screen sizes that are on for the site (Settings > Screen sizes); phone, tablet and desktop when left out. */
   screens?: readonly string[];
@@ -258,6 +267,17 @@ export function LayoutEditor(props: LayoutEditorProps) {
   const device = devices.some((d) => d.key === chosenDevice)
     ? chosenDevice
     : devices[devices.length - 1]!.key;
+  const catalogue = useMemo(
+    () => [
+      ...CATALOGUE,
+      ...(props.pluginBlocks ?? []).map((p) => ({
+        type: p.type,
+        label: p.label,
+        make: () => block(p.type),
+      })),
+    ],
+    [props.pluginBlocks],
+  );
   const [adding, setAdding] = useState(CATALOGUE[0]!.type);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState("");
@@ -322,7 +342,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
 
   // ---- adding ----
   function add() {
-    const entry = CATALOGUE.find((c) => c.type === adding);
+    const entry = catalogue.find((c) => c.type === adding);
     if (!entry) return;
     const fresh = entry.make();
     // Inside the chosen block if it takes this one; else after it, or after the block that holds it, and so on up.
@@ -640,6 +660,37 @@ export function LayoutEditor(props: LayoutEditorProps) {
             </select>,
           )
         : null}
+      {(props.pluginBlocks ?? [])
+        .filter((p) => p.type === place.block.type)
+        .flatMap((p) =>
+          p.fields.map((f) => (
+            <div key={`${p.type}:${f.key}`}>
+              {f.type === "boolean"
+                ? field(
+                    f.label,
+                    <input
+                      type="checkbox"
+                      checked={place.block.props[f.key] === true}
+                      onChange={(e) => setProp(f.key, e.target.checked)}
+                    />,
+                  )
+                : field(
+                    f.label,
+                    <input
+                      type={f.type === "number" ? "number" : "text"}
+                      style={{ width: "100%" }}
+                      value={String(place.block.props[f.key] ?? "")}
+                      onChange={(e) =>
+                        setProp(
+                          f.key,
+                          f.type === "number" ? Number(e.target.value) : e.target.value,
+                        )
+                      }
+                    />,
+                  )}
+            </div>
+          )),
+        )}
       {place.block.type === "button" ? (
         <>
           {field(
@@ -1002,7 +1053,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
         <label>
           Add a block{" "}
           <select value={adding} onChange={(e) => setAdding(e.target.value)}>
-            {CATALOGUE.map((c) => (
+            {catalogue.map((c) => (
               <option key={c.type} value={c.type}>
                 {c.label}
               </option>
