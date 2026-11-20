@@ -30,7 +30,15 @@ import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import { pageCount } from "../paging";
 import { styleFileUrl } from "../site-style";
-import type { EntryView, Look, PostsPage, SiteInfo, TermArchive, TypeList } from "./types";
+import type {
+  EntryView,
+  Look,
+  PictureView,
+  PostsPage,
+  SiteInfo,
+  TermArchive,
+  TypeList,
+} from "./types";
 
 /**
  * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
@@ -190,7 +198,7 @@ export async function loadComments(entryId: string) {
 export async function loadPublishedEntry(slug: string): Promise<EntryView | null> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
-    `select e."id", e."title", e."slug", e."type_key", e."html", e."body", e."plain_text", e."seo", e."meta", e."published_at", e."updated_at", u."name" as "author"
+    `select e."id", e."title", e."slug", e."type_key", e."html", e."body", e."plain_text", e."seo", e."meta", e."fields", e."published_at", e."updated_at", u."name" as "author"
        from "entries" e left join "users" u on u."id" = e."author_id"
       where e."site_id" = ? and e."slug" = ? and e."status" = 'published' and e."locale" = ''
       order by case e."type_key" when 'page' then 0 else 1 end limit 1`,
@@ -221,7 +229,54 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
     noindex: seo.noindex,
     image: firstImageOf(written),
     layout: chosenLayout(r["meta"]),
+    pictures: await picturesOf(String(r["type_key"]), r["fields"], false),
   };
+}
+
+/**
+ * The pictures in the picture fields of an entry of a custom type (in the order of the fields), or just the first one.
+ * A picture that is gone from the library, or is not ready, is left out.
+ */
+async function picturesOf(
+  typeKey: string,
+  raw: unknown,
+  firstOnly: boolean,
+): Promise<PictureView[]> {
+  if (typeKey === "page" || typeKey === "post") return [];
+  const values = readBody(raw) as Record<string, unknown> | null;
+  if (!values || typeof values !== "object") return [];
+  const siteId = await getSiteId();
+  const runner = getRunner();
+  const defs = await runner.all(
+    `select fd."key", fd."label" from "field_definitions" fd join "content_types" ct on ct."id" = fd."content_type_id"
+      where ct."site_id" = ? and ct."key" = ? and fd."field_type" = 'picture' order by fd."position", fd."key"`,
+    [siteId, typeKey],
+  );
+  const wanted = defs
+    .map((d) => ({ label: String(d["label"]), id: values[String(d["key"])] }))
+    .filter((w): w is { label: string; id: string } => typeof w.id === "string");
+  if (wanted.length === 0) return [];
+  const rows = await runner.all(
+    `select "id", "storage_key", "alt", "width", "height" from "media"
+      where "site_id" = ? and "status" = 'ready' and "mime_type" like 'image/%' and "id" in (${wanted.map(() => "?").join(", ")})`,
+    [siteId, ...wanted.map((w) => w.id)],
+  );
+  const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+  const storage = mediaContext().storage;
+  const out: PictureView[] = [];
+  for (const w of wanted) {
+    const r = byId.get(w.id);
+    if (!r) continue;
+    out.push({
+      label: w.label,
+      url: storage.publicUrl(String(r["storage_key"])),
+      alt: r["alt"] == null ? "" : String(r["alt"]),
+      width: r["width"] == null ? null : Number(r["width"]),
+      height: r["height"] == null ? null : Number(r["height"]),
+    });
+    if (firstOnly) break;
+  }
+  return out;
 }
 
 /** The cheap question the proxy asks on every request: is there a published entry at this address? Which one? */
@@ -442,11 +497,22 @@ export async function loadTypeList(base: string, perPage = 10, page = 1): Promis
   const siteId = await getSiteId();
   const { where, args, total } = await typeListWhere(siteId, type.key);
   const rows = await getRunner().all(
-    `select "title", "slug", "plain_text", "seo", "published_at" from "entries"
+    `select "title", "slug", "plain_text", "seo", "fields", "published_at" from "entries"
       where ${where} order by "published_at" desc, "id" desc limit ? offset ?`,
     [...args, perPage, (Math.max(1, page) - 1) * perPage],
   );
   const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
+  const posts = [];
+  for (const r of rows) {
+    const picture = (await picturesOf(type.key, r["fields"], true))[0];
+    posts.push({
+      title: String(r["title"]),
+      slug: String(r["slug"]),
+      publishedAt: ms(r["published_at"]),
+      excerpt: readEntrySeo(r["seo"]).description || excerptOf(String(r["plain_text"])),
+      ...(picture ? { picture } : {}),
+    });
+  }
   return {
     key: type.key,
     label: type.label,
@@ -454,12 +520,7 @@ export async function loadTypeList(base: string, perPage = 10, page = 1): Promis
     page,
     pages: pageCount(total, perPage),
     total,
-    posts: rows.map((r) => ({
-      title: String(r["title"]),
-      slug: String(r["slug"]),
-      publishedAt: ms(r["published_at"]),
-      excerpt: readEntrySeo(r["seo"]).description || excerptOf(String(r["plain_text"])),
-    })),
+    posts,
   };
 }
 

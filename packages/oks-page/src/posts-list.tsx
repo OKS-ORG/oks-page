@@ -16,6 +16,18 @@ export function PostsList({
     <ul className="oks-posts-list">
       {posts.map((post) => (
         <li key={post.slug}>
+          {post.picture ? (
+            <a href={`/${post.slug}`}>
+              <img
+                src={post.picture.url}
+                alt={post.picture.alt}
+                {...(post.picture.width ? { width: post.picture.width } : {})}
+                {...(post.picture.height ? { height: post.picture.height } : {})}
+                loading="lazy"
+                style={{ maxInlineSize: "100%", blockSize: "auto" }}
+              />
+            </a>
+          ) : null}
           <h2>
             <a href={`/${post.slug}`}>{post.title}</a>
           </h2>

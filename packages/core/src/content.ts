@@ -17,7 +17,7 @@ import { loadScreenSizes } from "./screen-sizes.js";
 import { addCovers } from "./video-covers.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
-import { cleanFieldValues, fieldsOfType, type FieldDef } from "./content-types.js";
+import { cleanFieldValues, fieldsOfType, pictureMedia, type FieldDef } from "./content-types.js";
 
 export interface Actor {
   userId: string;
@@ -362,7 +362,7 @@ export async function saveContent(
 ): Promise<ContentResult<SavedContent>> {
   const row = (
     await runner.all(
-      `select "type_key", "author_id", "slug", "published_at", "title", "status", "plain_text", "body", "meta", "scheduled_at" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
+      `select "type_key", "author_id", "slug", "published_at", "title", "status", "plain_text", "body", "meta", "scheduled_at", "fields" from "entries" where "id" = ? and "site_id" = ? and "status" <> 'trash'`,
       [id, siteId],
     )
   )[0];
@@ -453,6 +453,16 @@ export async function saveContent(
     if (!cleaned.ok) return fail("invalid", cleaned.message, { field: cleaned.field });
     fieldChange = { fields: cleaned.fields };
   }
+  // The files the picture fields use: a value being saved must be an image of this library; an older one that has
+  // since gone is just left out.
+  const pictures = await pictureMedia(
+    runner,
+    siteId,
+    defs,
+    fieldChange?.fields ?? (parseJson(row["fields"]) as Record<string, unknown> | null) ?? {},
+    fieldChange !== undefined,
+  );
+  if (!pictures.ok) return fail("invalid", pictures.message, { field: pictures.field });
   const at = new Date(now());
   const saved = await saveEntry(runner, {
     entryId: id,
@@ -470,7 +480,7 @@ export async function saveContent(
       ...(publishing && row["published_at"] == null ? { published_at: at } : {}),
     },
     // Which library files the page uses, so a file in use is not deleted by mistake.
-    media: await usedMedia(runner, siteId, checked.body.blocks),
+    media: [...(await usedMedia(runner, siteId, checked.body.blocks)), ...pictures.media],
     // A full copy of this save, with a short summary of what changed.
     snapshot: {
       id: newId(),

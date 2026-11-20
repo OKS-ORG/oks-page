@@ -20,6 +20,17 @@ export interface EntryView {
   image: string | null;
   /** The layout the page chose in its settings ("" for its usual one). */
   layout: string;
+  /** The pictures in the picture fields of a custom type's entry, with the field's name. */
+  pictures: PictureView[];
+}
+
+/** A picture from the library, as a public page draws it. */
+export interface PictureView {
+  label: string;
+  url: string;
+  alt: string;
+  width: number | null;
+  height: number | null;
 }
 
 /** What every page needs to know about the site: its name, its tagline and its language. */
@@ -39,6 +50,8 @@ export interface PostSummary {
   slug: string;
   publishedAt: number;
   excerpt: string;
+  /** The first picture field of a custom type's entry, in lists of that type. */
+  picture?: PictureView;
 }
 
 /** One page of the list of the newest posts. */

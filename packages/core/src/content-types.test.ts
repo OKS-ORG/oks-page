@@ -52,6 +52,18 @@ describe("cleaning the values of an entry", () => {
       fields: { price: 3, on_sale: false },
     });
   });
+  test("a picture is the id of a library file", () => {
+    const photo = [def({ key: "photo", type: "picture" })];
+    expect(cleanFieldValues(photo, { photo: "01HZZZZZZZZZZZZZZZZZZZZZZZ" })).toEqual({
+      ok: true,
+      fields: { photo: "01HZZZZZZZZZZZZZZZZZZZZZZZ" },
+    });
+    expect(cleanFieldValues(photo, { photo: "" })).toEqual({ ok: true, fields: {} });
+    expect(cleanFieldValues(photo, { photo: "cat.png" })).toMatchObject({
+      ok: false,
+      field: "photo",
+    });
+  });
   test("a missing required value, a bad number and a bad date are refused with the field named", () => {
     expect(cleanFieldValues(defs, {})).toMatchObject({ ok: false, field: "price" });
     expect(cleanFieldValues(defs, { price: "abc" })).toMatchObject({ ok: false, field: "price" });
@@ -228,6 +240,70 @@ for (const { kind, open, skip } of openers) {
         sku: "A1",
         notes: "Comfy",
       });
+    });
+
+    test("a picture field holds the id of an image in the library, is checked on save, and marks the file as in use", async () => {
+      await saveContentType(db.runner, anna, siteId, {
+        ...product,
+        fields: [
+          { key: "photo", label: "Photo", type: "picture", sortable: true, filterable: true },
+        ],
+      });
+      // A picture is not a single value an index can sort or search by.
+      const type = (await listContentTypes(db.runner, siteId)).find((t) => t.key === "product")!;
+      expect(type.fields[0]).toMatchObject({ type: "picture", sortable: false, filterable: false });
+      const made = await createDraft(db.runner, anna, siteId, {
+        type: "product",
+        title: "Red shoe",
+      });
+      if (!made.ok) throw new Error("no draft");
+      const save = (fields: unknown, revision: number) =>
+        saveContent(db.runner, anna, siteId, made.id, {
+          title: "Red shoe",
+          slugPart: "red-shoe",
+          status: "draft",
+          blocks: [],
+          revision,
+          fields,
+        });
+      const user = String((await db.run("select id from users limit 1"))[0]!["id"]);
+      const file = (id: string, mime: string, key: string) =>
+        db.run(
+          `insert into media (id, site_id, storage_key, filename, mime_type, size_bytes, content_hash, status, uploaded_by, created_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, siteId, key, key, mime, 10, key, "ready", user, T],
+        );
+      const image = newId();
+      const pdf = newId();
+      await file(image, "image/png", "a.png");
+      await file(pdf, "application/pdf", "b.pdf");
+      // Not an id, not in the library, and not an image are all refused with the field named.
+      for (const bad of ["x", newId(), pdf])
+        expect(await save({ photo: bad }, 1)).toMatchObject({
+          ok: false,
+          code: "invalid",
+          field: "photo",
+        });
+      expect(await save({ photo: image }, 1)).toMatchObject({ ok: true });
+      const used = await db.run("select media_id, field from entry_media where entry_id = ?", [
+        made.id,
+      ]);
+      expect(used.map((r) => [r["media_id"], r["field"]])).toEqual([[image, "field:photo"]]);
+      // The saved value is kept, and a later save that does not touch the fields keeps the file marked as in use.
+      const again = await loadForEdit(db.runner, anna, siteId, made.id);
+      expect(again.ok && again.entry.fieldValues).toEqual({ photo: image });
+      expect(
+        await saveContent(db.runner, anna, siteId, made.id, {
+          title: "Red shoe again",
+          slugPart: "red-shoe",
+          status: "draft",
+          blocks: [],
+          revision: 2,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(
+        (await db.run("select media_id from entry_media where entry_id = ?", [made.id])).length,
+      ).toBe(1);
     });
 
     test("the prefix cannot change once entries exist, and a type with entries cannot be deleted", async () => {

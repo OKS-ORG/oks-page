@@ -11,6 +11,7 @@ const TYPES: { value: FieldDef["type"]; label: string }[] = [
   { value: "number", label: "Number" },
   { value: "true / false", label: "Yes or no" },
   { value: "date", label: "Date" },
+  { value: "picture", label: "Picture" },
 ];
 
 const keyOf = (label: string): string =>
@@ -263,7 +264,7 @@ export function ContentTypesScreen({ initial }: { initial: ContentTypeInfo[] }) 
                   <input
                     type="checkbox"
                     checked={f.sortable}
-                    disabled={f.type === "long text"}
+                    disabled={f.type === "long text" || f.type === "picture"}
                     onChange={(event) => setField(index, { sortable: event.target.checked })}
                   />{" "}
                   Fast to sort by
@@ -272,7 +273,7 @@ export function ContentTypesScreen({ initial }: { initial: ContentTypeInfo[] }) 
                   <input
                     type="checkbox"
                     checked={f.filterable}
-                    disabled={f.type === "long text"}
+                    disabled={f.type === "long text" || f.type === "picture"}
                     onChange={(event) => setField(index, { filterable: event.target.checked })}
                   />{" "}
                   Fast to search by

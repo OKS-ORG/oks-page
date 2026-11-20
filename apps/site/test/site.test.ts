@@ -7351,6 +7351,75 @@ describe.skipIf(!findBrowser())(
       }
     });
 
+    test("CT-02: a picture field takes a file from the library, shows it on the entry and in the list, and keeps the file from being deleted", async () => {
+      const page = await signedIn(owner);
+      const api = page.context().request;
+      const saved = await call(page, "PUT", "/api/admin/content-types", {
+        key: "dish",
+        label: "Dish",
+        urlPrefix: "menu/",
+        fields: [{ key: "photo", label: "Photo", type: "picture" }],
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const upload = await api.post(site.base + "/api/admin/media", {
+        multipart: {
+          file: {
+            name: "dish.png",
+            mimeType: "image/png",
+            buffer: await sharp({
+              create: { width: 40, height: 30, channels: 3, background: "#c60" },
+            })
+              .png()
+              .toBuffer(),
+          },
+        },
+      });
+      const file = (await upload.json()) as { id: string; url: string };
+      for (let i = 0; i < 100; i++) {
+        const got = (await (await api.get(site.base + `/api/admin/media/${file.id}`)).json()) as {
+          item: { status: string };
+        };
+        if (got.item.status !== "processing") break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      const made = await call(page, "POST", "/api/admin/entries", { type: "dish", title: "Soup" });
+      const id = String(made.json!["id"]);
+      // A value that is not a file of the library is refused with the field named.
+      const refused = await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Soup",
+        slugPart: "soup",
+        status: "published",
+        blocks: [b("paragraph", {}, [], words("Hot soup."))],
+        revision: 1,
+        fields: { photo: "01HZZZZZZZZZZZZZZZZZZZZZZZ" },
+      });
+      expect(refused.status).toBe(400);
+      const ok = await call(page, "PUT", `/api/admin/entries/${id}`, {
+        title: "Soup",
+        slugPart: "soup",
+        status: "published",
+        blocks: [b("paragraph", {}, [], words("Hot soup."))],
+        revision: 1,
+        fields: { photo: file.id },
+      });
+      expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+      // The edit screen shows the chosen picture and the buttons.
+      await page.goto(site.base + `/admin/content/dish/${id}`);
+      await page.getByRole("heading", { level: 1 }).first().waitFor();
+      await page.getByRole("button", { name: "Change picture" }).waitFor();
+      await page.getByRole("button", { name: "Remove picture" }).waitFor();
+      // The entry and the list of the type show the picture.
+      const entryHtml = await (await fetch(site.base + "/menu/soup")).text();
+      expect(entryHtml).toContain(file.url);
+      const listHtml = await (await fetch(site.base + "/menu")).text();
+      expect(listHtml).toContain(file.url);
+      // The file is in use: it cannot be deleted.
+      const deleted = await api.delete(site.base + `/api/admin/media/${file.id}`);
+      expect(deleted.status()).toBe(409);
+      // Out of the way of the other tests.
+      await call(page, "DELETE", `/api/admin/entries/${id}`);
+    });
+
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

@@ -6,7 +6,14 @@ import { fields as dbFields, newId, type SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
 
 /** The field types the admin offers. Each one is a scalar the index code knows (`valueKind`). */
-export const FIELD_TYPES = ["text", "long text", "number", "true / false", "date"] as const;
+export const FIELD_TYPES = [
+  "text",
+  "long text",
+  "number",
+  "true / false",
+  "date",
+  "picture",
+] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 export const BUILT_IN_KEYS = ["page", "post"];
@@ -183,8 +190,8 @@ export async function saveContentType(
     if (!(FIELD_TYPES as readonly string[]).includes(f.type))
       return fail("invalid", `The field "${fkey}" has an unknown type.`, "fields");
     const type = f.type as FieldType;
-    // Only a single value can be sorted or searched by an index; a long text cannot.
-    const indexable = type !== "long text";
+    // Only a single value can be sorted or searched by an index; a long text and a picture cannot.
+    const indexable = type !== "long text" && type !== "picture";
     defs.push({
       key: fkey,
       label: flabel,
@@ -308,6 +315,16 @@ export function cleanFieldValues(
       if (!Number.isFinite(n))
         return { ok: false, message: `"${d.label}" must be a number.`, field: d.key };
       out[d.key] = n;
+    } else if (d.type === "picture") {
+      // The id of a file in the library (it is checked against the library when the entry is saved).
+      const s = String(raw);
+      if (!/^[0-9A-Za-z]{26}$/.test(s))
+        return {
+          ok: false,
+          message: `"${d.label}" must be a picture from the library.`,
+          field: d.key,
+        };
+      out[d.key] = s;
     } else if (d.type === "date") {
       const s = String(raw);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s)))
@@ -321,6 +338,43 @@ export function cleanFieldValues(
     }
   }
   return { ok: true, fields: out };
+}
+
+/**
+ * The library files the picture fields of an entry point to, as the rows that say which files a page uses (so a file in
+ * use is not deleted by mistake). With `strict` a value that is not an image in this site's library is refused with the
+ * field named; without it (values that were saved earlier and are not being changed) such a value is just left out.
+ */
+export async function pictureMedia(
+  runner: SqlRunner,
+  siteId: string,
+  defs: FieldDef[],
+  values: Record<string, unknown>,
+  strict: boolean,
+): Promise<
+  | { ok: true; media: { mediaId: string; field: string }[] }
+  | { ok: false; message: string; field: string }
+> {
+  const wanted = defs
+    .filter((d) => d.type === "picture" && typeof values[d.key] === "string")
+    .map((d) => ({ def: d, id: values[d.key] as string }));
+  if (wanted.length === 0) return { ok: true, media: [] };
+  const rows = await runner.all(
+    `select "id" from "media" where "site_id" = ? and "mime_type" like 'image/%' and "id" in (${wanted.map(() => "?").join(", ")})`,
+    [siteId, ...wanted.map((w) => w.id)],
+  );
+  const found = new Set(rows.map((r) => String(r["id"])));
+  const media: { mediaId: string; field: string }[] = [];
+  for (const w of wanted) {
+    if (found.has(w.id)) media.push({ mediaId: w.id, field: `field:${w.def.key}` });
+    else if (strict)
+      return {
+        ok: false,
+        message: `"${w.def.label}" must be a picture from the library.`,
+        field: w.def.key,
+      };
+  }
+  return { ok: true, media };
 }
 
 /** The field definitions of one type, for the edit screen. */
