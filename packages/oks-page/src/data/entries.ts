@@ -30,7 +30,7 @@ import { getRunner, getSiteId } from "../db";
 import { mediaContext } from "../uploads";
 import { pageCount } from "../paging";
 import { styleFileUrl } from "../site-style";
-import type { EntryView, Look, PostsPage, SiteInfo, TermArchive } from "./types";
+import type { EntryView, Look, PostsPage, SiteInfo, TermArchive, TypeList } from "./types";
 
 /**
  * The look: the CSS file of the theme in use, the owner's CSS for the colors and fonts (it comes after the theme's, so
@@ -105,14 +105,14 @@ export async function loadReading(): Promise<ReadingRoutes> {
 }
 
 /** The ids of published posts that ask to stay out of lists (a small set: the SEO box's "do not list this page"). */
-async function unlistedPostIds(siteId: string): Promise<string[]> {
+async function unlistedPostIds(siteId: string, typeKey = "post"): Promise<string[]> {
   // The value is JSON in both databases; casting it to text lets one query read it in either (PostgreSQL's jsonb writes
   // `"noindex": true`, SQLite keeps what was saved).
   const rows = await getRunner().all(
     `select "id", "seo" from "entries"
-      where "site_id" = ? and "type_key" = 'post' and "status" = 'published' and "locale" = ''
+      where "site_id" = ? and "type_key" = ? and "status" = 'published' and "locale" = ''
         and cast("seo" as text) like '%"noindex"%'`,
-    [siteId],
+    [siteId, typeKey],
   );
   return rows.filter((r) => readEntrySeo(r["seo"]).noindex).map((r) => String(r["id"]));
 }
@@ -246,6 +246,8 @@ export async function findAddress(
 ): Promise<{
   entry: { id: string; type: string } | null;
   redirect: { id: string; to: string; status: number } | null;
+  /** The custom type whose list is at this address ("shop" for the prefix "shop/"). */
+  typeList: { key: string } | null;
 }> {
   const siteId = await getSiteId();
   const rows = await getRunner().all(
@@ -253,12 +255,17 @@ export async function findAddress(
         where "site_id" = ? and "slug" = ? and "status" = 'published' and "locale" = '' limit 1) as e
      union all
      select * from (select 'redirect' as "kind", "id", "to_path" as "detail", "status_code" as "code" from "redirects"
-        where "site_id" = ? and "from_path" = ? limit 1) as r`,
-    [siteId, slug, siteId, path],
+        where "site_id" = ? and "from_path" = ? limit 1) as r
+     union all
+     select * from (select 'list' as "kind", "id", "key" as "detail", 0 as "code" from "content_types"
+        where "site_id" = ? and "url_rule" = ? and "key" not in ('page', 'post') limit 1) as l`,
+    [siteId, slug, siteId, path, siteId, `/${slug}/{slug}`],
   );
+  const list = rows.find((r) => r["kind"] === "list");
   const entry = rows.find((r) => r["kind"] === "entry");
   const redirect = rows.find((r) => r["kind"] === "redirect");
   return {
+    typeList: list ? { key: String(list["detail"]) } : null,
     entry: entry ? { id: String(entry["id"]), type: String(entry["detail"]) } : null,
     redirect: redirect
       ? {
@@ -374,7 +381,7 @@ export async function listPages(
   base: string,
   perPage: number,
   reading: ReadingRoutes,
-): Promise<{ pages: number; archiveId: string | null } | null> {
+): Promise<{ pages: number; archiveId: string | null; typeKey?: string } | null> {
   const siteId = await getSiteId();
   if (
     (base === "home" && reading.homeShows === "posts") ||
@@ -393,9 +400,82 @@ export async function listPages(
   }
   const parts = archiveParts(base);
   const term = parts ? await findTermArchive(base) : null;
-  if (!parts || !term) return null;
-  const total = await countTermPosts(siteId, await termWithChildren(parts.kind, term.id));
-  return { pages: pageCount(total, perPage), archiveId: term.id };
+  if (parts && term) {
+    const total = await countTermPosts(siteId, await termWithChildren(parts.kind, term.id));
+    return { pages: pageCount(total, perPage), archiveId: term.id };
+  }
+  const type = await findTypeList(base);
+  if (!type) return null;
+  const { total } = await typeListWhere(siteId, type.key);
+  return { pages: pageCount(total, perPage), archiveId: null, typeKey: type.key };
+}
+
+/**
+ * The custom type whose list is at this address: a type with the address prefix "shop/" lists its entries at "shop".
+ * Page and Post are built in and have no list of their own here; a type with no prefix has no list address.
+ */
+export async function findTypeList(base: string): Promise<{ key: string; label: string } | null> {
+  if (!base || base === "home") return null;
+  const rows = await getRunner().all(
+    `select "key", "label" from "content_types"
+      where "site_id" = ? and "url_rule" = ? and "key" not in ('page', 'post') limit 1`,
+    [await getSiteId(), `/${base}/{slug}`],
+  );
+  return rows[0] ? { key: String(rows[0]["key"]), label: String(rows[0]["label"]) } : null;
+}
+
+/** The test for the entries a type's list shows (published, not set to stay out of lists) and how many there are. */
+async function typeListWhere(siteId: string, typeKey: string) {
+  const hidden = await unlistedPostIds(siteId, typeKey);
+  const where = `"site_id" = ? and "type_key" = ? and "status" = 'published' and "locale" = ''${
+    hidden.length > 0 ? ` and "id" not in (${hidden.map(() => "?").join(", ")})` : ""
+  }`;
+  const args = [siteId, typeKey, ...hidden];
+  const rows = await getRunner().all(`select count(*) as "n" from "entries" where ${where}`, args);
+  return { where, args, total: Number(rows[0]?.["n"] ?? 0) };
+}
+
+/** One page of the list of a custom type (newest first), or null when no type has this address. */
+export async function loadTypeList(base: string, perPage = 10, page = 1): Promise<TypeList | null> {
+  const type = await findTypeList(base);
+  if (!type) return null;
+  const siteId = await getSiteId();
+  const { where, args, total } = await typeListWhere(siteId, type.key);
+  const rows = await getRunner().all(
+    `select "title", "slug", "plain_text", "seo", "published_at" from "entries"
+      where ${where} order by "published_at" desc, "id" desc limit ? offset ?`,
+    [...args, perPage, (Math.max(1, page) - 1) * perPage],
+  );
+  const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Number(v));
+  return {
+    key: type.key,
+    label: type.label,
+    base,
+    page,
+    pages: pageCount(total, perPage),
+    total,
+    posts: rows.map((r) => ({
+      title: String(r["title"]),
+      slug: String(r["slug"]),
+      publishedAt: ms(r["published_at"]),
+      excerpt: readEntrySeo(r["seo"]).description || excerptOf(String(r["plain_text"])),
+    })),
+  };
+}
+
+/** The address of every custom type's list (the types that have an address prefix), for the export build. */
+export async function listTypeListSlugs(): Promise<string[]> {
+  const rows = await getRunner().all(
+    `select "url_rule" from "content_types"
+      where "site_id" = ? and "key" not in ('page', 'post') order by "url_rule"`,
+    [await getSiteId()],
+  );
+  const out: string[] = [];
+  for (const r of rows) {
+    const m = /^\/((?:[a-z0-9-]+\/)+)\{slug\}$/.exec(String(r["url_rule"]));
+    if (m) out.push(m[1]!.slice(0, -1));
+  }
+  return out;
 }
 
 /** The header ("primary") or footer ("footer") menu as visitors see it. */

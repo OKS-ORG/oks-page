@@ -103,7 +103,19 @@ export async function listContentTypes(
 const KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const URL_PREFIX = /^(?:[a-z0-9-]+\/)*$/;
 /** Addresses the site keeps for itself cannot start a type's address prefix. */
-const RESERVED_PREFIX = new Set(["admin", "api", "_next", "preview", "search", "feed", "fonts"]);
+const RESERVED_PREFIX = new Set([
+  "admin",
+  "api",
+  "_next",
+  "preview",
+  "search",
+  "feed",
+  "fonts",
+  "category",
+  "tag",
+  "page",
+  "home",
+]);
 
 export interface ContentTypeInput {
   key: string;

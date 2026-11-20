@@ -6,6 +6,7 @@ import {
   getSiteMenu,
   getTermArchive,
   getThemeLayouts,
+  getTypeList,
   slugOf,
 } from "@data";
 import { layoutCandidates, pickLayout, type PageKind } from "@oks-page/core";
@@ -14,8 +15,14 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { Card, CardBody } from "oks-ui/card";
 import { ArchiveContent, ArchiveView, archiveTitle } from "./archive-view";
-import type { TermArchive } from "./data/types";
-import { EntryJsonLd, archiveMetadata, entryMetadata, postsMetadata } from "./page-meta";
+import type { TermArchive, TypeList } from "./data/types";
+import {
+  EntryJsonLd,
+  archiveMetadata,
+  entryMetadata,
+  postsMetadata,
+  typeListMetadata,
+} from "./page-meta";
 import { Pager } from "./pager";
 import { pagePath, pagingOf } from "./paging";
 import { PostsList } from "./posts-list";
@@ -43,8 +50,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const entry = await getPublishedEntry(slug);
   if (entry)
     return entryMetadata(entry, await getSiteInfo(), { feeds: true, front: asked === "home" });
-  const archive = await getTermArchive(slug, (await getReading()).perPage, 1);
-  return archive ? archiveMetadata(archive, slug, await getSiteInfo(), { feeds: true }) : {};
+  const perPage = (await getReading()).perPage;
+  const archive = await getTermArchive(slug, perPage, 1);
+  if (archive) return archiveMetadata(archive, slug, await getSiteInfo(), { feeds: true });
+  const list = await getTypeList(slug, perPage, 1);
+  return list ? typeListMetadata(list, await getSiteInfo()) : {};
 }
 
 export default async function Page({ params }: Props) {
@@ -58,9 +68,13 @@ export default async function Page({ params }: Props) {
   const entry = await getPublishedEntry(slug);
   if (!entry) {
     // An address that is not an entry may be a category or tag archive ("category/travel").
-    const archive = await getTermArchive(slug, (await getReading()).perPage, 1);
-    if (!archive) notFound();
-    return archiveNode(archive);
+    const perPage = (await getReading()).perPage;
+    const archive = await getTermArchive(slug, perPage, 1);
+    if (archive) return archiveNode(archive);
+    // Or the list of a custom type ("shop" for the address prefix "shop/").
+    const list = await getTypeList(slug, perPage, 1);
+    if (!list) notFound();
+    return typeListNode(list);
   }
   const drawn = await themed(
     { kind: "entry", type: entry.type, slug, chosen: entry.layout },
@@ -209,6 +223,30 @@ async function archiveNode(archive: TermArchive): Promise<ReactNode> {
   );
 }
 
+/** The list of a custom type, drawn with the theme's "list-<type>" or archive layout when there is one. */
+async function typeListNode(list: TypeList): Promise<ReactNode> {
+  const content = (
+    <>
+      <PostsList posts={list.posts} empty="There is nothing here yet." />
+      <Pager base={list.base} page={list.page} pages={list.pages} />
+    </>
+  );
+  const drawn = await themed(
+    { kind: "type-list", type: list.key },
+    { title: list.label, content, meta: null, isFront: false },
+  );
+  if (drawn) return drawn;
+  const [header, footer] = await Promise.all([getSiteMenu("primary"), getSiteMenu("footer")]);
+  return (
+    <PublicFrame header={header} footer={footer}>
+      <main>
+        <h1>{list.label}</h1>
+        {content}
+      </main>
+    </PublicFrame>
+  );
+}
+
 /**
  * A later page of a list: "page/2" (the newest posts), "<posts page>/page/2" or "category/news/page/2". Page 1 is the
  * list's own address (a permanent redirect there); a page past the last one is a 404 (the proxy already says so).
@@ -222,8 +260,13 @@ async function pagedPage(base: string, page: number): Promise<ReactNode> {
     return postsPage(reading.perPage, title, base === "home", base, page);
   }
   const archive = await getTermArchive(base, reading.perPage, page);
-  if (!archive || page > archive.pages) notFound();
-  return archiveNode(archive);
+  if (archive) {
+    if (page > archive.pages) notFound();
+    return archiveNode(archive);
+  }
+  const list = await getTypeList(base, reading.perPage, page);
+  if (!list || page > list.pages) notFound();
+  return typeListNode(list);
 }
 
 async function pagedMetadata(base: string, page: number): Promise<Metadata> {
@@ -239,5 +282,7 @@ async function pagedMetadata(base: string, page: number): Promise<Metadata> {
       page,
     );
   const archive = await getTermArchive(base, reading.perPage, page);
-  return archive ? archiveMetadata(archive, base, site, { feeds: true }, page) : {};
+  if (archive) return archiveMetadata(archive, base, site, { feeds: true }, page);
+  const list = await getTypeList(base, reading.perPage, page);
+  return list ? typeListMetadata(list, site, page) : {};
 }

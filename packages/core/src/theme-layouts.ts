@@ -53,6 +53,8 @@ export type PageKind =
       chosen?: string;
     }
   | { kind: "archive"; termKind: string }
+  /** The public list of a custom type ("shop" for the prefix "shop/"). */
+  | { kind: "type-list"; type: string }
   | { kind: "search" }
   /** The list of the newest posts (the home page or the posts page, Settings > Reading). */
   | { kind: "posts" };
@@ -81,6 +83,9 @@ export function layoutCandidates(page: PageKind): string[] {
     }
   } else if (page.kind === "archive") {
     add(page.termKind);
+    add("archive");
+  } else if (page.kind === "type-list") {
+    add(`list-${page.type}`);
     add("archive");
   } else if (page.kind === "posts") add("home");
   else add("search");

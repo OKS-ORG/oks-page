@@ -168,6 +168,27 @@ for (const { kind, open, skip } of openers) {
       expect(urls[0]!.lastModified).toBe(9_000);
     });
 
+    test("the list of a custom type is listed once it has an entry in the sitemap, at its prefix without the last slash", async () => {
+      const type = (key: string, rule: string) =>
+        db.run(
+          `insert into content_types (id, site_id, key, label, url_rule, has_body, hierarchical, options, created_at, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [newId(), siteId, key, key, rule, true, false, "{}", T, T],
+        );
+      await type("gadget", "/shop/{slug}");
+      await type("empty", "/empty/{slug}");
+      await type("hidden", "/hidden/{slug}");
+      await type("loose", "/{slug}");
+      await add("shop/red", { type: "gadget", at: 7_000 });
+      await add("shop/blue", { type: "gadget", at: 8_000 });
+      await add("hidden/one", { type: "hidden", seo: { noindex: true } });
+      await add("loose-one", { type: "loose" });
+      const paths = (await loadSitemapUrls(db.runner, siteId)).map((u) => u.path);
+      expect(paths).toEqual(["/loose-one", "/shop", "/shop/blue", "/shop/red"]);
+      const list = (await loadSitemapUrls(db.runner, siteId)).find((u) => u.path === "/shop")!;
+      expect(list.lastModified).toBe(8_000);
+    });
+
     test("category and tag pages are listed when they hold a published post, and the categories above them too", async () => {
       const news = await term("category", "news");
       const sport = await term("category", "sport", news);

@@ -7325,11 +7325,29 @@ describe.skipIf(!findBrowser())(
         const publicPage = await fetch(site.base + "/shop/red-gadget");
         expect(publicPage.status).toBe(200);
 
+        // The type has a public list at its prefix without the last slash: the entry is in it, and so is the sitemap.
+        const list = await fetch(site.base + "/shop");
+        expect(list.status).toBe(200);
+        const listHtml = await list.text();
+        expect(listHtml).toContain('href="/shop/red-gadget"');
+        expect(listHtml).toContain("<h1>Gadget</h1>");
+        expect(await (await fetch(site.base + "/sitemap.xml")).text()).toContain("/shop</loc>");
+        // There is no second page, page 1 is the list itself, and a prefix that is no type's is a plain 404.
+        expect((await fetch(site.base + "/shop/page/2")).status).toBe(404);
+        const first = await fetch(site.base + "/shop/page/1", { redirect: "manual" });
+        expect(first.status).toBe(308);
+        expect(first.headers.get("location")).toMatch(/\/shop$/);
+        expect((await fetch(site.base + "/nothing-here")).status).toBe(404);
+
         // A type with an entry cannot be deleted.
         const refused = await call(page, "DELETE", "/api/admin/content-types?key=gadget");
         expect(refused.status).toBe(400);
         // Out of the way of the other tests: the entry goes to the trash.
         await call(page, "DELETE", `/api/admin/entries/${id}`);
+        // The list is made fresh at once: the entry is gone from it, and the list says so.
+        const after = await (await fetch(site.base + "/shop")).text();
+        expect(after).not.toContain("red-gadget");
+        expect(after).toContain("There is nothing here yet.");
       }
     });
 

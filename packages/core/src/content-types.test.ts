@@ -137,6 +137,9 @@ for (const { kind, open, skip } of openers) {
       expect(await bad({ label: " " })).toMatchObject({ ok: false, field: "label" });
       expect(await bad({ urlPrefix: "Shop" })).toMatchObject({ ok: false, field: "urlPrefix" });
       expect(await bad({ urlPrefix: "admin/" })).toMatchObject({ ok: false, field: "urlPrefix" });
+      // The addresses of the archives, the later pages and the home page are kept too (a list would clash with them).
+      for (const kept of ["category/", "tag/", "page/", "home/"])
+        expect(await bad({ urlPrefix: kept })).toMatchObject({ ok: false, field: "urlPrefix" });
       expect(
         await bad({
           fields: [

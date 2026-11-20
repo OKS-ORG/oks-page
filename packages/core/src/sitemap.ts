@@ -40,11 +40,26 @@ export async function loadSitemapUrls(runner: SqlRunner, siteId: string): Promis
   );
   const urls: SitemapUrl[] = [];
   const ok = new Map<string, number>();
+  const typeNewest = new Map<string, number>();
   for (const e of entries) {
     if (asObject(e["seo"])["noindex"] === true) continue;
     const updated = toNumber(e["updated_at"]);
     ok.set(String(e["id"]), updated);
     urls.push({ path: pathOfSlug(String(e["slug"])), lastModified: updated });
+    const type = String(e["type_key"]);
+    typeNewest.set(type, Math.max(typeNewest.get(type) ?? 0, updated));
+  }
+  // The list of a custom type (the address prefix "shop/" lists at "/shop") when it has an entry in the sitemap.
+  const types = await runner.all(
+    `select "key", "url_rule" from "content_types" where "site_id" = ? and "key" not in ('page', 'post')`,
+    [siteId],
+  );
+  for (const t of types) {
+    const m = /^\/((?:[a-z0-9-]+\/)+)\{slug\}$/.exec(String(t["url_rule"]));
+    const newest = typeNewest.get(String(t["key"]));
+    const path = m ? `/${m[1]!.slice(0, -1)}` : null;
+    if (path && newest !== undefined && !urls.some((u) => u.path === path))
+      urls.push({ path, lastModified: newest });
   }
   // Category and tag pages: the newest change among their posts.
   const links = await runner.all(

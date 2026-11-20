@@ -48,6 +48,21 @@ export function postsMetadata(
   };
 }
 
+/** The list of a custom type at its own address ("shop"). */
+export function typeListMetadata(
+  list: { label: string; base: string },
+  site: SiteInfo,
+  page = 1,
+): Metadata {
+  return {
+    title: titleOf(page > 1 ? `${list.label} – Page ${page}` : list.label, site, false),
+    alternates: {
+      canonical: canonicalFor(page > 1 ? pagePath(list.base, page).slice(1) : list.base),
+    },
+    ...iconsOf(site),
+  };
+}
+
 export function entryMetadata(
   entry: EntryView,
   site: SiteInfo,

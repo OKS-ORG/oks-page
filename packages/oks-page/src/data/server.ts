@@ -14,13 +14,31 @@ import {
   loadSiteMenu,
   loadTermArchive,
   loadThemeLayouts,
+  loadTypeList,
   slugOf,
 } from "./entries";
 import type { ReadingRoutes } from "@oks-page/core";
-import type { EntryView, Look, PostsPage, PostSummary, SiteInfo, TermArchive } from "./types";
+import type {
+  EntryView,
+  Look,
+  PostsPage,
+  PostSummary,
+  SiteInfo,
+  TermArchive,
+  TypeList,
+} from "./types";
 
 export { slugOf };
-export type { EntryView, Look, PostsPage, PostSummary, ReadingRoutes, SiteInfo, TermArchive };
+export type {
+  EntryView,
+  Look,
+  PostsPage,
+  PostSummary,
+  ReadingRoutes,
+  SiteInfo,
+  TermArchive,
+  TypeList,
+};
 
 /** Where the home page and the posts page are. Tagged `settings` and `menus` (a page's address or status changes it). */
 export async function getReading(): Promise<ReadingRoutes> {
@@ -110,4 +128,12 @@ export async function getTermArchive(
   const archive = await loadTermArchive(slug, perPage, page);
   if (archive) cacheTag(`term:${archive.id}`);
   return archive;
+}
+
+/** One page of the list of a custom type ("shop"). Refreshed whenever an entry changes (tag "archive:posts"). */
+export async function getTypeList(base: string, perPage = 10, page = 1): Promise<TypeList | null> {
+  "use cache";
+  cacheTag("site", "archive:posts");
+  count(`type-list:${base}`);
+  return loadTypeList(base, perPage, page);
 }

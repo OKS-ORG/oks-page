@@ -45,6 +45,7 @@ export async function proxy(request: NextRequest) {
   let archive: Awaited<ReturnType<typeof findTermArchive>> = null;
   let moved: Awaited<ReturnType<typeof findAddress>>["redirect"] = null;
   let paged: Awaited<ReturnType<typeof listPages>> = null;
+  let typeList: Awaited<ReturnType<typeof findAddress>>["typeList"] = null;
   let address: Awaited<ReturnType<typeof findAddress>>;
   let cdn: boolean;
   let maintenance: Awaited<ReturnType<typeof maintenanceSettings>>;
@@ -68,7 +69,9 @@ export async function proxy(request: NextRequest) {
     if (!found && !archive && path !== "") moved = address.redirect;
     // Still nothing: it may be a later page of a list ("page/2", "category/news/page/2"). Only addresses ending in
     // "page/<number>" cost a read, and a page past the last one is a 404 like any made-up address.
-    const paging = !found && !archive && !moved ? pagingOf(slug) : null;
+    // It may also be the list of a custom type ("shop" for the address prefix "shop/").
+    if (!found && !archive && !moved && path !== "") typeList = address.typeList;
+    const paging = !found && !archive && !moved && !typeList ? pagingOf(slug) : null;
     if (paging) paged = await listPages(paging.base, reading.perPage, reading);
   } catch (error) {
     // A new install has no site yet: the first visit goes to the setup wizard (installation guide, "First run").
@@ -143,6 +146,15 @@ export async function proxy(request: NextRequest) {
     const tags = [`site:${await getSiteId()}`, `term:${archive.id}`, ...MENU_TAGS];
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
+  if (typeList) {
+    const tags = [
+      `site:${await getSiteId()}`,
+      `type:${typeList.key}`,
+      "archive:posts",
+      ...MENU_TAGS,
+    ];
+    return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
+  }
   const paging = pagingOf(slug);
   if (paging && paged) {
     // Page 1 is the list's own address: one address per page.
@@ -151,7 +163,11 @@ export async function proxy(request: NextRequest) {
     if (paging.page <= paged.pages) {
       const tags = [
         `site:${await getSiteId()}`,
-        ...(paged.archiveId ? [`term:${paged.archiveId}`, "archive:posts"] : ["feed"]),
+        ...(paged.archiveId
+          ? [`term:${paged.archiveId}`, "archive:posts"]
+          : paged.typeKey
+            ? [`type:${paged.typeKey}`, "archive:posts"]
+            : ["feed"]),
         ...MENU_TAGS,
       ];
       return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));

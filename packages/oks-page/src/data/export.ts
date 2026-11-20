@@ -10,6 +10,7 @@ import {
   loadLook,
   loadSiteMenu,
   loadTermArchive,
+  loadTypeList,
   loadThemeLayouts,
   slugOf,
 } from "./entries";
@@ -53,7 +54,7 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
   return { ...entry, html: `<style>${css}</style>${entry.html.slice(link.length)}` };
 }
 
-import { listArchiveSlugs, listPublishedSlugs } from "./entries";
+import { listArchiveSlugs, listPublishedSlugs, listTypeListSlugs } from "./entries";
 
 /** A static site has nothing to receive comments, so it shows none. */
 export async function getComments(entryId: string) {
@@ -76,11 +77,18 @@ export async function getTermArchive(
   return loadTermArchive(slug, perPage, page);
 }
 
+export async function getTypeList(base: string, perPage = 10, page = 1) {
+  return loadTypeList(base, perPage, page);
+}
+
 /** The pages to write, as the route parameters of `[[...slug]]`: "home" is the empty list (the front page). */
 export async function allSlugParams(): Promise<{ slug: string[] }[]> {
   const slugs = [...(await listPublishedSlugs())];
   // A term whose address is also an entry's address shows the entry, so it is not written twice.
   for (const archive of await listArchiveSlugs()) if (!slugs.includes(archive)) slugs.push(archive);
+  // The list of each custom type ("shop" for the prefix "shop/").
+  const typeLists = await listTypeListSlugs();
+  for (const list of typeLists) if (!slugs.includes(list)) slugs.push(list);
   // The home page shows the newest posts, or a chosen page: "/" is written either way.
   if (!slugs.includes("home")) slugs.push("home");
   // The later pages of every list: the newest posts, the posts page and each archive.
@@ -89,6 +97,7 @@ export async function allSlugParams(): Promise<{ slug: string[] }[]> {
     "home",
     ...(reading.postsSlug ? [reading.postsSlug] : []),
     ...(await listArchiveSlugs()),
+    ...typeLists,
   ]) {
     const info = await listPages(list, reading.perPage, reading);
     for (let page = 2; page <= (info?.pages ?? 1); page++) {

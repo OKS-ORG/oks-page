@@ -4,8 +4,14 @@ import type { PostSummary } from "./data/types";
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-export function PostsList({ posts }: { posts: PostSummary[] }) {
-  if (posts.length === 0) return <p>There are no posts yet.</p>;
+export function PostsList({
+  posts,
+  empty = "There are no posts yet.",
+}: {
+  posts: PostSummary[];
+  empty?: string;
+}) {
+  if (posts.length === 0) return <p>{empty}</p>;
   return (
     <ul className="oks-posts-list">
       {posts.map((post) => (

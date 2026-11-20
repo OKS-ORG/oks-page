@@ -52,6 +52,15 @@ export interface PostsPage {
   total: number;
 }
 
+/** One page of the public list of a custom type (its address prefix without the last slash, "shop" for "shop/"). */
+export interface TypeList extends PostsPage {
+  /** The key of the type and the name the owner gave it. */
+  key: string;
+  label: string;
+  /** The address of the list. */
+  base: string;
+}
+
 /** The look as the public pages use it: the theme's CSS file, the owner's CSS, and the logo if there is one. */
 export interface Look {
   /** The address of the CSS file of the theme in use (fonts, design values, the theme's CSS), or null. */

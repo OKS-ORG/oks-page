@@ -31,6 +31,12 @@ describe("which layout a page uses", () => {
       "page",
       "index",
     ]);
+    // The list of a custom type: its own layout, then the archive layout.
+    expect(layoutCandidates({ kind: "type-list", type: "gadget" })).toEqual([
+      "list-gadget",
+      "archive",
+      "index",
+    ]);
     expect(layoutCandidates({ kind: "entry", type: "post", slug: "hello" })).toEqual([
       "single-post-hello",
       "single-post",
