@@ -20,3 +20,21 @@ export function EntryPictures({ pictures }: { pictures: PictureView[] }) {
     </>
   );
 }
+
+/** The entries a custom type's entry links to, as a line of links above the text. */
+export function EntryLinks({
+  links,
+}: {
+  links: { id: string; label: string; title: string; slug: string }[];
+}) {
+  if (links.length === 0) return null;
+  return (
+    <ul style={{ listStyle: "none", padding: 0 }}>
+      {links.map((l) => (
+        <li key={`${l.label}:${l.slug}`}>
+          {l.label}: <a href={`/${l.slug}`}>{l.title}</a>
+        </li>
+      ))}
+    </ul>
+  );
+}

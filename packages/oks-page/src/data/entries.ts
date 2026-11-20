@@ -230,7 +230,43 @@ export async function loadPublishedEntry(slug: string): Promise<EntryView | null
     image: firstImageOf(written),
     layout: chosenLayout(r["meta"]),
     pictures: await picturesOf(String(r["type_key"]), r["fields"], false),
+    links: await linksOf(String(r["type_key"]), r["fields"]),
   };
+}
+
+/** The published entries that the link fields of an entry point to (one that is gone or not published is left out). */
+async function linksOf(
+  typeKey: string,
+  raw: unknown,
+): Promise<{ id: string; label: string; title: string; slug: string }[]> {
+  if (typeKey === "page" || typeKey === "post") return [];
+  const values = readBody(raw) as Record<string, unknown> | null;
+  if (!values || typeof values !== "object") return [];
+  const siteId = await getSiteId();
+  const runner = getRunner();
+  const defs = await runner.all(
+    `select fd."key", fd."label", fd."options" from "field_definitions" fd join "content_types" ct on ct."id" = fd."content_type_id"
+      where ct."site_id" = ? and ct."key" = ? and fd."field_type" = 'relation' order by fd."position", fd."key"`,
+    [siteId, typeKey],
+  );
+  const out: { id: string; label: string; title: string; slug: string }[] = [];
+  for (const d of defs) {
+    const id = values[String(d["key"])];
+    if (typeof id !== "string") continue;
+    const options = readBody(d["options"]) as { target?: string } | null;
+    const found = await runner.all(
+      `select "title", "slug" from "entries" where "site_id" = ? and "id" = ? and "type_key" = ? and "status" = 'published' and "locale" = ''`,
+      [siteId, id, options?.target ?? ""],
+    );
+    if (found[0])
+      out.push({
+        id,
+        label: String(d["label"]),
+        title: String(found[0]["title"]),
+        slug: String(found[0]["slug"]),
+      });
+  }
+  return out;
 }
 
 /**

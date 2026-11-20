@@ -22,6 +22,8 @@ export interface EntryView {
   layout: string;
   /** The pictures in the picture fields of a custom type's entry, with the field's name. */
   pictures: PictureView[];
+  /** The entries a custom type's entry links to (only those that are published). */
+  links: { id: string; label: string; title: string; slug: string }[];
 }
 
 /** A picture from the library, as a public page draws it. */

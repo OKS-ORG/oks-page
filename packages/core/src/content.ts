@@ -17,7 +17,13 @@ import { loadScreenSizes } from "./screen-sizes.js";
 import { addCovers } from "./video-covers.js";
 
 /** Who is acting, and what they may do (their role's capabilities; spec 02, section 6). */
-import { cleanFieldValues, fieldsOfType, pictureMedia, type FieldDef } from "./content-types.js";
+import {
+  checkRelations,
+  cleanFieldValues,
+  fieldsOfType,
+  pictureMedia,
+  type FieldDef,
+} from "./content-types.js";
 
 export interface Actor {
   userId: string;
@@ -452,6 +458,8 @@ export async function saveContent(
     const cleaned = cleanFieldValues(defs, input.fields);
     if (!cleaned.ok) return fail("invalid", cleaned.message, { field: cleaned.field });
     fieldChange = { fields: cleaned.fields };
+    const linked = await checkRelations(runner, siteId, defs, cleaned.fields);
+    if (!linked.ok) return fail("invalid", linked.message, { field: linked.field });
   }
   // The files the picture fields use: a value being saved must be an image of this library; an older one that has
   // since gone is just left out.

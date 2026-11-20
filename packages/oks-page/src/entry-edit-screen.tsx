@@ -24,6 +24,7 @@ import { EntryTermsPanel } from "./entry-terms-panel";
 import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
 import { PictureField } from "./picture-field";
+import { RelationField } from "./relation-field";
 
 export interface EntryEditScreenProps {
   id: string;
@@ -552,6 +553,18 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
                   />{" "}
                   {d.label}
                 </label>
+              ) : d.type === "relation" ? (
+                <span role="group" aria-label={d.label}>
+                  {d.label}
+                  {d.required ? " (required)" : ""}
+                  <br />
+                  <RelationField
+                    label={d.label}
+                    target={d.target ?? ""}
+                    value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
+                    onChange={(id) => setValues({ ...values, [d.key]: id })}
+                  />
+                </span>
               ) : d.type === "picture" ? (
                 <span role="group" aria-label={d.label}>
                   {d.label}

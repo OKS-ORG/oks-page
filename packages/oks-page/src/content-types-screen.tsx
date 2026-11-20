@@ -12,6 +12,7 @@ const TYPES: { value: FieldDef["type"]; label: string }[] = [
   { value: "true / false", label: "Yes or no" },
   { value: "date", label: "Date" },
   { value: "picture", label: "Picture" },
+  { value: "relation", label: "Link to another type" },
 ];
 
 const keyOf = (label: string): string =>
@@ -252,6 +253,29 @@ export function ContentTypesScreen({ initial }: { initial: ContentTypeInfo[] }) 
                     ))}
                   </select>
                 </label>{" "}
+                {f.type === "relation" ? (
+                  <>
+                    <label>
+                      Links to
+                      <select
+                        value={f.target ?? ""}
+                        onChange={(event) => setField(index, { target: event.target.value })}
+                      >
+                        <option value="">Choose a type…</option>
+                        {[
+                          ...types.map((t) => ({ key: t.key, label: t.label })),
+                          ...(draft.isNew && draft.key && draft.label
+                            ? [{ key: draft.key, label: `${draft.label} (this type)` }]
+                            : []),
+                        ].map((t) => (
+                          <option key={t.key} value={t.key}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>{" "}
+                  </>
+                ) : null}
                 <label>
                   <input
                     type="checkbox"
@@ -264,7 +288,9 @@ export function ContentTypesScreen({ initial }: { initial: ContentTypeInfo[] }) 
                   <input
                     type="checkbox"
                     checked={f.sortable}
-                    disabled={f.type === "long text" || f.type === "picture"}
+                    disabled={
+                      f.type === "long text" || f.type === "picture" || f.type === "relation"
+                    }
                     onChange={(event) => setField(index, { sortable: event.target.checked })}
                   />{" "}
                   Fast to sort by

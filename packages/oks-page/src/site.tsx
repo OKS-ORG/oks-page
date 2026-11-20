@@ -23,7 +23,7 @@ import {
   postsMetadata,
   typeListMetadata,
 } from "./page-meta";
-import { EntryPictures } from "./entry-pictures";
+import { EntryLinks, EntryPictures } from "./entry-pictures";
 import { Pager } from "./pager";
 import { pagePath, pagingOf } from "./paging";
 import { PostsList } from "./posts-list";
@@ -84,6 +84,7 @@ export default async function Page({ params }: Props) {
       content: (
         <>
           <EntryPictures pictures={entry.pictures} />
+          <EntryLinks links={entry.links} />
           <article dangerouslySetInnerHTML={{ __html: entry.html }} />
           {entry.type === "post" ? <CommentsSection entryId={entry.id} slug={slug} /> : null}
         </>
@@ -114,6 +115,7 @@ export default async function Page({ params }: Props) {
         <Card>
           <CardBody>
             <EntryPictures pictures={entry.pictures} />
+            <EntryLinks links={entry.links} />
             <article dangerouslySetInnerHTML={{ __html: entry.html }} />
           </CardBody>
         </Card>

@@ -94,7 +94,11 @@ export async function getPublishedEntry(slug: string): Promise<EntryView | null>
   cacheTag("site", slugTag(slug));
   count(`entry:${slug}`);
   const entry = await loadPublishedEntry(slug);
-  if (entry) cacheTag(`entry:${entry.id}`);
+  if (entry) {
+    cacheTag(`entry:${entry.id}`);
+    // A page that links to other entries is made fresh when one of them changes (one that is trashed, say).
+    for (const link of entry.links) cacheTag(`entry:${link.id}`);
+  }
   return entry;
 }
 

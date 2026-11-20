@@ -13,6 +13,7 @@ export const FIELD_TYPES = [
   "true / false",
   "date",
   "picture",
+  "relation",
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -25,6 +26,8 @@ export interface FieldDef {
   required: boolean;
   sortable: boolean;
   filterable: boolean;
+  /** For a "relation" field: the key of the type whose entries it links to. */
+  target?: string;
 }
 
 export interface ContentTypeInfo {
@@ -81,7 +84,7 @@ export async function listContentTypes(
   const result: ContentTypeInfo[] = [];
   for (const t of types) {
     const defs = await runner.all(
-      `select "key", "label", "field_type", "validation", "is_sortable", "is_filterable" from "field_definitions"
+      `select "key", "label", "field_type", "validation", "options", "is_sortable", "is_filterable" from "field_definitions"
         where "content_type_id" = ? order by "position", "key"`,
       [String(t["id"])],
     );
@@ -98,6 +101,9 @@ export async function listContentTypes(
         label: String(d["label"]),
         type: String(d["field_type"]) as FieldType,
         required: parse(d["validation"])["required"] === true,
+        ...(String(d["field_type"]) === "relation"
+          ? { target: String(parse(d["options"])["target"] ?? "") }
+          : {}),
         sortable: d["is_sortable"] === true || d["is_sortable"] === 1 || d["is_sortable"] === "1",
         filterable:
           d["is_filterable"] === true || d["is_filterable"] === 1 || d["is_filterable"] === "1",
@@ -136,6 +142,7 @@ export interface ContentTypeInput {
     required?: boolean;
     sortable?: boolean;
     filterable?: boolean;
+    target?: string;
   }[];
 }
 
@@ -190,17 +197,32 @@ export async function saveContentType(
     if (!(FIELD_TYPES as readonly string[]).includes(f.type))
       return fail("invalid", `The field "${fkey}" has an unknown type.`, "fields");
     const type = f.type as FieldType;
-    // Only a single value can be sorted or searched by an index; a long text and a picture cannot.
+    // Only a single value can be sorted or searched by an index; a long text and a picture cannot, and the id of a
+    // linked entry has no order worth sorting by (it can be searched by).
     const indexable = type !== "long text" && type !== "picture";
+    const target = String(f.target ?? "").trim();
+    if (type === "relation" && !KEY.test(target))
+      return fail("invalid", `Choose the type the field "${fkey}" links to.`, "fields");
     defs.push({
       key: fkey,
       label: flabel,
       type,
       required: f.required === true,
-      sortable: indexable && f.sortable === true,
+      sortable: indexable && type !== "relation" && f.sortable === true,
       filterable: indexable && f.filterable === true,
+      ...(type === "relation" ? { target } : {}),
     });
   }
+  // A link goes to a type that exists (or to the type being made).
+  for (const d of defs)
+    if (d.type === "relation" && d.target !== key) {
+      const found = await runner.all(
+        `select "id" from "content_types" where "site_id" = ? and "key" = ?`,
+        [siteId, d.target],
+      );
+      if (found.length === 0)
+        return fail("invalid", `The type "${d.target}" does not exist.`, "fields");
+    }
   const at = new Date(now());
   const rule = `/${prefix}{slug}`;
   const hasBody = input.hasBody !== false;
@@ -248,7 +270,7 @@ export async function saveContentType(
         d.label,
         d.type,
         JSON.stringify(d.required ? { required: true } : {}),
-        "{}",
+        JSON.stringify(d.type === "relation" ? { target: d.target } : {}),
         d.sortable,
         d.filterable,
         position++,
@@ -315,6 +337,12 @@ export function cleanFieldValues(
       if (!Number.isFinite(n))
         return { ok: false, message: `"${d.label}" must be a number.`, field: d.key };
       out[d.key] = n;
+    } else if (d.type === "relation") {
+      // The id of the entry it links to (checked against the site's entries when the entry is saved).
+      const s = String(raw);
+      if (!/^[0-9A-Za-z]{26}$/.test(s))
+        return { ok: false, message: `"${d.label}" must be an entry.`, field: d.key };
+      out[d.key] = s;
     } else if (d.type === "picture") {
       // The id of a file in the library (it is checked against the library when the entry is saved).
       const s = String(raw);
@@ -375,6 +403,46 @@ export async function pictureMedia(
       };
   }
   return { ok: true, media };
+}
+
+/**
+ * Checks the links of an entry: each one must be a published entry of the type the field links to. (An older link whose
+ * entry has since gone is not checked here: it shows as empty on the page and as "deleted item" on the edit screen.)
+ */
+export async function checkRelations(
+  runner: SqlRunner,
+  siteId: string,
+  defs: FieldDef[],
+  values: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; message: string; field: string }> {
+  for (const d of defs) {
+    const id = values[d.key];
+    if (d.type !== "relation" || typeof id !== "string") continue;
+    const found = await runner.all(
+      `select "id" from "entries" where "site_id" = ? and "id" = ? and "type_key" = ? and "status" = 'published'`,
+      [siteId, id, d.target ?? ""],
+    );
+    if (found.length === 0)
+      return {
+        ok: false,
+        message: `"${d.label}" must be a published ${d.target} entry.`,
+        field: d.key,
+      };
+  }
+  return { ok: true };
+}
+
+/** The published entries of a type, for the choice box of a link field (the newest names first is not needed: by title). */
+export async function entryChoices(
+  runner: SqlRunner,
+  siteId: string,
+  typeKey: string,
+): Promise<{ id: string; title: string }[]> {
+  const rows = await runner.all(
+    `select "id", "title" from "entries" where "site_id" = ? and "type_key" = ? and "status" = 'published' and "locale" = '' order by "title" limit 500`,
+    [siteId, typeKey],
+  );
+  return rows.map((r) => ({ id: String(r["id"]), title: String(r["title"]) }));
 }
 
 /** The field definitions of one type, for the edit screen. */

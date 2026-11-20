@@ -7420,6 +7420,58 @@ describe.skipIf(!findBrowser())(
       await call(page, "DELETE", `/api/admin/entries/${id}`);
     });
 
+    test("CT-03: a link field points to an entry of another type, shows as a link on the page, and goes away with the entry", async () => {
+      const page = await signedIn(owner);
+      for (const type of [
+        { key: "maker", label: "Maker", urlPrefix: "makers/", fields: [] },
+        {
+          key: "tool",
+          label: "Tool",
+          urlPrefix: "tools/",
+          fields: [{ key: "made_by", label: "Made by", type: "relation", target: "maker" }],
+        },
+      ])
+        expect((await call(page, "PUT", "/api/admin/content-types", type)).status).toBe(200);
+      const publish = async (type: string, title: string, slugPart: string, fields?: object) => {
+        const made = await call(page, "POST", "/api/admin/entries", { type, title });
+        const id = String(made.json!["id"]);
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title,
+          slugPart,
+          status: "published",
+          blocks: [b("paragraph", {}, [], words(`About ${title}.`))],
+          revision: 1,
+          ...(fields ? { fields } : {}),
+        });
+        return { id, saved };
+      };
+      const maker = await publish("maker", "Acme Works", "acme");
+      expect(maker.saved.status, JSON.stringify(maker.saved.json)).toBe(200);
+      // A link to something that is not a published entry of the right type is refused.
+      const bad = await publish("tool", "Bad hammer", "bad-hammer", {
+        made_by: "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+      });
+      expect(bad.saved.status).toBe(400);
+      expect(bad.saved.json!["error"]).toMatchObject({ field: "made_by" });
+      const tool = await publish("tool", "Hammer", "hammer", { made_by: maker.id });
+      expect(tool.saved.status, JSON.stringify(tool.saved.json)).toBe(200);
+      // The edit screen has a choice box with the maker chosen.
+      await page.goto(site.base + `/admin/content/tool/${tool.id}`);
+      const box = page.getByRole("combobox", { name: "Made by" });
+      await box.waitFor();
+      await page.getByRole("option", { name: "Acme Works" }).waitFor({ state: "attached" });
+      expect(await box.inputValue()).toBe(maker.id);
+      // The page shows the link.
+      const html = await (await fetch(site.base + "/tools/hammer")).text();
+      expect(html).toContain("Made by:");
+      expect(html).toContain('href="/makers/acme"');
+      // When the maker goes to the trash, the link is gone from the page at once.
+      await call(page, "DELETE", `/api/admin/entries/${maker.id}`);
+      const after = await (await fetch(site.base + "/tools/hammer")).text();
+      expect(after).not.toContain('href="/makers/acme"');
+      for (const e of [tool.id, bad.id]) await call(page, "DELETE", `/api/admin/entries/${e}`);
+    });
+
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

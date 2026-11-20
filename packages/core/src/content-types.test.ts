@@ -6,6 +6,7 @@ import { createDraft, loadForEdit, saveContent, type Actor } from "./content.js"
 import {
   cleanFieldValues,
   deleteContentType,
+  entryChoices,
   listContentTypes,
   saveContentType,
   type FieldDef,
@@ -304,6 +305,68 @@ for (const { kind, open, skip } of openers) {
       expect(
         (await db.run("select media_id from entry_media where entry_id = ?", [made.id])).length,
       ).toBe(1);
+    });
+
+    test("a link field points to a published entry of another type, and is checked on save", async () => {
+      await saveContentType(db.runner, anna, siteId, {
+        key: "brand",
+        label: "Brand",
+        urlPrefix: "brands/",
+      });
+      // A link needs a type to link to, and that type must exist.
+      for (const target of [undefined, "", "nothing"])
+        expect(
+          await saveContentType(db.runner, anna, siteId, {
+            ...product,
+            fields: [{ key: "maker", label: "Maker", type: "relation", target } as never],
+          }),
+        ).toMatchObject({ ok: false, field: "fields" });
+      const saved = await saveContentType(db.runner, anna, siteId, {
+        ...product,
+        fields: [
+          {
+            key: "maker",
+            label: "Maker",
+            type: "relation",
+            target: "brand",
+            sortable: true,
+            filterable: true,
+          },
+        ],
+      });
+      expect(saved.ok && saved.type.fields[0]).toMatchObject({
+        type: "relation",
+        target: "brand",
+        sortable: false,
+        filterable: true,
+      });
+      const brand = await createDraft(db.runner, anna, siteId, { type: "brand", title: "Acme" });
+      const other = await createDraft(db.runner, anna, siteId, { type: "product", title: "Boot" });
+      const shoe = await createDraft(db.runner, anna, siteId, { type: "product", title: "Shoe" });
+      if (!brand.ok || !other.ok || !shoe.ok) throw new Error("no draft");
+      const save = (maker: unknown) =>
+        saveContent(db.runner, anna, siteId, shoe.id, {
+          title: "Shoe",
+          slugPart: "shoe",
+          status: "draft",
+          blocks: [],
+          revision: 1,
+          fields: { maker },
+        });
+      // Not an id, an entry that is only a draft, and an entry of the wrong type are all refused with the field named.
+      for (const bad of ["x", newId(), brand.id, other.id])
+        expect(await save(bad)).toMatchObject({ ok: false, code: "invalid", field: "maker" });
+      await db.run("update entries set status = 'published' where id in (?, ?)", [
+        brand.id,
+        other.id,
+      ]);
+      expect(await save(other.id)).toMatchObject({ ok: false, field: "maker" });
+      expect(await save(brand.id)).toMatchObject({ ok: true });
+      const loaded = await loadForEdit(db.runner, anna, siteId, shoe.id);
+      expect(loaded.ok && loaded.entry.fieldValues).toEqual({ maker: brand.id });
+      expect(await entryChoices(db.runner, siteId, "brand")).toEqual([
+        { id: brand.id, title: "Acme" },
+      ]);
     });
 
     test("the prefix cannot change once entries exist, and a type with entries cannot be deleted", async () => {
