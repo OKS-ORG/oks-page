@@ -1,6 +1,7 @@
 // PUT /api/admin/entries/[id]: save an entry. The core checks who may, repairs the blocks, writes the HTML and uses the
 // revision rule; then the cached public page is refreshed. DELETE moves an entry to the trash (or, with ?forever=1,
 // deletes one that is already in the trash); PATCH with {"action": "restore"} brings it back as a draft.
+import { hooksFor } from "./plugin-hooks";
 import {
   deleteForever,
   loadGeneralSettings,
@@ -28,6 +29,16 @@ import { mapCoverProvider, videoCoverProvider } from "./video-cover";
 // A video or map block is given the picture it shows before a click when the page is saved (PB-94).
 setCoverProvider(videoCoverProvider);
 setMapCoverProvider(mapCoverProvider);
+
+/** The plugins' hooks for a save, as an option of the save (nothing when no plugin is on). */
+async function withHooks(
+  runner: ReturnType<typeof getRunner>,
+  siteId: string,
+  actor: Awaited<ReturnType<typeof actorOf>>,
+) {
+  const hooks = await hooksFor(runner, siteId, actor);
+  return hooks ? { hooks } : {};
+}
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!isSameOrigin(request))
@@ -88,7 +99,10 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       ...(input["fields"] !== undefined ? { fields: input["fields"] } : {}),
     },
     undefined,
-    setAside.length > 0 ? { publishAnyway: true } : {},
+    {
+      ...(setAside.length > 0 ? { publishAnyway: true } : {}),
+      ...(await withHooks(runner, member.siteId, actor)),
+    },
   );
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   if (setAside.length > 0) await recordPublishOverride(runner, actor, member.siteId, id, setAside);

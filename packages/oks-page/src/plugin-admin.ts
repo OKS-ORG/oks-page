@@ -241,6 +241,15 @@ export async function removePlugin(
 }
 
 /** What the screen needs to know about the host: whether it can cap memory, and the notes plugins left for the owner. */
-export function hostFacts(host: SandboxHost): { limitsNote: string | null; notices: string[] } {
-  return { limitsNote: host.limitsNote(), notices: host.notices.map((n) => n.message) };
+export async function hostFacts(
+  host: SandboxHost,
+): Promise<{ limitsNote: string | null; notices: string[] }> {
+  return {
+    limitsNote: host.limitsNote(),
+    notices: [
+      ...host.notices.map((n) => n.message),
+      ...(await host.publishCheckNotes()).map((n) => n.message),
+      ...(await host.permissionNotes()).map((n) => n.message),
+    ],
+  };
 }

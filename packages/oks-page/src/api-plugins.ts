@@ -40,7 +40,7 @@ export async function GET() {
       member.siteId,
       host ? (id) => host.status(id) : undefined,
     ),
-    ...(host ? hostFacts(host) : { limitsNote: null, notices: [] }),
+    ...(host ? await hostFacts(host) : { limitsNote: null, notices: [] }),
   });
 }
 

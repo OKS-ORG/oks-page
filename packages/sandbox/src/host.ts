@@ -25,6 +25,7 @@ import type {
   CallResult,
   ContentService,
   DeveloperNote,
+  FilterRun,
   OwnerNotice,
   PermissionNote,
   PermissionRefusal,
@@ -406,6 +407,92 @@ export class SandboxHost {
       });
     }
     return { allowed: true, skipped };
+  }
+
+  private enabledInOrder() {
+    return [...this.plugins.values()]
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => p.status === "enabled")
+      .sort((a, b) => (a.p.manifest.priority ?? 10) - (b.p.manifest.priority ?? 10) || a.i - b.i)
+      .map(({ p }) => p);
+  }
+
+  /**
+   * Runs a filter hook through every enabled plugin, by priority and then install order (spec 04, section 7): a plugin's
+   * answer goes to the next one. An answer that is not an object, is too big, or comes from a plugin that failed or took
+   * too long is dropped and the value passes on unchanged (fail open, section 5.3). A plugin that changes the value needs
+   * the permission `content:write`; without it the change is dropped and the refusal is kept for the owner's note.
+   */
+  async runFilter(name: string, value: unknown, options: CallOptions = {}): Promise<FilterRun> {
+    const out: FilterRun = { value, applied: [], skipped: [] };
+    for (const p of this.enabledInOrder()) {
+      const r = await this.call(p.manifest.id, "hook", name, out.value, options);
+      if (r.ok && r.skipped) continue; // the plugin has no such hook
+      const label = p.manifest.displayName ?? p.manifest.id;
+      if (!r.ok) {
+        if (r.permissionRefusals?.length) continue;
+        const why: "timeout" | "failed" = r.error === "timeout" ? "timeout" : "failed";
+        out.skipped.push({
+          pluginId: p.manifest.id,
+          why,
+          message: `${label} could not run "${name}", so the page was saved without its change.`,
+        });
+        continue;
+      }
+      const answer = r.result;
+      if (answer === null || typeof answer !== "object" || Array.isArray(answer)) continue;
+      let size: number;
+      try {
+        size = JSON.stringify(answer).length;
+      } catch {
+        size = Infinity;
+      }
+      if (size > 200_000) {
+        out.skipped.push({
+          pluginId: p.manifest.id,
+          why: "failed",
+          message: `${label} gave an answer to "${name}" that is too big, so it was left out.`,
+        });
+        continue;
+      }
+      if (JSON.stringify(answer) === JSON.stringify(out.value)) continue;
+      if (!p.manifest.permissions.includes("content:write")) {
+        await this.audit(p, "host.denied", {
+          route: "filter",
+          need: "content:write",
+          kind: "hook",
+          name,
+        });
+        const message = developerMessage({ kind: "hook", name }, "content:write");
+        if (this.o.onDeveloperNote)
+          this.o.onDeveloperNote({
+            pluginId: p.manifest.id,
+            permission: "content:write",
+            code: "permission_denied",
+            message,
+            call: { kind: "hook", name },
+          });
+        else console.warn(`[plugin ${p.manifest.id}] ${message}`);
+        continue;
+      }
+      out.value = answer;
+      out.applied.push({ pluginId: p.manifest.id, value: answer });
+    }
+    return out;
+  }
+
+  /**
+   * Runs an action hook in every enabled plugin (spec 04, section 7): they react after the main work, their answers are
+   * not used, and a failure is only counted (three in a minute switch the plugin off). Never throws.
+   */
+  async runAction(name: string, value: unknown, options: CallOptions = {}): Promise<void> {
+    for (const p of this.enabledInOrder()) {
+      try {
+        await this.call(p.manifest.id, "hook", name, value, options);
+      } catch {
+        // a plugin never stops the others
+      }
+    }
   }
 
   /** One note for the owner per plugin whose before-publish check could not run (PL-40), however often it happened.

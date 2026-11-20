@@ -16,12 +16,14 @@ const STATUS: Record<PluginInfo["status"], string> = {
 export function PluginsScreen({
   initial,
   limitsNote,
+  notices: firstNotices,
 }: {
   initial: PluginInfo[];
   limitsNote: string | null;
+  notices: string[];
 }) {
   const [plugins, setPlugins] = useState(initial);
-  const [notices, setNotices] = useState<string[]>([]);
+  const [notices, setNotices] = useState<string[]>(firstNotices);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState<{

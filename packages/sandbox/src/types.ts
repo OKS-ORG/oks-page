@@ -112,6 +112,14 @@ export interface PublishCheck {
   skipped: { pluginId: string; why: "timeout" | "failed"; message: string }[];
 }
 
+/** What running a filter hook through every plugin gave (spec 04, section 7): the value after the last plugin that
+ * changed it, what each plugin that changed it returned, and the plugins that were skipped because they failed. */
+export interface FilterRun {
+  value: unknown;
+  applied: { pluginId: string; value: unknown }[];
+  skipped: { pluginId: string; why: "timeout" | "failed"; message: string }[];
+}
+
 /** One note for the owner per plugin whose before-publish check could not run (PL-40), built from the audit trail. */
 export interface PublishCheckNote {
   pluginId: string;

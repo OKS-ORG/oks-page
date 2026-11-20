@@ -16,3 +16,4 @@ next-env.d.ts
 apps/site/out/
 .e2e-generated-*/
 apps/site/uploads/
+.oks/

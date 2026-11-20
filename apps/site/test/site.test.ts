@@ -7661,6 +7661,71 @@ describe.skipIf(!findBrowser())(
       await page.getByText("No plugins are installed.").waitFor();
     });
 
+    test("PG-03: a plugin's hooks run when a post is saved and published, fail open, and stop when the plugin is off", async () => {
+      const page = await signedIn(owner);
+      const code = `export default { hooks: {
+        "content:beforePublish": async (e) => e.title.includes("Refuse") ? { refuse: "No titles that say Refuse" } : {},
+        "content:beforeSave": async (e) => ({ ...e, title: e.title.replace("teh", "the"), meta: { ...e.meta, words: String(e.plainText || "").split(/\\s+/).filter(Boolean).length } }),
+      } };`;
+      const manifest = {
+        id: "hooked",
+        version: "1.0.0",
+        displayName: "Hooked",
+        description: "Fixes a typo and counts words.",
+        author: "Ada",
+        permissions: ["content:write"],
+        hooks: ["content:beforePublish", "content:beforeSave"],
+        blocks: [],
+      };
+      const file = JSON.stringify({
+        format: 1,
+        manifest,
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: ["content:write"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+
+      const post = await call(page, "POST", "/api/admin/entries", { type: "post", title: "Typo" });
+      const id = String(post.json!["id"]);
+      const body = [b("paragraph", {}, [], words("one two three four"))];
+      const save = (title: string, status: string, revision: number) =>
+        call(page, "PUT", `/api/admin/entries/${id}`, {
+          title,
+          slugPart: "hooked-post",
+          status,
+          blocks: body,
+          revision,
+        });
+
+      // The check before going live refuses with the plugin's own words, and nothing changes.
+      const refused = await save("Refuse me", "published", 1);
+      expect(refused.status).toBe(400);
+      expect(refused.json!["error"]).toMatchObject({ message: "No titles that say Refuse" });
+
+      // The filter before the save fixes the title and keeps the plugin's value under its own name.
+      const saved = await save("Say teh word", "published", 1);
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const row = (await db.run("select title, meta from entries where id = ?", [id]))[0]!;
+      const meta = typeof row["meta"] === "string" ? JSON.parse(row["meta"]) : row["meta"];
+      expect(row["title"]).toBe("Say the word");
+      expect(meta.plugins.hooked).toEqual({ words: 4 });
+      expect(await (await fetch(site.base + "/" + String(saved.json!["slug"]))).text()).toContain(
+        "Say the word",
+      );
+
+      // Switched off, the plugin does nothing: a title it would have refused goes live.
+      await call(page, "PATCH", "/api/admin/plugins", { id: "hooked", enabled: false });
+      const again = await save("Refuse me again", "published", 2);
+      expect(again.status, JSON.stringify(again.json)).toBe(200);
+      await call(page, "DELETE", "/api/admin/plugins?id=hooked");
+      await call(page, "DELETE", `/api/admin/entries/${id}`);
+    });
+
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {
       const page = await signedIn(owner);
       const made = await call(page, "POST", "/api/admin/entries", {

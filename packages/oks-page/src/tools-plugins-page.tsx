@@ -8,7 +8,7 @@ import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
-import { listPlugins } from "./plugin-admin";
+import { hostFacts, listPlugins } from "./plugin-admin";
 import { PluginsScreen } from "./plugins-screen";
 import { pluginHost } from "./plugin-runtime";
 
@@ -23,10 +23,13 @@ export default async function PluginsPage() {
   if (!actor.can("plugins.manage")) redirect("/admin");
   // The note about the memory limit belongs to the host; when the host cannot start here the screen still opens.
   let limitsNote: string | null;
+  let notices: string[] = [];
   let status: ((id: string) => string) | undefined;
   try {
     const host = await pluginHost();
-    limitsNote = host.limitsNote();
+    const facts = await hostFacts(host);
+    limitsNote = facts.limitsNote;
+    notices = facts.notices;
     status = (id) => host.status(id);
   } catch {
     limitsNote = "The plugin sandbox could not start on this computer, so plugins are not running.";
@@ -44,6 +47,7 @@ export default async function PluginsPage() {
       <PluginsScreen
         initial={await listPlugins(getRunner(), member.siteId, status)}
         limitsNote={limitsNote}
+        notices={notices}
       />
     </AdminFrame>
   );

@@ -357,6 +357,34 @@ export interface SavedContent {
   scheduledAt: string | null;
 }
 
+/** The part of an entry a plugin sees when a save runs its hooks (spec 04, section 7). */
+export interface HookEntry {
+  id: string;
+  status: string;
+  title: string;
+  plainText: string;
+  meta: Record<string, unknown>;
+  typeKey: string;
+  authorId: string;
+}
+
+/**
+ * What the plugins do in a save. The core knows nothing of how they run: the site passes these three functions, and a
+ * site with no plugins passes nothing (spec 04, sections 5.3 and 7).
+ */
+export interface SaveHooks {
+  /** A filter: it may change the title, and add values of its own to the entry's meta under the plugin's id. */
+  beforeSave?(
+    entry: HookEntry,
+  ): Promise<{ title?: string; plugins?: Record<string, Record<string, unknown>> } | null>;
+  /** A check before an entry goes live: only an explicit refusal blocks it. */
+  beforePublish?(
+    entry: HookEntry,
+  ): Promise<{ allowed: true } | { allowed: false; message: string }>;
+  /** An action after the save: not waited for. */
+  afterSave?(entry: HookEntry): void;
+}
+
 export async function saveContent(
   runner: SqlRunner,
   actor: Actor,
@@ -364,7 +392,7 @@ export async function saveContent(
   id: string,
   input: SaveInput,
   now: () => number = Date.now,
-  options: { summary?: string; publishAnyway?: boolean } = {},
+  options: { summary?: string; publishAnyway?: boolean; hooks?: SaveHooks } = {},
 ): Promise<ContentResult<SavedContent>> {
   const row = (
     await runner.all(
@@ -392,7 +420,7 @@ export async function saveContent(
     }
   }
 
-  const title = String(input.title ?? "").trim();
+  let title = String(input.title ?? "").trim();
   if (!title) return fail("invalid", "Give it a title.", { field: "title" });
   if (title.length > 200)
     return fail("invalid", "The title can be at most 200 characters.", { field: "title" });
@@ -471,6 +499,43 @@ export async function saveContent(
     fieldChange !== undefined,
   );
   if (!pictures.ok) return fail("invalid", pictures.message, { field: pictures.field });
+  // The plugins' hooks (spec 04, section 7). They run only now, when the save is otherwise sure to go ahead, and only for
+  // a person's own save. A refusal from a plugin that worked stops going live; anything else a plugin does wrong is
+  // left out and the save carries on without it.
+  const hooks = options.hooks;
+  const hookEntry = (): HookEntry => ({
+    id,
+    status: input.status,
+    title,
+    plainText: written.plainText,
+    meta: structuredClone(meta),
+    typeKey: type,
+    authorId,
+  });
+  if (hooks?.beforePublish && publishing && String(row["status"]) !== "published") {
+    const verdict = await hooks.beforePublish(hookEntry());
+    if (!verdict.allowed) return fail("invalid", verdict.message, { field: "status" });
+  }
+  if (hooks?.beforeSave) {
+    const changed = await hooks.beforeSave(hookEntry());
+    if (changed) {
+      if (typeof changed.title === "string") {
+        const t = changed.title.trim();
+        if (t && t.length <= 200) title = t;
+      }
+      if (changed.plugins) {
+        const mine =
+          meta["plugins"] !== null && typeof meta["plugins"] === "object"
+            ? { ...(meta["plugins"] as Record<string, unknown>) }
+            : {};
+        for (const [pluginId, values] of Object.entries(changed.plugins)) {
+          // Each plugin keeps its own part of the meta, and a part cannot grow past a few kilobytes.
+          if (JSON.stringify(values).length <= 4096) mine[pluginId] = values;
+        }
+        meta["plugins"] = mine;
+      }
+    }
+  }
   const at = new Date(now());
   const saved = await saveEntry(runner, {
     entryId: id,
@@ -559,6 +624,13 @@ export async function saveContent(
     `delete from "entry_revisions" where "entry_id" = ? and "author_id" = ? and "kind" = 'autosave'`,
     [id, actor.userId],
   );
+  if (hooks?.afterSave) {
+    try {
+      hooks.afterSave({ ...hookEntry(), meta: structuredClone(meta) });
+    } catch {
+      // a plugin's reaction never changes the answer to the person who saved
+    }
+  }
   return {
     ok: true,
     revision: saved.revision,

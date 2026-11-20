@@ -7,3 +7,4 @@ packages/db/drizzle
 apps/site/.export-build
 apps/site/out
 packages/core/src/font-files.ts
+.oks/

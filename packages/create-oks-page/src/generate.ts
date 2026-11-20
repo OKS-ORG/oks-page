@@ -71,7 +71,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     { path: ".env", content: env },
     {
       path: ".gitignore",
-      content: "node_modules\n.next\n.env\ndata\nuploads\nnext-env.d.ts\n*.tsbuildinfo\n",
+      content: "node_modules\n.next\n.env\ndata\nuploads\n.oks\nnext-env.d.ts\n*.tsbuildinfo\n",
     },
     {
       path: "README.md",
