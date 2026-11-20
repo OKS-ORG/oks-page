@@ -30,6 +30,12 @@ import { generateSync } from "otplib";
 import sharp from "sharp";
 import { chromium, type Browser } from "playwright-core";
 import { SMTPServer } from "smtp-server";
+import {
+  TEST_HOST_KEY,
+  TEST_PASSWORD,
+  startSftpServer,
+  type TestSftpServer,
+} from "@oks-page/core/testing/sftp-server";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
 /** The page's HTML followed by the owner's look, which the page links to as a file (`/site-style/<fingerprint>.css`). */
@@ -5613,6 +5619,7 @@ describe.skipIf(!findBrowser())(
     const exportDir = mkdtempSync(join(tmpdir(), "oks-export-"));
     const liveDir = join(mkdtempSync(join(tmpdir(), "oks-live-")), "site");
     const zipDir = mkdtempSync(join(tmpdir(), "oks-zips-"));
+    let sftp: TestSftpServer;
 
     beforeAll(async () => {
       registry = createHttpServer((request, response) => {
@@ -5638,6 +5645,7 @@ describe.skipIf(!findBrowser())(
         }
       });
       await new Promise<void>((done) => registry.listen(0, "127.0.0.1", done));
+      sftp = await startSftpServer();
       registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
       site = await startSite("sqlite", db, {
@@ -5678,6 +5686,7 @@ describe.skipIf(!findBrowser())(
       site?.server.kill();
       await db?.close();
       registry?.close();
+      await sftp?.close();
       for (const dir of [exportDir, join(liveDir, ".."), zipDir])
         rmSync(dir, { recursive: true, force: true });
     });
@@ -8033,6 +8042,68 @@ describe.skipIf(!findBrowser())(
       await live.getByRole("button", { name: "Remove" }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("There is no place to publish to yet.").waitFor();
+    });
+
+    test("PG-07: an SFTP place is checked, its fingerprint confirmed, its password kept sealed, and the site is sent to it", async () => {
+      const page = await signedIn(owner);
+      // An exported site, as the other publish test left it (or a new one).
+      mkdirSync(join(exportDir, "about"), { recursive: true });
+      writeFileSync(join(exportDir, "index.html"), "<p>home</p>");
+      writeFileSync(join(exportDir, "about/index.html"), "<p>about</p>");
+      rmSync(join(exportDir, "news"), { recursive: true, force: true });
+      await page.goto(site.base + "/admin/tools/publish");
+      await page.getByRole("button", { name: "Add a place" }).click();
+      await page.getByLabel("Name").fill("Client SFTP");
+      await page.getByLabel("Kind").selectOption("sftp");
+      await page.getByLabel("Server address").fill("127.0.0.1");
+      await page.getByLabel("Port").fill(String(sftp.port));
+      await page.getByLabel("User name").fill("ada");
+      await page.getByLabel("Password", { exact: true }).fill(TEST_PASSWORD);
+      await page.getByLabel("Folder on the server").fill("/var/www/site");
+      // Without checking the server first, nothing is saved.
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText(/Check the server first/).waitFor();
+      // The server shows its fingerprint; it is trusted only after the owner says so.
+      await page.getByRole("button", { name: "Check the server" }).click();
+      await page.getByText(TEST_HOST_KEY).waitFor();
+      await page.getByLabel(/This is my server: trust it/).check();
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Client SFTP is saved.").waitFor();
+
+      // The password is not in the page, in the API's answer or in the database as text; only that one is saved.
+      const listed = await page.context().request.get(site.base + "/api/admin/publish");
+      expect(await listed.text()).not.toContain(TEST_PASSWORD);
+      expect(await page.content()).not.toContain(TEST_PASSWORD);
+      const stored = JSON.stringify(
+        await db.run("select value from settings where key = 'publish-targets'"),
+      );
+      expect(stored).not.toContain(TEST_PASSWORD);
+      expect(stored).toContain("v1:");
+
+      // Publish: the files arrive on the server, whole.
+      const row = page.getByRole("row", { name: /Client SFTP/ });
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row.getByText(/Published: 2 files sent, 0 removed\./).waitFor({ timeout: 60_000 });
+      expect(sftp.text("/var/www/site/about/index.html")).toBe("<p>about</p>");
+      expect([...sftp.files.keys()].filter((f) => f.endsWith(".oks-part"))).toEqual([]);
+
+      // A wrong password is a plain sentence, and nothing changes on the server.
+      const before = sftp.files.size;
+      await row.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Password", { exact: true }).fill("not the password");
+      await page.getByRole("button", { name: "Save this place" }).click();
+      await page.getByText("Client SFTP is saved.").waitFor();
+      writeFileSync(join(exportDir, "index.html"), "<p>home 2</p>");
+      await row.getByRole("button", { name: "Publish now" }).click();
+      await row
+        .getByText(/refused the user name, the password or the key/)
+        .waitFor({ timeout: 60_000 });
+      expect(sftp.files.size).toBe(before);
+      expect(sftp.text("/var/www/site/index.html")).toBe("<p>home</p>");
+
+      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("Client SFTP is removed.").waitFor();
     });
 
     test("CM-01: comments are off until switched on; a visitor's comment waits, an editor approves it, and then the post shows it", async () => {

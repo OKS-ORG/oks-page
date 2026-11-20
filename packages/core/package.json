@@ -26,6 +26,10 @@
     "./timezone": {
       "types": "./dist/timezone.d.ts",
       "default": "./dist/timezone.js"
+    },
+    "./testing/sftp-server": {
+      "types": "./dist/testing/sftp-server.d.ts",
+      "default": "./dist/testing/sftp-server.js"
     }
   },
   "dependencies": {
@@ -33,11 +37,13 @@
     "@oks-page/db": "workspace:*",
     "@oks-page/media": "workspace:*",
     "@oks-page/renderer": "workspace:*",
-    "nodemailer": "10.1.7"
+    "nodemailer": "10.1.7",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/nodemailer": "8.0.2",
     "@types/smtp-server": "3.5.13",
+    "@types/ssh2": "^1.15.6",
     "sharp": "0.35.5",
     "smtp-server": "3.21.1"
   }

@@ -5,6 +5,8 @@ import {
   folderTarget,
   publishSite,
   recordPublishLast,
+  secretPlace,
+  sftpTarget,
   zipTarget,
   type PublishTarget,
   type PublishTargetConfig,
@@ -12,6 +14,7 @@ import {
 import type { SqlRunner } from "@oks-page/db";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { siteSecrets } from "./mail";
 
 export interface Running {
   targetId: string;
@@ -38,9 +41,29 @@ export function publishRunning(): Running | null {
 }
 
 function targetFor(config: PublishTargetConfig): PublishTarget {
-  return config.kind === "zip"
-    ? zipTarget(path.join(zipFolder(), config.path))
-    : folderTarget(config.path);
+  if (config.kind === "zip") return zipTarget(path.join(zipFolder(), config.path));
+  if (config.kind === "sftp" && config.sftp) {
+    // The sealed secrets are opened only now, for this publish, and only in memory.
+    const box = siteSecrets();
+    const open = (name: "password" | "privateKey" | "passphrase") => {
+      const sealed = config.secrets?.[name];
+      return sealed ? box.open(sealed, secretPlace(config.id, name)) : undefined;
+    };
+    const password = open("password");
+    const privateKey = open("privateKey");
+    const passphrase = open("passphrase");
+    return sftpTarget({
+      host: config.sftp.host,
+      port: config.sftp.port,
+      username: config.sftp.username,
+      remoteDir: config.path,
+      hostKey: config.sftp.hostKey,
+      ...(password !== undefined ? { password } : {}),
+      ...(privateKey !== undefined ? { privateKey } : {}),
+      ...(passphrase !== undefined ? { passphrase } : {}),
+    });
+  }
+  return folderTarget(config.path);
 }
 
 /** Starts a publish to one saved place. It answers at once; the work goes on in the background. */

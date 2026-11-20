@@ -1,5 +1,5 @@
 // Tools > Publish, for a signed-in member who may change the settings.
-import { isSetupDone, listPublishTargets, loadPublishLast } from "@oks-page/core";
+import { isSetupDone, listPublishTargets, loadPublishLast, publicTarget } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -32,7 +32,7 @@ export default async function PublishPage() {
     >
       <PublishScreen
         initial={{
-          targets: await listPublishTargets(getRunner(), member.siteId),
+          targets: (await listPublishTargets(getRunner(), member.siteId)).map(publicTarget),
           last: await loadPublishLast(getRunner(), member.siteId),
           running: publishRunning(),
           exportReady: exportReady(),

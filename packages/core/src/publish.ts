@@ -88,6 +88,8 @@ export interface PublishTarget {
   remove(path: string): Promise<void>;
   /** Called last, when every operation was done: the place records what it now holds. */
   finish(manifest: Manifest): Promise<void>;
+  /** Called when the publish is over, whether it went well or not: the place lets go of its connection. */
+  close?(): Promise<void>;
 }
 
 export interface PublishReport {
@@ -106,6 +108,19 @@ export async function publishSite(
   target: PublishTarget,
   options: { onStep?: (op: PublishOp) => void } = {},
 ): Promise<PublishReport> {
+  try {
+    return await publishInner(dir, target, options);
+  } finally {
+    // The place lets go of its connection, whatever happened.
+    await target.close?.().catch(() => undefined);
+  }
+}
+
+async function publishInner(
+  dir: string,
+  target: PublishTarget,
+  options: { onStep?: (op: PublishOp) => void },
+): Promise<PublishReport> {
   const root = resolve(dir);
   const next = manifestOf(root);
   for (const path of Object.keys(next.files))
@@ -116,7 +131,18 @@ export async function publishSite(
         planned: 0,
         problem: `The file name "${path}" is not safe to publish.`,
       };
-  const ops = planPublish(next, await target.previous());
+  let previous: Manifest | null;
+  try {
+    previous = await target.previous();
+  } catch (error) {
+    return {
+      ok: false,
+      done: [],
+      planned: 0,
+      problem: `The place could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const ops = planPublish(next, previous);
   const done: PublishOp[] = [];
   for (const op of ops) {
     try {

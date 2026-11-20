@@ -8,11 +8,14 @@ import {
   deletePublishTarget,
   listPublishTargets,
   loadPublishLast,
+  publicTarget,
   readTargets,
   recordPublishLast,
   savePublishTarget,
+  secretPlace,
 } from "./publish-targets.js";
 import { DEFAULT_ROLES } from "./roles.js";
+import { SiteSecrets } from "./secret-box.js";
 import { runSetup } from "./setup.js";
 
 const T = new Date(1_700_000_000_000);
@@ -171,6 +174,117 @@ for (const { kind, open, skip } of openers) {
       expect(await bad({ label: "one more" })).toMatchObject({
         ok: false,
         message: "A site can have at most 10 places to publish to.",
+      });
+    });
+
+    test("an SFTP place keeps its secrets sealed, never shows them, keeps a saved one when it is left out, and needs what the sign-in needs", async () => {
+      const box = new SiteSecrets("a-site-secret-that-is-long-enough-0123456789");
+      const fingerprint = `SHA256:${"B".repeat(43)}`;
+      const input = {
+        kind: "sftp",
+        label: "Client server",
+        path: "/var/www/site",
+        host: "sftp.example.com",
+        port: 2222,
+        username: "ada",
+        auth: "password",
+        hostKey: fingerprint,
+        password: "correct horse battery",
+      };
+      const save = (over: Record<string, unknown> = {}, sealing: SiteSecrets | undefined = box) =>
+        savePublishTarget(db.runner, admin, siteId, { ...input, ...over }, sealing);
+      const added = await save();
+      if (!added.ok) throw new Error(added.message);
+      expect(added.target.sftp).toEqual({
+        host: "sftp.example.com",
+        port: 2222,
+        username: "ada",
+        hostKey: fingerprint,
+        auth: "password",
+      });
+      // Sealed for this place and this name: it opens there and nowhere else, and the text is not in the database.
+      const sealed = added.target.secrets!.password!;
+      expect(box.open(sealed, secretPlace(added.target.id, "password"))).toBe(
+        "correct horse battery",
+      );
+      expect(() => box.open(sealed, secretPlace("another", "password"))).toThrow();
+      const stored = JSON.stringify(
+        await db.run('select "value" from settings where key = ?', ["publish-targets"]),
+      );
+      expect(stored).not.toContain("correct horse battery");
+      // The screen only learns that one is saved.
+      expect(publicTarget((await listPublishTargets(db.runner, siteId))[0]!)).toMatchObject({
+        has: { password: true, privateKey: false, passphrase: false },
+      });
+      expect(JSON.stringify(publicTarget(added.target))).not.toContain(sealed);
+      // Changing the place without a password keeps the saved one; an empty one removes it (and then one is needed).
+      const kept = await save({ id: added.target.id, password: undefined, label: "Renamed" });
+      expect(kept.ok && kept.target.secrets!.password).toBe(sealed);
+      expect(await save({ id: added.target.id, password: "" })).toMatchObject({
+        ok: false,
+        message: "Give the password.",
+      });
+      // A key needs a whole key, and changing to a key drops the password.
+      expect(await save({ id: added.target.id, auth: "key", password: undefined })).toMatchObject({
+        ok: false,
+        message: "Paste the private key.",
+      });
+      expect(
+        await save({
+          id: added.target.id,
+          auth: "key",
+          password: undefined,
+          privateKey: "not a key",
+        }),
+      ).toMatchObject({ ok: false });
+      const withKey = await save({
+        id: added.target.id,
+        auth: "key",
+        password: undefined,
+        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+        passphrase: "pass",
+      });
+      expect(withKey.ok && Object.keys(withKey.target.secrets!).sort()).toEqual([
+        "passphrase",
+        "privateKey",
+      ]);
+    });
+
+    test("an SFTP place needs a good address, port, user name and a confirmed fingerprint, and a way to seal its secrets", async () => {
+      const box = new SiteSecrets("a-site-secret-that-is-long-enough-0123456789");
+      const good = {
+        kind: "sftp",
+        label: "S",
+        path: "public_html",
+        host: "sftp.example.com",
+        username: "ada",
+        hostKey: `SHA256:${"C".repeat(43)}`,
+        password: "pw",
+      };
+      const save = (over: Record<string, unknown>, sealing: SiteSecrets | null = box) =>
+        savePublishTarget(db.runner, admin, siteId, { ...good, ...over }, sealing ?? undefined);
+      expect((await save({})).ok).toBe(true);
+      for (const over of [
+        { host: "bad host!" },
+        { host: "" },
+        { port: 0 },
+        { port: 70000 },
+        { port: "abc" },
+        { username: "has space" },
+        { username: "" },
+        { hostKey: "" },
+        { hostKey: "SHA256:short" },
+        { path: "/" },
+        { path: "a/../b" },
+      ])
+        expect(await save(over), JSON.stringify(over)).toMatchObject({
+          ok: false,
+          code: "invalid",
+        });
+      // Without a long enough OKS_SECRET a password cannot be sealed, and the words say what to set.
+      expect(await save({}, null)).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("OKS_SECRET"),
       });
     });
 

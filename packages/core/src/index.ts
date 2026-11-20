@@ -67,3 +67,4 @@ export * from "./page-css.js";
 export * from "./entry-editor.js";
 export * from "./publish.js";
 export * from "./publish-targets.js";
+export * from "./sftp.js";

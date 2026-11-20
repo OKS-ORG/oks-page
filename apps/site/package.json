@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@oks-page/core": "workspace:*",
     "@oks-page/db": "workspace:*",
     "next": "16.4.2",
     "oks-page": "workspace:*",

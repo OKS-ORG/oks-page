@@ -1,24 +1,66 @@
 // Where the owner publishes an exported site to (spec 10, section 7.2; the Publish screen). A target is kept in the site's
 // `settings` table under the key `publish-targets`; the result of the last publish to each is kept under `publish-last`.
-// Nothing secret is kept here: a target that needs a password or a token keeps it sealed (a later piece of work).
+// What a place needs to sign in (a password, a private key, a passphrase) is sealed with the site's secret key and never
+// shown again: the screen only learns that one is saved.
 import { newId, type SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
+import type { SiteSecrets } from "./secret-box.js";
 
 export const PUBLISH_TARGETS_KEY = "publish-targets";
 export const PUBLISH_LAST_KEY = "publish-last";
 export const MAX_PUBLISH_TARGETS = 10;
 
-export const PUBLISH_KINDS = ["folder", "zip"] as const;
+export const PUBLISH_KINDS = ["folder", "zip", "sftp"] as const;
 export type PublishKind = (typeof PUBLISH_KINDS)[number];
+
+export const SFTP_SECRETS = ["password", "privateKey", "passphrase"] as const;
+export type SftpSecret = (typeof SFTP_SECRETS)[number];
+
+/** What an SFTP place needs besides its secrets. */
+export interface SftpConfig {
+  host: string;
+  port: number;
+  username: string;
+  /** The server's host key fingerprint the owner confirmed (`SHA256:` and 43 characters). */
+  hostKey: string;
+  /** How the account signs in. */
+  auth: "password" | "key";
+}
 
 export interface PublishTargetConfig {
   id: string;
   kind: PublishKind;
   /** The name the owner gave it: "Client's server". */
   label: string;
-  /** A folder (an absolute path), or the zip file (a path ending in `.zip`, relative to the project's `publish` folder). */
+  /**
+   * A folder (an absolute path), the zip file (a plain name, written in the project's `publish` folder), or the folder on the
+   * SFTP server.
+   */
   path: string;
+  sftp?: SftpConfig;
+  /** Sealed secrets by name (never sent to a browser). */
+  secrets?: Partial<Record<SftpSecret, string>>;
 }
+
+/** A place as the screen sees it: no secret, only which ones are saved. */
+export type PublicPublishTarget = Omit<PublishTargetConfig, "secrets"> & {
+  has: Record<SftpSecret, boolean>;
+};
+
+export const publicTarget = (t: PublishTargetConfig): PublicPublishTarget => {
+  const { secrets, ...rest } = t;
+  return {
+    ...rest,
+    has: {
+      password: Boolean(secrets?.password),
+      privateKey: Boolean(secrets?.privateKey),
+      passphrase: Boolean(secrets?.passphrase),
+    },
+  };
+};
+
+/** Where a sealed secret is bound: it opens only for this place and this name. */
+export const secretPlace = (id: string, name: SftpSecret): string => `publish:${id}:${name}`;
 
 export interface PublishLast {
   at: number;
@@ -63,25 +105,56 @@ async function store(
   );
 }
 
+const HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
+const HOST_KEY = /^SHA256:[A-Za-z0-9+/]{43}$/;
+
 /** A saved list, with anything that is not a valid target left out. */
 export function readTargets(raw: unknown): PublishTargetConfig[] {
-  const list = Array.isArray(parse(raw)) ? (parse(raw) as unknown[]) : [];
+  const parsed = parse(raw);
+  const list = Array.isArray(parsed) ? (parsed as unknown[]) : [];
   const out: PublishTargetConfig[] = [];
   for (const item of list) {
     const t = item as Record<string, unknown> | null;
     if (
-      t &&
-      typeof t["id"] === "string" &&
-      (PUBLISH_KINDS as readonly string[]).includes(String(t["kind"])) &&
-      typeof t["label"] === "string" &&
-      typeof t["path"] === "string"
+      !t ||
+      typeof t["id"] !== "string" ||
+      !(PUBLISH_KINDS as readonly string[]).includes(String(t["kind"])) ||
+      typeof t["label"] !== "string" ||
+      typeof t["path"] !== "string"
     )
-      out.push({
-        id: t["id"],
-        kind: t["kind"] as PublishKind,
-        label: t["label"],
-        path: t["path"],
-      });
+      continue;
+    const target: PublishTargetConfig = {
+      id: t["id"],
+      kind: t["kind"] as PublishKind,
+      label: t["label"],
+      path: t["path"],
+    };
+    if (target.kind === "sftp") {
+      const s = t["sftp"] as Record<string, unknown> | null;
+      if (
+        !s ||
+        typeof s["host"] !== "string" ||
+        typeof s["port"] !== "number" ||
+        typeof s["username"] !== "string" ||
+        typeof s["hostKey"] !== "string" ||
+        (s["auth"] !== "password" && s["auth"] !== "key")
+      )
+        continue;
+      target.sftp = {
+        host: s["host"],
+        port: s["port"],
+        username: s["username"],
+        hostKey: s["hostKey"],
+        auth: s["auth"],
+      };
+      const sealed = t["secrets"] as Record<string, unknown> | null;
+      if (sealed && typeof sealed === "object") {
+        target.secrets = {};
+        for (const name of SFTP_SECRETS)
+          if (typeof sealed[name] === "string") target.secrets[name] = sealed[name];
+      }
+    }
+    out.push(target);
   }
   return out.slice(0, MAX_PUBLISH_TARGETS);
 }
@@ -113,31 +186,42 @@ export function cleanTargetPath(
     if (path.split(/[\\/]/).includes("..")) return { problem: 'The path may not contain "..".' };
     return { path };
   }
+  if (kind === "sftp") {
+    // A folder on the server: whole (/var/www) or from the account's home (public_html). Never the root itself.
+    if (path === "/" || path.includes("\\") || path.split("/").includes(".."))
+      return {
+        problem:
+          'The folder on the server must be a path such as /var/www/site or public_html (not "/", no "..").',
+      };
+    return { path };
+  }
   // A zip file is written in the project's own `publish` folder: only its name is chosen.
   if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,100}\.zip$/.test(path))
     return { problem: "The zip file needs a plain name ending in .zip, such as site.zip." };
   return { path };
 }
 
-/** Adds a target, or changes the one with this id. */
+/** Adds a target, or changes the one with this id. `box` seals the secrets of an SFTP place. */
 export async function savePublishTarget(
   runner: SqlRunner,
   actor: Actor,
   siteId: string,
-  input: { id?: unknown; kind?: unknown; label?: unknown; path?: unknown },
+  input: Record<string, unknown>,
+  box?: SiteSecrets,
 ): Promise<PublishResult<{ target: PublishTargetConfig }>> {
   if (!actor.can("settings.manage")) return fail("forbidden", "You may not change the settings.");
-  const kind = String(input.kind ?? "");
+  const kind = String(input["kind"] ?? "");
   if (!(PUBLISH_KINDS as readonly string[]).includes(kind))
-    return fail("invalid", "Choose a folder or a zip file.");
-  const label = String(input.label ?? "").trim();
+    return fail("invalid", "Choose a folder, a zip file or an SFTP server.");
+  const label = String(input["label"] ?? "").trim();
   if (label === "" || label.length > 60)
     return fail("invalid", "Give it a name of at most 60 characters.");
-  const cleaned = cleanTargetPath(kind as PublishKind, String(input.path ?? ""));
+  const cleaned = cleanTargetPath(kind as PublishKind, String(input["path"] ?? ""));
   if ("problem" in cleaned) return fail("invalid", cleaned.problem);
   const all = await listPublishTargets(runner, siteId);
-  const id = typeof input.id === "string" && input.id !== "" ? input.id : null;
-  if (id && !all.some((t) => t.id === id)) return fail("not_found", "This place does not exist.");
+  const id = typeof input["id"] === "string" && input["id"] !== "" ? input["id"] : null;
+  const before = id ? all.find((t) => t.id === id) : undefined;
+  if (id && !before) return fail("not_found", "This place does not exist.");
   if (!id && all.length >= MAX_PUBLISH_TARGETS)
     return fail("invalid", `A site can have at most ${MAX_PUBLISH_TARGETS} places to publish to.`);
   const target: PublishTargetConfig = {
@@ -146,6 +230,59 @@ export async function savePublishTarget(
     label,
     path: cleaned.path,
   };
+
+  if (kind === "sftp") {
+    const host = String(input["host"] ?? "").trim();
+    if (!HOST.test(host))
+      return fail("invalid", "Give the server's address, such as sftp.example.com.");
+    const port = input["port"] === undefined || input["port"] === "" ? 22 : Number(input["port"]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      return fail("invalid", "The port is a number from 1 to 65535 (usually 22).");
+    const username = String(input["username"] ?? "").trim();
+    if (!/^[^\s\0:]{1,64}$/.test(username))
+      return fail("invalid", "Give the user name (up to 64 characters, no spaces).");
+    const hostKey = String(input["hostKey"] ?? "").trim();
+    if (!HOST_KEY.test(hostKey))
+      return fail(
+        "invalid",
+        'Check the server first and confirm its fingerprint with "Check the server".',
+      );
+    const auth = input["auth"] === "key" ? "key" : "password";
+    // The secrets: left out keeps the saved one, an empty one removes it, anything else replaces it.
+    const secrets: Partial<Record<SftpSecret, string>> = { ...(before?.secrets ?? {}) };
+    for (const name of SFTP_SECRETS) {
+      const value = input[name];
+      if (value === undefined) continue;
+      if (typeof value !== "string" || value.length > 20_000)
+        return fail("invalid", `The ${name === "privateKey" ? "private key" : name} is not valid.`);
+      if (value === "") delete secrets[name];
+      else {
+        if (name === "privateKey" && !value.includes("-----BEGIN"))
+          return fail(
+            "invalid",
+            "The private key must be pasted whole, from the line that starts with -----BEGIN.",
+          );
+        if (!box)
+          return fail(
+            "invalid",
+            "A password or key can be saved only when the site's OKS_SECRET (at least 32 characters) is set in its .env file.",
+          );
+        secrets[name] = box.seal(value, secretPlace(target.id, name));
+      }
+    }
+    // What the chosen way of signing in needs, and nothing else is kept.
+    if (auth === "password") {
+      delete secrets.privateKey;
+      delete secrets.passphrase;
+      if (!secrets.password) return fail("invalid", "Give the password.");
+    } else {
+      delete secrets.password;
+      if (!secrets.privateKey) return fail("invalid", "Paste the private key.");
+    }
+    target.sftp = { host, port, username, hostKey, auth };
+    target.secrets = secrets;
+  }
+
   await store(
     runner,
     siteId,

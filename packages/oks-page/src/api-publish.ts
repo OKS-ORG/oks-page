@@ -5,13 +5,17 @@ import {
   deletePublishTarget,
   listPublishTargets,
   loadPublishLast,
+  probeSftpHost,
+  publicTarget,
   savePublishTarget,
+  type SiteSecrets,
 } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { siteSecrets } from "./mail";
 import {
   exportFolder,
   exportReady,
@@ -29,7 +33,7 @@ export async function GET() {
     return reply({ code: "forbidden", message: "You may not change the settings." }, 403);
   const runner = getRunner();
   return NextResponse.json({
-    targets: await listPublishTargets(runner, member.siteId),
+    targets: (await listPublishTargets(runner, member.siteId)).map(publicTarget),
     last: await loadPublishLast(runner, member.siteId),
     running: publishRunning(),
     exportReady: exportReady(),
@@ -52,9 +56,36 @@ export async function POST(request: Request) {
   const actor = await actorOf(member);
   const runner = getRunner();
   if (input["action"] === "save") {
-    const result = await savePublishTarget(runner, actor, member.siteId, input);
+    // The secrets can be sealed only when the site's secret key is long enough.
+    let box: SiteSecrets | undefined;
+    try {
+      box = siteSecrets();
+    } catch {
+      box = undefined;
+    }
+    const result = await savePublishTarget(runner, actor, member.siteId, input, box);
     if (!result.ok) return reply(result, STATUS[result.code]);
-    return NextResponse.json({ ok: true, target: result.target });
+    return NextResponse.json({ ok: true, target: publicTarget(result.target) });
+  }
+  if (input["action"] === "probe") {
+    // The server connects to the address only for someone who changes the settings, and only to read its host key.
+    if (!actor.can("settings.manage"))
+      return reply({ code: "forbidden", message: "You may not change the settings." }, 403);
+    const host = String(input["host"] ?? "").trim();
+    const port = input["port"] === undefined || input["port"] === "" ? 22 : Number(input["port"]);
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(host))
+      return reply(
+        { code: "invalid", message: "Give the server's address, such as sftp.example.com." },
+        400,
+      );
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      return reply(
+        { code: "invalid", message: "The port is a number from 1 to 65535 (usually 22)." },
+        400,
+      );
+    const found = await probeSftpHost(host, port);
+    if (!found.ok) return reply({ code: "invalid", message: found.message }, 400);
+    return NextResponse.json({ fingerprint: found.fingerprint });
   }
   if (input["action"] === "run") {
     if (!actor.can("settings.manage"))
