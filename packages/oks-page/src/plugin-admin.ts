@@ -157,6 +157,7 @@ export async function installPlugin(
   siteId: string,
   text: string,
   approved: string[],
+  source = "file",
 ): Promise<PluginResult<{ extensionId: string; file: PluginFile }>> {
   if (!actor.can("plugins.manage")) return fail("forbidden", "You may not manage plugins.");
   const read = readPluginFile(text);
@@ -188,6 +189,7 @@ export async function installPlugin(
     );
   await note(runner, siteId, actor, "plugin.installed", m.id, {
     version: m.version,
+    source,
     approved: [...new Set(approved)],
     refused: m.permissions.filter((p) => !approved.includes(p)),
   });

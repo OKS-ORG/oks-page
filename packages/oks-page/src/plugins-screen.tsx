@@ -24,7 +24,13 @@ export function PluginsScreen({
   const [notices, setNotices] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
-  const [adding, setAdding] = useState<{ text: string; preview: PluginPreview } | null>(null);
+  const [adding, setAdding] = useState<{
+    text: string;
+    preview: PluginPreview;
+    source: string;
+  } | null>(null);
+  const [npmName, setNpmName] = useState("");
+  const [npmVersion, setNpmVersion] = useState("");
   const [approved, setApproved] = useState<string[]>([]);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -58,7 +64,31 @@ export function PluginsScreen({
       return;
     }
     setApproved(body.plugin.permissions.map((p) => p.permission));
-    setAdding({ text, preview: body.plugin });
+    setAdding({ text, preview: body.plugin, source: "file" });
+  }
+
+  async function lookUp() {
+    setProblem(null);
+    setNote("Looking it up on npm…");
+    const response = await fetch("/api/admin/plugins", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "npm", name: npmName, version: npmVersion }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      plugin?: PluginPreview;
+      file?: string;
+      source?: string;
+      error?: { message?: string };
+    } | null;
+    setNote("");
+    if (!response.ok || !body?.plugin || !body.file) {
+      setAdding(null);
+      setProblem(body?.error?.message ?? "The package could not be looked up.");
+      return;
+    }
+    setApproved(body.plugin.permissions.map((p) => p.permission));
+    setAdding({ text: body.file, preview: body.plugin, source: body.source ?? "file" });
   }
 
   async function install() {
@@ -68,7 +98,12 @@ export function PluginsScreen({
     const response = await fetch("/api/admin/plugins", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "install", file: adding.text, approved }),
+      body: JSON.stringify({
+        action: "install",
+        file: adding.text,
+        approved,
+        source: adding.source,
+      }),
     });
     const body = (await response.json().catch(() => null)) as {
       error?: { message?: string };
@@ -141,6 +176,27 @@ export function PluginsScreen({
           />
         </label>
       </p>
+      <form
+        aria-label="Add a plugin from npm"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void lookUp();
+        }}
+      >
+        <p>
+          <label>
+            npm package name{" "}
+            <input value={npmName} onChange={(event) => setNpmName(event.target.value)} />
+          </label>{" "}
+          <label>
+            Version (empty: the latest){" "}
+            <input value={npmVersion} onChange={(event) => setNpmVersion(event.target.value)} />
+          </label>{" "}
+          <Button type="submit" isDisabled={npmName.trim() === ""}>
+            Look up on npm
+          </Button>
+        </p>
+      </form>
       {adding ? (
         <form
           aria-label="Add this plugin"
@@ -154,6 +210,7 @@ export function PluginsScreen({
           </h3>
           <p>
             By {adding.preview.author}. {adding.preview.description}
+            {adding.source === "file" ? "" : ` From ${adding.source.slice(4)}.`}
           </p>
           {adding.preview.installed ? (
             <Alert

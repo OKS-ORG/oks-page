@@ -17,7 +17,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, relative, sep } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -5571,11 +5571,73 @@ describe.skipIf(!findBrowser())(
     const owner = { email: "anna@example.com", password: "a-long-password" };
     const cara = { email: "cara@example.com", password: "cara-long-password" };
 
+    // A registry that holds two plugins: one good, and one whose download does not match its published hash.
+    const pluginText = JSON.stringify({
+      format: 1,
+      manifest: {
+        id: "npm-hello",
+        version: "1.0.0",
+        displayName: "NPM Hello",
+        description: "Comes from npm.",
+        author: "Ada",
+        permissions: ["content:read"],
+        hooks: [],
+        blocks: [],
+      },
+      code: "export default { hooks: {} };",
+      integrity: createHash("sha256").update("export default { hooks: {} };").digest("hex"),
+    });
+    const tarOf = (name: string, text: string) => {
+      const body = Buffer.from(text);
+      const header = Buffer.alloc(512);
+      header.write(name, 0, "utf8");
+      header.write("0000644\0", 100, "latin1");
+      header.write(body.length.toString(8).padStart(11, "0") + "\0", 124, "latin1");
+      header.write("0", 156, "latin1");
+      header.write("ustar\0", 257, "latin1");
+      return gzipSync(
+        Buffer.concat([
+          header,
+          body,
+          Buffer.alloc((512 - (body.length % 512)) % 512),
+          Buffer.alloc(1024),
+        ]),
+      );
+    };
+    const tarball = tarOf("package/npm-hello-1.0.0.oksplugin", pluginText);
+    let registry: Server;
+    let registryUrl = "";
+
     beforeAll(async () => {
+      registry = createHttpServer((request, response) => {
+        const url = request.url ?? "";
+        const meta = (name: string, integrity: string) => ({
+          name,
+          version: "1.0.0",
+          dist: { tarball: `${registryUrl}/${name}/-/${name}-1.0.0.tgz`, integrity },
+        });
+        if (url.endsWith(".tgz")) {
+          response.end(tarball);
+        } else if (url === "/npm-hello/latest" || url === "/npm-hello/1.0.0") {
+          response.end(
+            JSON.stringify(
+              meta("npm-hello", `sha512-${createHash("sha512").update(tarball).digest("base64")}`),
+            ),
+          );
+        } else if (url === "/npm-bad/latest") {
+          response.end(JSON.stringify(meta("npm-bad", "sha512-AAAA")));
+        } else {
+          response.statusCode = 404;
+          response.end("{}");
+        }
+      });
+      await new Promise<void>((done) => registry.listen(0, "127.0.0.1", done));
+      registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
       site = await startSite("sqlite", db, {
         OKS_SECRET: "l".repeat(40),
         OKS_LICENCE_PUBLIC_KEYS: licencePublic,
+        OKS_NPM_REGISTRY: registryUrl,
       });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
@@ -5607,6 +5669,7 @@ describe.skipIf(!findBrowser())(
       await browser?.close();
       site?.server.kill();
       await db?.close();
+      registry?.close();
     });
 
     type Page = Awaited<ReturnType<Browser["newPage"]>>;
@@ -7552,6 +7615,47 @@ describe.skipIf(!findBrowser())(
       await page.getByText("Hello plugin is on.").waitFor();
 
       // Removing asks first, then takes the plugin away.
+      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Yes, remove" }).click();
+      await page.getByText("No plugins are installed.").waitFor();
+    });
+
+    test("PG-02: a plugin is looked up on npm by its name, checked against the registry's hash, and added", async () => {
+      const page = await signedIn(owner);
+      // Not signed in: the server does not go to the registry for anybody.
+      const anonymous = await fetch(site.base + "/api/admin/plugins", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: site.base },
+        body: JSON.stringify({ action: "npm", name: "npm-hello", version: "" }),
+      });
+      expect(anonymous.status).toBe(401);
+      await page.goto(site.base + "/admin/tools/plugins");
+      const name = page.getByLabel("npm package name");
+      const look = page.getByRole("button", { name: "Look up on npm" });
+      await name.waitFor();
+      expect(await look.isDisabled()).toBe(true);
+
+      // A package that is not there, a name that cannot be one, and a download that does not match its hash.
+      await name.fill("no-such-package");
+      await look.click();
+      await page.getByText("There is no such package or version on npm.").waitFor();
+      await name.fill("Not A Name");
+      await look.click();
+      await page.getByText(/That is not an npm package name/).waitFor();
+      await name.fill("npm-bad");
+      await look.click();
+      await page.getByText(/does not match the hash the registry published/).waitFor();
+
+      // The good one shows what it asks for, and is added.
+      await name.fill("npm-hello");
+      await look.click();
+      await page.getByRole("heading", { name: "Add NPM Hello 1.0.0" }).waitFor();
+      await page.getByText(/From npm-hello@1\.0\.0\./).waitFor();
+      await page.getByLabel(/Read your published posts and pages/).waitFor();
+      await page.getByRole("button", { name: "Add plugin" }).click();
+      await page.getByText("NPM Hello is added and switched on.").waitFor();
+      const row = page.getByRole("row", { name: /NPM Hello/ });
+      await row.waitFor();
       await row.getByRole("button", { name: "Remove" }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("No plugins are installed.").waitFor();
