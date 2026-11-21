@@ -3,6 +3,7 @@
 //   node scripts/release.mjs                 check every package and pack it (nothing is sent anywhere)
 //   node scripts/release.mjs --version 0.1.0-beta.1   set one version in every package and in the packages' links to each other
 //   node scripts/release.mjs --publish       build, check, and publish in dependency order to npm
+//   node scripts/release.mjs --publish --dry-run   the same, but npm only reports what it would send
 //
 // Publishing needs `npm login` first (done by a person). The tag defaults to "beta" so that nobody
 // gets a first release by accident; pass --tag latest for a stable one.
@@ -121,11 +122,30 @@ export function main() {
     run("pnpm", ["build"]);
     const out = resolve(option("--out") ?? join(root, ".oks", "packs"));
     mkdirSync(out, { recursive: true });
+    const dry = flag("--dry-run");
+    if (flag("--publish") && !dry) {
+      // Stops here, before anything is sent, when nobody is logged in to npm.
+      try {
+        const who = execFileSync("npm", ["whoami"], { encoding: "utf8" }).trim();
+        console.log(`Publishing as npm user ${who}`);
+      } catch {
+        console.error("Not logged in to npm: run `npm login` first.");
+        process.exit(1);
+      }
+    }
     for (const pkg of ordered) {
       if (flag("--publish")) {
         run(
           "pnpm",
-          ["publish", "--access", "public", "--tag", option("--tag") ?? "beta", "--no-git-checks"],
+          [
+            "publish",
+            "--access",
+            "public",
+            "--tag",
+            option("--tag") ?? "beta",
+            "--no-git-checks",
+            ...(dry ? ["--dry-run"] : []),
+          ],
           { cwd: pkg.dir },
         );
       } else {
