@@ -1,7 +1,6 @@
 {
   "name": "@oks-page/admin",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "The admin app (React, oks-ui)",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,5 +29,21 @@
   "files": [
     "dist",
     "src/shell.css"
-  ]
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/admin"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

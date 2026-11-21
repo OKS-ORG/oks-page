@@ -77,6 +77,7 @@ export function withOksPage(config: NextConfig = {}): NextConfig {
       "pg",
       "@oks-page/sandbox",
       "workerd",
+      "ssh2",
       "sharp",
       "jsdom",
     ]),

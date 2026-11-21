@@ -1,7 +1,6 @@
 {
   "name": "@oks-page/auth",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "Login, sessions, roles and capabilities",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,5 +28,24 @@
     "otplib": "^13.5.0",
     "playwright-core": "^1.64.1",
     "ulidx": "^2.4.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/auth"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

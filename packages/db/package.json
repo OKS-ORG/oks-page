@@ -1,7 +1,6 @@
 {
   "name": "@oks-page/db",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "Database schema (Drizzle), migrations, SQLite and PostgreSQL adapters",
   "type": "module",
   "main": "./dist/index.js",
@@ -37,5 +36,25 @@
   },
   "scripts": {
     "generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/db"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

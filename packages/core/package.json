@@ -1,7 +1,6 @@
 {
   "name": "@oks-page/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "Content engine: types, entries, revisions, taxonomies, menus, settings, hooks, permissions, jobs",
   "type": "module",
   "main": "./dist/index.js",
@@ -54,5 +53,24 @@
     "@types/ssh2": "^1.15.6",
     "sharp": "0.35.5",
     "smtp-server": "3.21.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

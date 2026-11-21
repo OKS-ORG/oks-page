@@ -1,7 +1,6 @@
 {
   "name": "create-oks-page",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "Creates a new oks-page site: npx create-oks-page my-site",
   "type": "module",
   "bin": {
@@ -18,5 +17,18 @@
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.20.5"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/create-oks-page"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

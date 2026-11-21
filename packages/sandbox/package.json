@@ -1,7 +1,6 @@
 {
   "name": "@oks-page/sandbox",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "SandboxRunner interface and the workerd adapter",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,5 +18,24 @@
   },
   "devDependencies": {
     "@oks-page/auth": "workspace:*"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/sandbox"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,7 +1,6 @@
 {
   "name": "oks-page",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "The site, the admin and the API of oks-page as one installable package: a project re-exports its pages from here",
   "type": "module",
   "files": [
@@ -42,5 +41,21 @@
     "next": "16.4.2",
     "react": "19.3.1",
     "react-dom": "19.3.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OKS-ORG/oks-page.git",
+    "directory": "packages/oks-page"
+  },
+  "homepage": "https://github.com/OKS-ORG/oks-page#readme",
+  "bugs": {
+    "url": "https://github.com/OKS-ORG/oks-page/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
