@@ -89,6 +89,9 @@ export async function syncPlugin(
       ...(typeof row["integrity"] === "string" ? { integrity: row["integrity"] } : {}),
       ...(manifest["settings"] ? { settings: manifest["settings"] as never } : {}),
       ...(typeof manifest["priority"] === "number" ? { priority: manifest["priority"] } : {}),
+      ...(typeof manifest["routes"] === "object" && manifest["routes"]
+        ? { routes: manifest["routes"] as never }
+        : {}),
     },
     row["code"],
     extensionId,

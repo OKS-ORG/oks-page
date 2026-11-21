@@ -7862,6 +7862,95 @@ describe.skipIf(!findBrowser())(
       await call(page, "DELETE", `/api/admin/entries/${id}`);
     });
 
+    test("PG-10: a plugin's routes answer visitors under /api/oks/plugins, within the limits they declare, and stop when the plugin is off", async () => {
+      const page = await signedIn(owner);
+      const code = `export default { routes: {
+        send: async (req, ctx) => {
+          const n = ((await ctx.storage.get("c", "n")) || 0) + 1;
+          await ctx.storage.set("c", "n", n);
+          if (req.data && req.data.back) return { redirect: req.data.back };
+          return { status: 201, json: { name: req.data && req.data.name, n } };
+        },
+        ping: async (req) => ({ text: "pong " + (req.query.who || "") }),
+        mine: async (req) => ({ json: { user: req.user && req.user.id } }),
+      } };`;
+      const manifest = {
+        id: "routed",
+        version: "1.0.0",
+        displayName: "Routed",
+        description: "Answers three addresses.",
+        author: "Ada",
+        permissions: ["routes:public"],
+        hooks: [],
+        blocks: [],
+        routes: {
+          send: { method: "POST", maxBytes: 200 },
+          ping: { method: "GET" },
+          mine: { method: "GET", signedIn: true },
+        },
+      };
+      const file = JSON.stringify({
+        format: 1,
+        manifest,
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: ["routes:public"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const at = (name: string) => `${site.base}/api/oks/plugins/routed/${name}`;
+      const form = (name: string, body: string, headers: Record<string, string> = {}) =>
+        fetch(at(name), {
+          method: "POST",
+          redirect: "manual",
+          headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+          body,
+        });
+      try {
+        // A form sent by a visitor reaches the plugin, which keeps its own count and answers with JSON.
+        const first = await form("send", "name=Anna");
+        expect(first.status).toBe(201);
+        expect(first.headers.get("cache-control")).toBe("private, no-store");
+        expect(await first.json()).toEqual({ name: "Anna", n: 1 });
+        expect(await (await form("send", "name=Bo")).json()).toEqual({ name: "Bo", n: 2 });
+        // The plugin may send the browser back to a page of this site; never to another site.
+        const back = await form("send", "back=%2Fthanks");
+        expect(back.status).toBe(303);
+        expect(back.headers.get("location")).toBe("/thanks");
+        // The limits the route declared hold: a request that is too big never reaches the plugin.
+        expect((await form("send", "name=" + "x".repeat(300))).status).toBe(413);
+        expect((await form("send", "name=Anna", { origin: "https://evil.example" })).status).toBe(
+          403,
+        );
+        // Wrong method, unknown route and unknown plugin are plain refusals.
+        expect((await fetch(at("send"))).status).toBe(405);
+        expect((await form("ping", "x=1")).status).toBe(405);
+        expect((await fetch(at("nope"))).status).toBe(404);
+        expect((await fetch(`${site.base}/api/oks/plugins/ghost/ping`)).status).toBe(404);
+        // A GET route answers with plain text.
+        const pong = await fetch(at("ping") + "?who=Ada");
+        expect(pong.status).toBe(200);
+        expect(pong.headers.get("content-type")).toContain("text/plain");
+        expect(await pong.text()).toBe("pong Ada");
+        // A route for signed-in people refuses a visitor, and tells the plugin who the person is.
+        expect((await fetch(at("mine"))).status).toBe(401);
+        const mine = await page.context().request.get(at("mine"));
+        expect(mine.status()).toBe(200);
+        expect((await mine.json()).user).toMatch(/\w+/);
+        // Switched off, the addresses are gone at once.
+        await call(page, "PATCH", "/api/admin/plugins", { id: "routed", enabled: false });
+        expect((await fetch(at("ping"))).status).toBe(404);
+        await call(page, "PATCH", "/api/admin/plugins", { id: "routed", enabled: true });
+        expect((await fetch(at("ping"))).status).toBe(200);
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=routed");
+      }
+      expect((await fetch(at("ping"))).status).toBe(404);
+    });
+
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);
       const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {

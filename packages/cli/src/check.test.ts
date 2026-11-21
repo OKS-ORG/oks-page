@@ -155,6 +155,39 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PL-41 routes: the manifest and the code must agree, and routes need routes:public",
+    async () => {
+      const source = `export default { routes: { send: async () => ({ json: 1 }) } };`;
+      const routes = { send: { method: "POST" } };
+      const good = await checkPlugin(
+        plugin(source, { hooks: [], permissions: ["routes:public"], routes }),
+      );
+      expect(good.issues).toEqual([]);
+      const unlisted = await checkPlugin(
+        plugin(source, { hooks: [], permissions: ["routes:public"] }),
+      );
+      expect(errors(unlisted).map((e) => e.message)).toEqual([
+        'The code has the route "send" but "oksPage.routes" does not list it.',
+      ]);
+      const missing = await checkPlugin(
+        plugin(`export default {};`, {
+          hooks: [],
+          permissions: ["routes:public"],
+          routes,
+        }),
+      );
+      expect(errors(missing).map((e) => e.message)).toEqual([
+        '"oksPage.routes" lists "send" but the code does not have it.',
+      ]);
+      const noPermission = await checkPlugin(plugin(source, { hooks: [], routes }));
+      expect(errors(noPermission).map((e) => e.message)).toContain(
+        'A plugin with routes must list "routes:public" in "permissions".',
+      );
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

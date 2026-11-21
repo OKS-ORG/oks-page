@@ -50,6 +50,9 @@ export async function packPlugin(dir: string, outFile?: string): Promise<PackRes
     ...(raw["blockInfo"] && typeof raw["blockInfo"] === "object"
       ? { blockInfo: raw["blockInfo"] as NonNullable<PluginFileManifest["blockInfo"]> }
       : {}),
+    ...(raw["routes"] && typeof raw["routes"] === "object"
+      ? { routes: raw["routes"] as NonNullable<PluginFileManifest["routes"]> }
+      : {}),
     ...(typeof raw["priority"] === "number" ? { priority: raw["priority"] } : {}),
     ...(raw["settings"] && typeof raw["settings"] === "object"
       ? { settings: raw["settings"] as NonNullable<PluginFileManifest["settings"]> }

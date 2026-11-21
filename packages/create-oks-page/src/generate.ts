@@ -424,6 +424,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { DELETE, GET, POST } from ${from("api-publish")};\n`,
     },
     {
+      path: "app/api/oks/plugins/[plugin]/[route]/route.ts",
+      content: `export { GET, POST } from ${from("api-plugin-routes")};\n`,
+    },
+    {
       path: "app/api/admin/plugins/route.ts",
       content: `export { DELETE, GET, PATCH, POST } from ${from("api-plugins")};
 `,

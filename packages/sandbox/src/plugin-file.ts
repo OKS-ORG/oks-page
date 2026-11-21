@@ -3,7 +3,7 @@
 // without a network, and the same file can come from a marketplace later. Nothing here runs the code.
 import { createHash } from "node:crypto";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
-import type { SettingsSchema } from "./types.js";
+import type { RouteInfo, SettingsSchema } from "./types.js";
 
 export const PLUGIN_FILE_FORMAT = 1;
 /** The biggest plugin file the site takes (the bundle itself is limited more tightly by `oks check`). */
@@ -22,6 +22,8 @@ export interface PluginFileManifest {
   blockInfo?: Record<string, { label: string; settings?: SettingsSchema }>;
   priority?: number;
   settings?: SettingsSchema;
+  /** The addresses the plugin adds, by route name (needs the permission `routes:public`). */
+  routes?: Record<string, RouteInfo>;
 }
 
 export interface PluginFile {
@@ -94,6 +96,40 @@ function readSettings(value: unknown, where: string): SettingsSchema | string {
   return out;
 }
 
+export const ROUTE_BODY_DEFAULT = 20_000;
+export const ROUTE_BODY_MOST = 100_000;
+
+/** The routes of a manifest, or the words for what is wrong with them. */
+export function readRoutes(value: unknown): Record<string, RouteInfo> | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return "The plugin's routes are not valid.";
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 20) return "The plugin has too many routes.";
+  const out: Record<string, RouteInfo> = {};
+  for (const [name, raw] of entries) {
+    const r = raw as { method?: unknown; maxBytes?: unknown; signedIn?: unknown } | null;
+    if (
+      !BLOCK.test(name) ||
+      r === null ||
+      typeof r !== "object" ||
+      (r.method !== "GET" && r.method !== "POST") ||
+      (r.maxBytes !== undefined &&
+        (typeof r.maxBytes !== "number" ||
+          !Number.isInteger(r.maxBytes) ||
+          r.maxBytes < 0 ||
+          r.maxBytes > ROUTE_BODY_MOST)) ||
+      (r.signedIn !== undefined && typeof r.signedIn !== "boolean")
+    )
+      return `The route "${name.slice(0, 40)}" is not valid.`;
+    out[name] = {
+      method: r.method,
+      ...(r.maxBytes !== undefined ? { maxBytes: r.maxBytes as number } : {}),
+      ...(r.signedIn ? { signedIn: true } : {}),
+    };
+  }
+  return out;
+}
+
 /** Reads the text of a plugin file and checks every part of it. A bad file says in plain words what is wrong. */
 export function readPluginFile(text: string): PluginFileResult {
   if (Buffer.byteLength(text) > PLUGIN_FILE_MAX_BYTES)
@@ -153,6 +189,14 @@ export function readPluginFile(text: string): PluginFileResult {
     if (typeof read === "string") return bad(read);
     settings = read;
   }
+  let routes: Record<string, RouteInfo> | undefined;
+  if (mm["routes"] !== undefined) {
+    const read = readRoutes(mm["routes"]);
+    if (typeof read === "string") return bad(read);
+    if (Object.keys(read).length > 0 && !permissions.includes("routes:public"))
+      return bad('A plugin with routes must ask for the permission "routes:public".');
+    routes = read;
+  }
   let blockInfo: PluginFileManifest["blockInfo"];
   if (mm["blockInfo"] !== undefined) {
     const info = mm["blockInfo"];
@@ -198,6 +242,7 @@ export function readPluginFile(text: string): PluginFileResult {
         ...(blockInfo ? { blockInfo } : {}),
         ...(priority !== undefined ? { priority } : {}),
         ...(settings ? { settings } : {}),
+        ...(routes && Object.keys(routes).length > 0 ? { routes } : {}),
       },
       code: f["code"],
       integrity: f["integrity"],

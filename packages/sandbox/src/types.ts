@@ -11,7 +11,47 @@ export interface PluginManifest {
   settings?: SettingsSchema;
   /** Filters run by priority, lowest first, then in install order (spec 04, section 7). Default 10. */
   priority?: number;
+  /** The web addresses the plugin adds under `/api/oks/plugins/<id>/<name>` (needs `routes:public`; spec 04, section 9). */
+  routes?: Record<string, RouteInfo>;
 }
+
+/** What a plugin says about one of its routes. The site checks it before the plugin's code is called. */
+export interface RouteInfo {
+  method: "GET" | "POST";
+  /** The most bytes of the request body the site hands to the plugin. Default 20 000, at most 100 000. */
+  maxBytes?: number;
+  /** Only a signed-in person may use the route (the plugin then also gets who it is). */
+  signedIn?: boolean;
+}
+
+/** What the site hands to a plugin's route. Nothing in it names the visitor beyond what they sent. */
+export interface RouteRequest {
+  method: "GET" | "POST";
+  /** The query string as text pairs (the first value of each name, at most 50). */
+  query: Record<string, string>;
+  /** The body as text (cut at the route's limit: a bigger request never reaches the plugin). */
+  body: string;
+  /** The body read as data: JSON, or a form (`application/x-www-form-urlencoded`), else null. */
+  data: Record<string, unknown> | null;
+  /** The request's content type, without parameters. */
+  contentType: string;
+  /** Who is signed in, for a route that needs it. */
+  user?: { id: string };
+}
+
+/** What a plugin's route answers; the site turns it into a web answer. */
+export interface RouteReply {
+  /** 200 to 599, but not a redirect: use `redirect`. Default 200. */
+  status: number;
+  /** Exactly one of these is set. */
+  json?: unknown;
+  text?: string;
+  /** A path on this site (starts with one slash): answered with a 303 so a form sent by a browser lands there. */
+  redirect?: string;
+}
+
+export type RouteRun =
+  { ok: true; reply: RouteReply } | { ok: false; status: number; message: string };
 
 /** One setting a plugin declares. A `secret` (an API key) is sealed at rest and never shown in full again (PL-39). */
 export interface SettingField {
@@ -46,7 +86,7 @@ export interface ContentService {
   ): Promise<ContentEntry | null>;
 }
 
-export type CallKind = "hook" | "block";
+export type CallKind = "hook" | "block" | "route";
 
 /** The person a call acts for (spec 02, section 8, rule 1). The core builds it from the person's role, for example
  * with `capabilitiesOf` from `@oks-page/auth`. */

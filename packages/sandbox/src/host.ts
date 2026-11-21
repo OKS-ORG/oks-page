@@ -33,6 +33,9 @@ import type {
   PluginStatus,
   PublishCheck,
   PublishCheckNote,
+  RouteInfo,
+  RouteRequest,
+  RouteRun,
 } from "./types.js";
 import { WRAPPER_SOURCE } from "./wrapper.js";
 
@@ -255,7 +258,9 @@ export class SandboxHost {
 
   /** The hooks and blocks the plugin's code really has, read by starting it. `oks check` compares this with the
    * manifest (spec 04, section 11). Null for a plugin that is not loaded. */
-  async describe(id: string): Promise<{ hooks: string[]; blocks: string[] } | null> {
+  async describe(
+    id: string,
+  ): Promise<{ hooks: string[]; blocks: string[]; routes: string[] } | null> {
     const p = this.plugins.get(id);
     if (!p) return null;
     await this.start(p);
@@ -265,8 +270,92 @@ export class SandboxHost {
       body: "{}",
       signal: AbortSignal.timeout(this.o.wallMs),
     });
-    const body = (await response.json()) as { result?: { hooks: string[]; blocks: string[] } };
-    return body.result ?? null;
+    const body = (await response.json()) as {
+      result?: { hooks: string[]; blocks: string[]; routes?: string[] };
+    };
+    return body.result ? { ...body.result, routes: body.result.routes ?? [] } : null;
+  }
+
+  /** What the plugin declared for one of its routes, or null when there is no such route to use: the plugin is unknown,
+   * switched off or was not given `routes:public`. The site reads this before it reads a request. */
+  routeInfo(id: string, name: string): RouteInfo | null {
+    const p = this.plugins.get(id);
+    const info = p?.manifest.routes?.[name];
+    if (!p || p.status !== "enabled" || !info || !p.manifest.permissions.includes("routes:public"))
+      return null;
+    return info;
+  }
+
+  /**
+   * Runs one of a plugin's routes (spec 04, section 9). The site has already read the request; this checks that the
+   * plugin may have the route (it is switched on, has `routes:public` and lists the route in its manifest), calls it
+   * and turns the answer into one of a few safe shapes: a status, then JSON, text, or a redirect to a path on this site.
+   * A plugin that fails or is too slow gives a 502 that says nothing about the plugin's insides.
+   */
+  async runRoute(
+    id: string,
+    name: string,
+    request: RouteRequest,
+    options: CallOptions = {},
+  ): Promise<RouteRun> {
+    const p = this.plugins.get(id);
+    const info = p?.manifest.routes?.[name];
+    if (!p || p.status !== "enabled" || !info || !p.manifest.permissions.includes("routes:public"))
+      return { ok: false, status: 404, message: "There is nothing at this address." };
+    if (info.method !== request.method)
+      return {
+        ok: false,
+        status: 405,
+        message: "This address does not take this kind of request.",
+      };
+    const r = await this.call(id, "route", name, request, {
+      ...options,
+      timeoutMs: options.timeoutMs ?? this.o.publishWallMs,
+    });
+    if (!r.ok || r.skipped)
+      return {
+        ok: false,
+        status: r.ok === false && r.error === "timeout" ? 504 : 502,
+        message: "The plugin could not answer this request.",
+      };
+    const a = r.result as Record<string, unknown> | null | undefined;
+    if (a === null || typeof a !== "object" || Array.isArray(a))
+      return { ok: false, status: 502, message: "The plugin could not answer this request." };
+    const status = a["status"] === undefined ? 200 : Number(a["status"]);
+    if (
+      !Number.isInteger(status) ||
+      status < 200 ||
+      status > 599 ||
+      (status >= 300 && status < 400)
+    )
+      return { ok: false, status: 502, message: "The plugin could not answer this request." };
+    const kinds = ["json", "text", "redirect"].filter((k) => a[k] !== undefined);
+    if (kinds.length !== 1)
+      return { ok: false, status: 502, message: "The plugin could not answer this request." };
+    if (kinds[0] === "redirect") {
+      const to = a["redirect"];
+      if (
+        typeof to !== "string" ||
+        !/^\/(?![/\\])\S{0,500}$/u.test(to) ||
+        [...to].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+      )
+        return { ok: false, status: 502, message: "The plugin could not answer this request." };
+      return { ok: true, reply: { status: 303, redirect: to } };
+    }
+    if (kinds[0] === "text") {
+      if (typeof a["text"] !== "string" || a["text"].length > 200_000)
+        return { ok: false, status: 502, message: "The plugin could not answer this request." };
+      return { ok: true, reply: { status, text: a["text"] } };
+    }
+    let size: number;
+    try {
+      size = JSON.stringify(a["json"] ?? null).length;
+    } catch {
+      size = Infinity;
+    }
+    if (size > 200_000)
+      return { ok: false, status: 502, message: "The plugin could not answer this request." };
+    return { ok: true, reply: { status, json: a["json"] ?? null } };
   }
 
   async call(

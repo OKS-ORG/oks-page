@@ -3,7 +3,7 @@
 // published. It reports plain sentences, each with what to do.
 import { newId } from "@oks-page/db";
 import { openMemoryDatabase } from "@oks-page/db/memory";
-import { SandboxHost } from "@oks-page/sandbox";
+import { readRoutes, SandboxHost, type RouteInfo } from "@oks-page/sandbox";
 import { build } from "esbuild";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,6 +43,7 @@ interface Manifest {
   permissions: string[];
   hooks: string[];
   blocks: string[];
+  routes: Record<string, RouteInfo>;
   entry: string | null;
 }
 
@@ -97,8 +98,13 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
       "manifest",
       '"permissions", "hooks" and "blocks" in "oksPage" must each be a list of text.',
     );
+  const routes = raw["routes"] === undefined ? {} : readRoutes(raw["routes"]);
+  if (typeof routes === "string") add("error", "manifest", `"oksPage.routes": ${routes}`);
+  else if (Object.keys(routes).length > 0 && !permissions?.includes("routes:public"))
+    add("error", "manifest", 'A plugin with routes must list "routes:public" in "permissions".');
   if (issues.length > 0) return result();
   const manifest: Manifest = {
+    routes: routes as Record<string, RouteInfo>,
     id: raw["id"] as string,
     version: pkg["version"] as string,
     runtime: typeof raw["runtime"] === "string" ? raw["runtime"] : "sandbox",
@@ -228,11 +234,16 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     );
     await host.listen();
     host.load(
-      { id: manifest.id, version: manifest.version, permissions: manifest.permissions },
+      {
+        id: manifest.id,
+        version: manifest.version,
+        permissions: manifest.permissions,
+        routes: manifest.routes,
+      },
       code,
       extensionId,
     );
-    let shape: { hooks: string[]; blocks: string[] } | null;
+    let shape: { hooks: string[]; blocks: string[]; routes: string[] } | null;
     try {
       shape = await host.describe(manifest.id);
     } catch (e) {
@@ -275,6 +286,21 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
           "error",
           "manifest-mismatch",
           `"oksPage.blocks" lists "${b}" but the code does not have it.`,
+        );
+
+    for (const r of shape.routes)
+      if (!(r in manifest.routes))
+        add(
+          "error",
+          "manifest-mismatch",
+          `The code has the route "${r}" but "oksPage.routes" does not list it.`,
+        );
+    for (const r of Object.keys(manifest.routes))
+      if (!shape.routes.includes(r))
+        add(
+          "error",
+          "manifest-mismatch",
+          `"oksPage.routes" lists "${r}" but the code does not have it.`,
         );
 
     // Every hook and block runs once with sample data. A refusal means it uses a permission it did not declare.
