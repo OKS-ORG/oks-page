@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { main, type Io } from "./cli.js";
-import { generateProject, newSecret, PRODUCT, projectFiles } from "./generate.js";
+import { EXPORT_REMOVED, generateProject, newSecret, PRODUCT, projectFiles } from "./generate.js";
 import { complete, detectPackageManager, parseArgs, UsageError } from "./options.js";
 
 describe("the options", () => {
@@ -94,6 +94,27 @@ describe("the project", () => {
     expect(pkg.dependencies.next).toBe("16.4.2");
     // pnpm 10 must be allowed to build the SQLite driver.
     expect(pkg.pnpm.onlyBuiltDependencies).toEqual(["better-sqlite3"]);
+  });
+
+  test("a project can export a static site: the export files, the build script and the command are there", () => {
+    const files = Object.fromEntries(
+      projectFiles(options(), "x".repeat(40)).map((f) => [f.path, f.content]),
+    );
+    expect(files["export/page.tsx"]).toContain(
+      `export { default, generateMetadata, generateStaticParams } from "${PRODUCT}/site-export";`,
+    );
+    expect(JSON.parse(files["export/removed.json"]!)).toEqual(EXPORT_REMOVED);
+    expect(files["scripts/build-export.mjs"]).toContain(
+      `import { runExportBuild } from "${PRODUCT}/export-build";`,
+    );
+    const pkg = JSON.parse(files["package.json"]!);
+    expect(pkg.scripts.export).toBe("oks export . --uploads uploads");
+    expect(pkg.devDependencies[`@${PRODUCT}/cli`]).toMatch(/^\^\d/);
+    // The list in a new project is the one this repository's own site uses, so what `oks export --check` reads is the same.
+    const own = JSON.parse(
+      readFileSync(new URL("../../../apps/site/export/removed.json", import.meta.url), "utf8"),
+    );
+    expect(own).toEqual(EXPORT_REMOVED);
   });
 
   test("the files only re-export from the package, and the proxy writes its own matcher", () => {

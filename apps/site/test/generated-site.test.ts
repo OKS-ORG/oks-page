@@ -2,10 +2,12 @@
 // start) and the setup wizard works in a browser. The package manager's own install step is the one thing not run: the
 // project sits inside this site's folder and finds the same node_modules.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { runCli } from "../../../packages/cli/src/main";
 import { generateProject } from "../../../packages/create-oks-page/src/generate";
 import { findBrowser, freePort, next, siteDir } from "./helpers";
 
@@ -101,6 +103,42 @@ describe.skipIf(!findBrowser())("a site made by the installer", () => {
     expect(await page.locator("main").innerText()).toContain("Made by the installer");
     await page.close();
   }, 120_000);
+
+  test("the site can be exported as plain files from its own folder, and published to a folder", async () => {
+    const out = mkdtempSync(join(tmpdir(), "oks-generated-out-"));
+    const live = join(mkdtempSync(join(tmpdir(), "oks-generated-live-")), "site");
+    try {
+      const lines: string[] = [];
+      const say = (text: string) => lines.push(text);
+      // The export reads the database the running site made (the wizard created the pages), from the project's own folder.
+      const code = await runCli(
+        ["export", dir, "--out", out, "--uploads", join(dir, "uploads")],
+        say,
+      );
+      expect(code, lines.join("\n")).toBe(0);
+      for (const [path, text] of [
+        ["index.html", "This is your home page"],
+        ["about.html", "Tell visitors who you are"],
+        ["blog/hello-world.html", "This is your first post"],
+      ] as const) {
+        expect(existsSync(join(out, path)), path).toBe(true);
+        expect(readFileSync(join(out, path), "utf8"), path).toContain(text);
+      }
+      // No admin, no API and no server code in the exported site, and the search index and the 404 page are made.
+      expect(existsSync(join(out, "admin"))).toBe(false);
+      expect(existsSync(join(out, "api"))).toBe(false);
+      expect(existsSync(join(out, "404.html"))).toBe(true);
+      expect(existsSync(join(out, "pagefind"))).toBe(true);
+
+      const published: string[] = [];
+      expect(await runCli(["publish", out, "--folder", live], (t) => published.push(t))).toBe(0);
+      expect(published.join("\n")).toMatch(/^Published: \d+ files sent, 0 removed\.$/);
+      expect(readFileSync(join(live, "index.html"), "utf8")).toContain("This is your home page");
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+      rmSync(join(live, ".."), { recursive: true, force: true });
+    }
+  }, 600_000);
 
   test("the secret key in .env is what the site uses, and the database is the file in data/", () => {
     expect(readFileSync(join(dir, ".env"), "utf8")).toMatch(/^OKS_SECRET=\w{96}$/m);

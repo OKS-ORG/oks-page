@@ -11,6 +11,29 @@ const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 };
 /** The package this installer installs: its own name without the "create-" in front. */
 export const PRODUCT = own.name.replace(/^create-/, "");
+/** What the export build leaves out of a project, and the page it puts in place (the same list `oks export --check` reads). */
+export const EXPORT_REMOVED = {
+  removed: [
+    "proxy.ts",
+    "app/api",
+    "app/not-found-handler",
+    "app/maintenance-handler",
+    "app/search",
+    "app/preview",
+    "app/sitemap.xml",
+    "app/robots.txt",
+    "app/feed.xml",
+    "app/atom.xml",
+    "app/category",
+    "app/test-form",
+    "app/admin",
+    "app/uploads",
+    "app/fonts",
+    "app/site-style",
+    "app/page-style",
+  ],
+  replaced: { "app/[[...slug]]/page.tsx": "export/page.tsx" },
+};
 const NEXT = "16.4.2";
 const REACT = "19.3.1";
 
@@ -36,7 +59,13 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     version: "0.1.0",
     private: true,
     type: "module",
-    scripts: { dev: "next dev", build: "next build", start: "next start" },
+    scripts: {
+      dev: "next dev",
+      build: "next build",
+      start: "next start",
+      // Static mode: make the exported site in `out`, then send it to a place (Tools > Publish, or `oks publish`).
+      export: "oks export . --uploads uploads",
+    },
     // pnpm 10 does not run install scripts unless they are allowed: without this the SQLite driver is never built.
     pnpm: { onlyBuiltDependencies: ["better-sqlite3"] },
     dependencies: {
@@ -46,6 +75,7 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       "react-dom": REACT,
     },
     devDependencies: {
+      [`@${PRODUCT}/cli`]: options.workspace ? "workspace:*" : `^${own.version}`,
       "@types/node": "^22.20.5",
       "@types/react": "^19.3.0",
       typescript: "~5.9.3",
@@ -69,6 +99,16 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
   return [
     { path: "package.json", content: JSON.stringify(packageJson, null, 2) + "\n" },
     { path: ".env", content: env },
+    // Static mode (spec 10): the export build leaves out what needs a server and draws the public pages ahead of time.
+    {
+      path: "export/page.tsx",
+      content: `// The page for the export build (static mode): used in place of app/[[...slug]]/page.tsx by scripts/build-export.mjs.\nexport { default, generateMetadata, generateStaticParams } from ${from("site-export")};\n`,
+    },
+    { path: "export/removed.json", content: JSON.stringify(EXPORT_REMOVED, null, 2) + "\n" },
+    {
+      path: "scripts/build-export.mjs",
+      content: `// Builds the public pages as plain files (static mode): \`oks export\` runs this.\nimport { runExportBuild } from ${from("export-build")};\n\nawait runExportBuild(process.argv[2]);\n`,
+    },
     {
       path: ".gitignore",
       content: "node_modules\n.next\n.env\ndata\nuploads\n.oks\nnext-env.d.ts\n*.tsbuildinfo\n",
