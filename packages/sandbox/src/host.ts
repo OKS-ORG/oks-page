@@ -26,6 +26,7 @@ import type {
   ContentService,
   DeveloperNote,
   FilterRun,
+  JobInfo,
   OwnerNotice,
   PermissionNote,
   PermissionRefusal,
@@ -84,6 +85,8 @@ export interface HostOptions {
   idleMs?: number;
   /** The time limit for a before-publish check (spec 04, section 5.3: 5 seconds). */
   publishWallMs?: number;
+  /** The time limit for one run of a plugin's job (30 seconds). */
+  jobWallMs?: number;
   /** Where the message for the developer goes when a plugin is refused a permission (ADR 0036). Default: the server log. */
   onDeveloperNote?: (note: DeveloperNote) => void;
   /** Tests only. */
@@ -168,6 +171,7 @@ export class SandboxHost {
       memoryMb: 0,
       idleMs: 0,
       publishWallMs: 5000,
+      jobWallMs: 30_000,
       allowPrivateForTests: false,
       pretendNoMemoryLimit: false,
       ...options,
@@ -271,7 +275,7 @@ export class SandboxHost {
    * manifest (spec 04, section 11). Null for a plugin that is not loaded. */
   async describe(
     id: string,
-  ): Promise<{ hooks: string[]; blocks: string[]; routes: string[] } | null> {
+  ): Promise<{ hooks: string[]; blocks: string[]; routes: string[]; jobs: string[] } | null> {
     const p = this.plugins.get(id);
     if (!p) return null;
     await this.start(p);
@@ -282,9 +286,48 @@ export class SandboxHost {
       signal: AbortSignal.timeout(this.o.wallMs),
     });
     const body = (await response.json()) as {
-      result?: { hooks: string[]; blocks: string[]; routes?: string[] };
+      result?: { hooks: string[]; blocks: string[]; routes?: string[]; jobs?: string[] };
     };
-    return body.result ? { ...body.result, routes: body.result.routes ?? [] } : null;
+    return body.result
+      ? { ...body.result, routes: body.result.routes ?? [], jobs: body.result.jobs ?? [] }
+      : null;
+  }
+
+  /** The jobs a plugin declared, by name, or none when it is unknown or switched off. The site reads this to know
+   * what to schedule. */
+  jobsOf(id: string): Record<string, JobInfo> {
+    const p = this.plugins.get(id);
+    return p && p.status === "enabled" ? (p.manifest.jobs ?? {}) : {};
+  }
+
+  /**
+   * Runs one of a plugin's jobs (spec 04, section 9), as the site's timer asks. It checks that the plugin is switched on
+   * and lists the job, then calls it with the job time limit (30 seconds) and the same failure rules as a hook: a job
+   * that fails or is too slow counts toward switching the plugin off. A job has no request and no answer.
+   */
+  async runJob(
+    id: string,
+    name: string,
+    options: { at?: number } = {},
+  ): Promise<{ ok: true } | { ok: false; skipped: boolean; error: string }> {
+    const p = this.plugins.get(id);
+    if (!p || p.status !== "enabled" || !p.manifest.jobs?.[name])
+      return { ok: false, skipped: true, error: "This job is not available." };
+    const r = await this.call(
+      id,
+      "job",
+      name,
+      { at: options.at ?? Date.now() },
+      {
+        timeoutMs: this.o.jobWallMs,
+      },
+    );
+    if (r.ok) return { ok: true };
+    return {
+      ok: false,
+      skipped: r.skipped === true,
+      error: String(r.error ?? "The job failed.").slice(0, 300),
+    };
   }
 
   /** What the plugin declared for one of its routes, or null when there is no such route to use: the plugin is unknown,

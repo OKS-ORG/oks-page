@@ -45,7 +45,8 @@ export function developerMessage(
   call: { kind: CallKind; name: string } | undefined,
   permission: string,
 ): string {
-  const who = call ? `${call.kind === "hook" ? "Hook" : "Block"} "${call.name}"` : "This call";
+  const word = { hook: "Hook", block: "Block", route: "Route", job: "Job" } as const;
+  const who = call ? `${word[call.kind]} "${call.name}"` : "This call";
   return `${who} needs "${permission}". Add it to "permissions" in the manifest.`;
 }
 

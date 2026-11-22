@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
-import type { RouteInfo, SettingsSchema } from "./types.js";
+import type { JobInfo, RouteInfo, SettingsSchema } from "./types.js";
 
 export const PLUGIN_FILE_FORMAT = 1;
 /** The biggest plugin file the site takes (the bundle itself is limited more tightly by `oks check`). */
@@ -27,6 +27,8 @@ export interface PluginFileManifest {
   routes?: Record<string, RouteInfo>;
   /** The screens the plugin adds to the admin, as data (needs the permission `admin:pages`). */
   adminPages?: AdminPageInfo[];
+  /** The tasks the plugin runs by itself on a timer, by name. */
+  jobs?: Record<string, JobInfo>;
 }
 
 export interface PluginFile {
@@ -133,6 +135,34 @@ export function readRoutes(value: unknown): Record<string, RouteInfo> | string {
   return out;
 }
 
+export const JOBS_MOST = 5;
+export const JOB_EVERY_LEAST = 5;
+export const JOB_EVERY_MOST = 7 * 24 * 60;
+
+/** The jobs of a manifest, or the words for what is wrong with them. */
+export function readJobs(value: unknown): Record<string, JobInfo> | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return "The plugin's jobs are not valid.";
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > JOBS_MOST) return "The plugin has too many jobs.";
+  const out: Record<string, JobInfo> = {};
+  for (const [name, raw] of entries) {
+    const j = raw as { everyMinutes?: unknown } | null;
+    if (
+      !BLOCK.test(name) ||
+      j === null ||
+      typeof j !== "object" ||
+      typeof j.everyMinutes !== "number" ||
+      !Number.isInteger(j.everyMinutes) ||
+      j.everyMinutes < JOB_EVERY_LEAST ||
+      j.everyMinutes > JOB_EVERY_MOST
+    )
+      return `The job "${name.slice(0, 40)}" is not valid: "everyMinutes" must be a whole number from ${JOB_EVERY_LEAST} to ${JOB_EVERY_MOST}.`;
+    out[name] = { everyMinutes: j.everyMinutes };
+  }
+  return out;
+}
+
 /** Reads the text of a plugin file and checks every part of it. A bad file says in plain words what is wrong. */
 export function readPluginFile(text: string): PluginFileResult {
   if (Buffer.byteLength(text) > PLUGIN_FILE_MAX_BYTES)
@@ -200,6 +230,12 @@ export function readPluginFile(text: string): PluginFileResult {
       return bad('A plugin with routes must ask for the permission "routes:public".');
     routes = read;
   }
+  let jobs: Record<string, JobInfo> | undefined;
+  if (mm["jobs"] !== undefined) {
+    const read = readJobs(mm["jobs"]);
+    if (typeof read === "string") return bad(read);
+    jobs = read;
+  }
   let adminPages: AdminPageInfo[] | undefined;
   if (mm["adminPages"] !== undefined) {
     const read = readAdminPages(mm["adminPages"]);
@@ -255,6 +291,7 @@ export function readPluginFile(text: string): PluginFileResult {
         ...(settings ? { settings } : {}),
         ...(routes && Object.keys(routes).length > 0 ? { routes } : {}),
         ...(adminPages && adminPages.length > 0 ? { adminPages } : {}),
+        ...(jobs && Object.keys(jobs).length > 0 ? { jobs } : {}),
       },
       code: f["code"],
       integrity: f["integrity"],

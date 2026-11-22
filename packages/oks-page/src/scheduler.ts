@@ -14,9 +14,11 @@ import {
   runDailyDomainCheck,
   type MayPublish,
 } from "@oks-page/core";
-import { getRunner } from "./db";
+import { getRunner, getSiteId } from "./db";
 import { expireTags } from "./expire-tags";
 import { kickEmailJobs, runEmailJobs, siteSecrets } from "./mail";
+import { runPluginJobs } from "./plugin-jobs";
+import { pluginHost } from "./plugin-runtime";
 
 const SECOND = 1000;
 const PURGE_EVERY = 60 * 60 * SECOND;
@@ -81,6 +83,20 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
     const gone = await purgeTrash(getRunner(), now);
     if (gone > 0)
       console.log(`[oks] Deleted ${gone} item(s) that had been in the trash for 30 days.`);
+  }
+  // The tasks plugins run by themselves (spec 04, section 9). Last, because a job may take up to 30 seconds. The
+  // sandbox starts only when a job is due.
+  try {
+    await runPluginJobs({
+      runner: getRunner(),
+      siteId: await getSiteId(),
+      runJob: async (plugin, name, at) => (await pluginHost()).runJob(plugin, name, { at }),
+      now,
+    });
+  } catch (error) {
+    // A site that is not set up yet has no plugins and nothing to say.
+    if (!(error instanceof Error && /has no site yet/.test(error.message)))
+      console.error("[oks] The plugin jobs could not run:", error);
   }
 }
 

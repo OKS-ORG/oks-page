@@ -5664,6 +5664,7 @@ describe.skipIf(!findBrowser())(
       db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
       site = await startSite("sqlite", db, {
         OKS_SECRET: "l".repeat(40),
+        OKS_SCHEDULER_SECONDS: "1",
         OKS_LICENCE_PUBLIC_KEYS: licencePublic,
         OKS_NPM_REGISTRY: registryUrl,
         OKS_EXPORT_DIR: exportDir,
@@ -8200,6 +8201,122 @@ describe.skipIf(!findBrowser())(
       } finally {
         await call(page, "DELETE", "/api/admin/plugins?id=forms");
         await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 90_000);
+
+    test("PG-13: a plugin's job runs on the site's own timer when it is due, shows on the Plugins screen, and goes with the plugin", async () => {
+      const page = await signedIn(owner);
+      const dir = new URL("../../forms-plugin/", import.meta.url);
+      const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8")) as {
+        version: string;
+        oksPage: Record<string, unknown>;
+      };
+      const code = readFileSync(new URL("src/index.js", dir), "utf8");
+      const rest: Record<string, unknown> = { ...pkg.oksPage };
+      delete rest.type;
+      const file = JSON.stringify({
+        format: 1,
+        manifest: { ...rest, version: pkg.version, author: "oks-page" },
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: ["admin:pages", "routes:public", "email:send"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const kind = "plugin:forms:keep";
+      const until = async (what: string, test: () => Promise<boolean>, ms = 25_000) => {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+          if (await test()) return;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        throw new Error(`Timed out waiting for: ${what}`);
+      };
+      try {
+        const ext = String(
+          (await db.runner.all(`select id from extensions where key = 'forms'`))[0]!["id"],
+        );
+        // Messages that are far past their keeping time, and one that is recent.
+        const day = 24 * 60 * 60 * 1000;
+        for (const [age, tag, title] of [
+          [500, "a", "Ancient"],
+          [450, "b", "Ancient"],
+          [1, "c", "Recent"],
+        ] as const) {
+          const at = Date.now() - age * day;
+          await db.run(
+            "insert into extension_storage (extension_id, collection, key, value, size_bytes, updated_at) values (?, 'messages', ?, ?, 10, ?)",
+            [
+              ext,
+              `${String(at).padStart(15, "0")}-${tag}`,
+              JSON.stringify({ at, status: "new", title, summary: "x", values: [] }),
+              new Date(),
+            ],
+          );
+        }
+        const kept = async () =>
+          (
+            await db.runner.all(
+              `select value from extension_storage where extension_id = ? and collection = 'messages'`,
+              [ext],
+            )
+          ).length;
+        expect(await kept()).toBe(3);
+        // The timer queues the first run one interval (a day) after it first looks at the plugin.
+        await until("the job to be queued", async () => {
+          const q = await db.runner.all(`select status from jobs where kind = ?`, [kind]);
+          return q.length === 1 && String(q[0]!["status"]) === "queued";
+        });
+        expect(await kept()).toBe(3);
+        // Make it due. The next look of the timer (every second here) runs it.
+        await db.run(`update jobs set run_at = ? where kind = ?`, [
+          new Date(Date.now() - 1000),
+          kind,
+        ]);
+        await until("the job to run", async () => (await kept()) === 1);
+        const left = await db.runner.all(
+          `select value from extension_storage where extension_id = ? and collection = 'messages'`,
+          [ext],
+        );
+        expect(JSON.stringify(left)).toContain("Recent");
+        await until("the job to be marked done", async () => {
+          const q = await db.runner.all(
+            `select status from jobs where kind = ? and status = 'done'`,
+            [kind],
+          );
+          return q.length === 1;
+        });
+
+        // The Plugins screen says what runs by itself, when it last ran, and when it runs next.
+        const listed = await call(page, "GET", "/api/admin/plugins");
+        const forms = (
+          listed.json!["plugins"] as {
+            id: string;
+            jobs: {
+              name: string;
+              everyMinutes: number;
+              last: { ok: boolean } | null;
+              next: number | null;
+            }[];
+          }[]
+        ).find((p) => p.id === "forms");
+        expect(forms?.jobs[0]).toMatchObject({
+          name: "keep",
+          everyMinutes: 1440,
+          last: { ok: true },
+        });
+        await page.goto(site.base + "/admin/tools/plugins");
+        await page.getByText(/Runs by itself: keep, every day; last .* \(worked\)/).waitFor();
+
+        // Switched off, nothing more is queued or run; removed, its timed runs go with it.
+        await call(page, "PATCH", "/api/admin/plugins", { id: "forms", enabled: false });
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        expect((await db.runner.all(`select id from jobs where kind = ?`, [kind])).length).toBe(0);
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
       }
     }, 90_000);
 

@@ -244,13 +244,23 @@ async function forget(ctx) {
     36,
   );
   const oldest = await ctx.storage.list("messages", { limit: 50, order: "asc" });
+  let gone = 0;
   for (const row of oldest) {
     if (!(row.value && Number(row.value.at) < Date.now() - months * 30 * DAY)) break;
     await ctx.storage.delete("messages", row.key);
+    gone += 1;
   }
+  return gone;
 }
 
 export default {
+  jobs: {
+    // Once a day, without waiting for a visitor: delete the messages that are past their keeping time, oldest first
+    // (up to 1,000 in one run; the rest go in the next run).
+    async keep(_info, ctx) {
+      for (let round = 0; round < 20; round += 1) if ((await forget(ctx)) < 50) break;
+    },
+  },
   blocks: {
     form: {
       async render(props, ctx) {

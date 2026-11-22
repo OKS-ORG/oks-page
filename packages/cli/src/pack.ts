@@ -53,6 +53,9 @@ export async function packPlugin(dir: string, outFile?: string): Promise<PackRes
     ...(raw["routes"] && typeof raw["routes"] === "object"
       ? { routes: raw["routes"] as NonNullable<PluginFileManifest["routes"]> }
       : {}),
+    ...(raw["jobs"] && typeof raw["jobs"] === "object" && !Array.isArray(raw["jobs"])
+      ? { jobs: raw["jobs"] as NonNullable<PluginFileManifest["jobs"]> }
+      : {}),
     ...(Array.isArray(raw["adminPages"])
       ? { adminPages: raw["adminPages"] as NonNullable<PluginFileManifest["adminPages"]> }
       : {}),

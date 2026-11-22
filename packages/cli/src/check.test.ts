@@ -220,6 +220,29 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PL-73 jobs: the manifest and the code must agree, and an interval must be from 5 minutes to 7 days",
+    async () => {
+      const source = `export default { jobs: { keep: async () => {} } };`;
+      const jobs = { keep: { everyMinutes: 1440 } };
+      const good = await checkPlugin(plugin(source, { hooks: [], jobs }));
+      expect(good.issues).toEqual([]);
+      const unlisted = await checkPlugin(plugin(source, { hooks: [] }));
+      expect(errors(unlisted).map((e) => e.message)).toEqual([
+        'The code has the job "keep" but "oksPage.jobs" does not list it.',
+      ]);
+      const missing = await checkPlugin(plugin(`export default {};`, { hooks: [], jobs }));
+      expect(errors(missing).map((e) => e.message)).toEqual([
+        '"oksPage.jobs" lists "keep" but the code does not have it.',
+      ]);
+      const tooOften = await checkPlugin(
+        plugin(source, { hooks: [], jobs: { keep: { everyMinutes: 1 } } }),
+      );
+      expect(errors(tooOften)[0]?.message).toContain('"oksPage.jobs"');
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

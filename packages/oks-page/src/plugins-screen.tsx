@@ -8,6 +8,17 @@ import { PluginSettingsForm } from "./plugin-settings-form";
 
 const RISK: Record<string, string> = { low: "", medium: " (medium risk)", high: " (HIGH RISK)" };
 
+/** "every 5 minutes", "every hour", "every 3 days". */
+function every(minutes: number): string {
+  const unit = (n: number, word: string) => (n === 1 ? `every ${word}` : `every ${n} ${word}s`);
+  if (minutes % 1440 === 0) return unit(minutes / 1440, "day");
+  if (minutes % 60 === 0) return unit(minutes / 60, "hour");
+  return unit(minutes, "minute");
+}
+
+const when = (ms: number): string =>
+  `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
 const STATUS: Record<PluginInfo["status"], string> = {
   enabled: "On",
   disabled: "Off",
@@ -285,6 +296,22 @@ export function PluginsScreen({
                     {p.author ? `By ${p.author}. ` : ""}
                     {p.description}
                   </small>
+                  {p.jobs.length > 0 ? (
+                    <small style={{ display: "block" }}>
+                      Runs by itself:{" "}
+                      {p.jobs
+                        .map(
+                          (j) =>
+                            `${j.name}, ${every(j.everyMinutes)}` +
+                            (j.last
+                              ? `; last ${when(j.last.at)}${j.last.ok ? " (worked)" : ` (did not work${j.last.error ? `: ${j.last.error}` : ""})`}`
+                              : "; not run yet") +
+                            (j.next ? `; next ${when(j.next)}` : ""),
+                        )
+                        .join(". ")}
+                      .
+                    </small>
+                  ) : null}
                 </th>
                 <td>{p.version}</td>
                 <td>{STATUS[p.status]}</td>

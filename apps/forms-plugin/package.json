@@ -135,6 +135,11 @@
         }
       }
     ],
+    "jobs": {
+      "keep": {
+        "everyMinutes": 1440
+      }
+    },
     "routes": {
       "send": {
         "method": "POST",

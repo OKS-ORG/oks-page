@@ -3,6 +3,7 @@
 // the screen only shows the answers.
 import type { Actor } from "@oks-page/core";
 import { newId, type SqlRunner } from "@oks-page/db";
+import { pluginJobStatus, type PluginJobStatus } from "./plugin-jobs";
 import {
   readAdminPages,
   permissionRisk,
@@ -36,6 +37,8 @@ export interface PluginInfo {
   hasSettings: boolean;
   /** The admin pages the plugin added (only while it is on and was given `admin:pages`). */
   pages: { id: string; title: string }[];
+  /** The tasks the plugin runs by itself, with the last run and the next one. */
+  jobs: PluginJobStatus[];
 }
 
 export type PluginResult<T> =
@@ -97,6 +100,7 @@ export async function listPlugins(
         manifest["settings"] !== null &&
         typeof manifest["settings"] === "object" &&
         Object.keys(manifest["settings"] as object).length > 0,
+      jobs: await pluginJobStatus(runner, siteId, key, manifest["jobs"]),
       pages: (() => {
         if (stored !== "enabled" || !granted.includes("admin:pages")) return [];
         const read = readAdminPages(manifest["adminPages"] ?? []);
@@ -252,6 +256,11 @@ export async function removePlugin(
   )[0];
   if (!row) return fail("not_found", "This plugin is not installed.");
   await runner.all(`delete from "extensions" where "id" = ?`, [String(row["id"])]);
+  // Its timed runs go with it (a plugin id and a job name have only letters, digits and hyphens).
+  await runner.all(`delete from "jobs" where "site_id" = ? and "kind" like ?`, [
+    siteId,
+    `plugin:${key}:%`,
+  ]);
   await note(runner, siteId, actor, "plugin.removed", key, {});
   return { ok: true };
 }

@@ -13,6 +13,14 @@ export interface PluginManifest {
   priority?: number;
   /** The web addresses the plugin adds under `/api/oks/plugins/<id>/<name>` (needs `routes:public`; spec 04, section 9). */
   routes?: Record<string, RouteInfo>;
+  /** The tasks the plugin runs by itself on a timer, by name (spec 04, section 9). */
+  jobs?: Record<string, JobInfo>;
+}
+
+/** When a plugin's job runs: every this many minutes (5 to 10,080, which is 7 days). The first run is one interval
+ * after the plugin is installed. A cron line (such as "every day at 3") may come later. */
+export interface JobInfo {
+  everyMinutes: number;
 }
 
 /** What a plugin says about one of its routes. The site checks it before the plugin's code is called. */
@@ -88,7 +96,7 @@ export interface ContentService {
   ): Promise<ContentEntry | null>;
 }
 
-export type CallKind = "hook" | "block" | "route";
+export type CallKind = "hook" | "block" | "route" | "job";
 
 /** The person a call acts for (spec 02, section 8, rule 1). The core builds it from the person's role, for example
  * with `capabilitiesOf` from `@oks-page/auth`. */

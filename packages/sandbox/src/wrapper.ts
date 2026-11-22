@@ -37,7 +37,13 @@ export default {
         return J({ ok: true, result: await fn(body.event, ctx) });
       }
       if (u.pathname === "/describe")
-        return J({ ok: true, result: { hooks: Object.keys(plugin.hooks || {}), blocks: Object.keys(plugin.blocks || {}), routes: Object.keys(plugin.routes || {}) } });
+        return J({ ok: true, result: { hooks: Object.keys(plugin.hooks || {}), blocks: Object.keys(plugin.blocks || {}), routes: Object.keys(plugin.routes || {}), jobs: Object.keys(plugin.jobs || {}) } });
+      if (u.pathname.startsWith("/job/")) {
+        const fn = plugin.jobs?.[decodeURIComponent(u.pathname.slice(5))];
+        if (typeof fn !== "function") return J({ ok: false, error: "no such job" }, 404);
+        await fn({ at: body.props && body.props.at }, ctx);
+        return J({ ok: true, result: true });
+      }
       if (u.pathname.startsWith("/route/")) {
         const fn = plugin.routes?.[decodeURIComponent(u.pathname.slice(7))];
         if (typeof fn !== "function") return J({ ok: false, error: "no such route" }, 404);

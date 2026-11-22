@@ -14,10 +14,16 @@ interface ServerSftp {
   attrs(id: number, attrs: Record<string, number>): void;
 }
 
-const keys = utils.generateKeyPairSync("ed25519");
-const parsed = utils.parseKey(keys.private);
-if (parsed instanceof Error || Array.isArray(parsed))
+// A freshly made key is now and then not read back at once (it is random); making another one is enough.
+function makeTestKey() {
+  for (let tries = 0; tries < 20; tries += 1) {
+    const made = utils.generateKeyPairSync("ed25519");
+    const read = utils.parseKey(made.private);
+    if (!(read instanceof Error) && !Array.isArray(read)) return { keys: made, parsed: read };
+  }
   throw new Error("the test key could not be read");
+}
+const { keys, parsed } = makeTestKey();
 
 /** The fingerprint of the test server's host key, as the owner would be shown it. */
 export const TEST_HOST_KEY = fingerprintOf(parsed.getPublicSSH());

@@ -129,6 +129,7 @@ for (const { kind, open, skip } of openers) {
           version: file.manifest.version,
           permissions: file.manifest.permissions,
           routes: file.manifest.routes as never,
+          jobs: file.manifest.jobs as never,
         },
         file.code,
         EXT,
@@ -391,6 +392,32 @@ for (const { kind, open, skip } of openers) {
       await send(forms["contact"]!, { name: "Gus", email: "gus@example.com", message: "Hi" });
       expect((await stored()).some((m) => m.title === "Middle")).toBe(false);
       delete settings["keep_months"];
+    });
+
+    test("the keeping job deletes the messages that are past their time on its own, without a new message", async () => {
+      expect(file.manifest.jobs).toEqual({ keep: { everyMinutes: 1440 } });
+      const day = 24 * 60 * 60 * 1000;
+      const insert = (at: number, tag: string, title: string) =>
+        db.run(
+          "insert into extension_storage (extension_id, collection, key, value, size_bytes, updated_at) values (?, 'messages', ?, ?, 10, ?)",
+          [
+            EXT,
+            `${String(at).padStart(15, "0")}-${tag}`,
+            JSON.stringify({ at, status: "new", title, values: [] }),
+            T,
+          ],
+        );
+      // 120 old messages (more than one round of 50) and one that is recent.
+      for (let i = 0; i < 120; i += 1) await insert(Date.now() - 500 * day + i, `o${i}`, "Ancient");
+      await insert(Date.now() - day, "recent", "Recent");
+      expect((await stored()).filter((m) => m.title === "Ancient").length).toBe(120);
+      const run = await host.runJob("forms", "keep");
+      expect(run).toEqual({ ok: true });
+      const after = await stored();
+      expect(after.filter((m) => m.title === "Ancient").length).toBe(0);
+      expect(after.some((m) => m.title === "Recent")).toBe(true);
+      // A job the plugin did not list cannot be run.
+      expect((await host.runJob("forms", "nothing")).ok).toBe(false);
     });
 
     test("one form takes at most 30 messages an hour; the rest are dropped without telling the sender", async () => {

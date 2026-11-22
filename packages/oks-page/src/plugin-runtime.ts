@@ -94,6 +94,9 @@ export async function syncPlugin(
       ...(typeof manifest["routes"] === "object" && manifest["routes"]
         ? { routes: manifest["routes"] as never }
         : {}),
+      ...(typeof manifest["jobs"] === "object" && manifest["jobs"]
+        ? { jobs: manifest["jobs"] as never }
+        : {}),
     },
     row["code"],
     extensionId,
