@@ -12,6 +12,7 @@
     "displayName": "Forms",
     "description": "Contact forms for your pages: the message is checked for spam, kept, and emailed to you.",
     "permissions": [
+      "admin:pages",
       "email:send",
       "routes:public"
     ],
@@ -62,6 +63,78 @@
         }
       }
     },
+    "adminPages": [
+      {
+        "id": "messages",
+        "title": "Form messages",
+        "view": {
+          "type": "table",
+          "source": "storage:messages",
+          "order": "desc",
+          "columns": [
+            {
+              "field": "at",
+              "label": "Received",
+              "format": "datetime"
+            },
+            {
+              "field": "title",
+              "label": "Form",
+              "truncate": 40
+            },
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "field": "summary",
+              "label": "Message",
+              "truncate": 140
+            }
+          ],
+          "filters": [
+            {
+              "label": "New",
+              "field": "status",
+              "value": "new"
+            },
+            {
+              "label": "Read",
+              "field": "status",
+              "value": "read"
+            },
+            {
+              "label": "Spam",
+              "field": "status",
+              "value": "spam"
+            }
+          ],
+          "actions": [
+            {
+              "id": "read",
+              "label": "Mark as read",
+              "kind": "set",
+              "field": "status",
+              "value": "read"
+            },
+            {
+              "id": "new",
+              "label": "Mark as new",
+              "kind": "set",
+              "field": "status",
+              "value": "new"
+            },
+            {
+              "id": "delete",
+              "label": "Delete",
+              "kind": "delete"
+            }
+          ],
+          "empty": "No messages here.",
+          "export": true
+        }
+      }
+    ],
     "routes": {
       "send": {
         "method": "POST",

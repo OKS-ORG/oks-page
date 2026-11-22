@@ -303,6 +303,11 @@ export function PluginsScreen({
                   )}
                 </td>
                 <td>
+                  {p.pages.map((page) => (
+                    <span key={page.id}>
+                      <a href={`/admin/tools/plugins/${p.id}/${page.id}`}>{page.title}</a>{" "}
+                    </span>
+                  ))}
                   {p.hasSettings ? (
                     <>
                       <Button onPress={() => setEditing(editing === p.id ? null : p.id)}>

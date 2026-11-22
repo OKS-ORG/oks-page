@@ -3,7 +3,7 @@
 // published. It reports plain sentences, each with what to do.
 import { newId } from "@oks-page/db";
 import { openMemoryDatabase } from "@oks-page/db/memory";
-import { readRoutes, SandboxHost, type RouteInfo } from "@oks-page/sandbox";
+import { readAdminPages, readRoutes, SandboxHost, type RouteInfo } from "@oks-page/sandbox";
 import { build } from "esbuild";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -102,6 +102,16 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   if (typeof routes === "string") add("error", "manifest", `"oksPage.routes": ${routes}`);
   else if (Object.keys(routes).length > 0 && !permissions?.includes("routes:public"))
     add("error", "manifest", 'A plugin with routes must list "routes:public" in "permissions".');
+  if (raw["adminPages"] !== undefined) {
+    const pages = readAdminPages(raw["adminPages"]);
+    if (typeof pages === "string") add("error", "manifest", `"oksPage.adminPages": ${pages}`);
+    else if (pages.length > 0 && !permissions?.includes("admin:pages"))
+      add(
+        "error",
+        "manifest",
+        'A plugin with admin pages must list "admin:pages" in "permissions".',
+      );
+  }
   if (issues.length > 0) return result();
   const manifest: Manifest = {
     routes: routes as Record<string, RouteInfo>,

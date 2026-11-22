@@ -76,6 +76,7 @@ for (const { kind, open, skip } of openers) {
         why?: string;
         title: string;
         at: number;
+        summary: string;
         values: { label: string; value: string }[];
       }[]
     > => {
@@ -161,7 +162,16 @@ for (const { kind, open, skip } of openers) {
     });
 
     test("the plugin passes the check and asks only for email and public addresses", () => {
-      expect(file.manifest.permissions.sort()).toEqual(["email:send", "routes:public"]);
+      expect(file.manifest.permissions.sort()).toEqual([
+        "admin:pages",
+        "email:send",
+        "routes:public",
+      ]);
+      // The Messages page is data: a table over the plugin's own storage.
+      expect(file.manifest.adminPages?.[0]).toMatchObject({
+        id: "messages",
+        view: { source: "storage:messages", export: true },
+      });
       expect(Object.keys(file.manifest.routes ?? {})).toEqual(["send"]);
       expect(file.manifest.blocks).toEqual(["form"]);
     });
@@ -240,6 +250,8 @@ for (const { kind, open, skip } of openers) {
       expect(last.title).toBe("Contact us");
       expect(last.values).toContainEqual({ label: "Name", value: "Anna <b>Berg</b>" });
       expect(last.values).toContainEqual({ label: "Colours", value: "Red, Blue" });
+      // One line for the Messages page, every answer with its label.
+      expect(last.summary).toContain("Name: Anna <b>Berg</b> · Email: anna@example.com");
       expect(last.values).toContainEqual({ label: "Newsletter", value: "yes" });
       expect(mails.length).toBe(before + 1);
       expect(mails[before]).toMatchObject({

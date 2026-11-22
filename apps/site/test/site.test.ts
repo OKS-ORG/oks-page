@@ -8063,6 +8063,146 @@ describe.skipIf(!findBrowser())(
       }
     }, 60_000);
 
+    test("PG-12: the Forms plugin's Messages page lists what visitors sent, filters it, marks and deletes it, and downloads it", async () => {
+      const page = await signedIn(owner);
+      const dir = new URL("../../forms-plugin/", import.meta.url);
+      const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8")) as {
+        version: string;
+        oksPage: Record<string, unknown>;
+      };
+      const code = readFileSync(new URL("src/index.js", dir), "utf8");
+      const rest: Record<string, unknown> = { ...pkg.oksPage };
+      delete rest.type;
+      const file = JSON.stringify({
+        format: 1,
+        manifest: { ...rest, version: pkg.version, author: "oks-page" },
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: ["admin:pages", "routes:public", "email:send"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Contact",
+      });
+      const id = String(made.json!["id"]);
+      const api = "/api/admin/plugin-pages?plugin=forms&page=messages";
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Contact",
+          slugPart: "contact-us",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Write to us below.")),
+            {
+              id: "fm1",
+              type: "forms-form",
+              props: { title: "Write to us", fields: "Name*; Message*:long" },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const shown = await fetch(site.base + "/contact-us").then((r) => r.text());
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        const send = (fields: Record<string, string>) =>
+          fetch(`${site.base}/api/oks/plugins/forms/send`, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              _form: hidden("_form"),
+              _t: hidden("_t"),
+              _hp: "",
+              ...fields,
+            }).toString(),
+          });
+        await send({ name: "Bot", message: "Sent too fast" });
+        await new Promise((r) => setTimeout(r, 3500));
+        expect((await send({ name: "Anna", message: "Hello from Anna" })).status).toBe(200);
+        expect((await send({ name: "Ben", message: "Hello from Ben" })).status).toBe(200);
+
+        // The plugin's page is listed on the Plugins screen, and only for people who manage plugins.
+        const listed = await call(page, "GET", "/api/admin/plugins");
+        const forms = (
+          listed.json!["plugins"] as { id: string; pages: { id: string; title: string }[] }[]
+        ).find((p) => p.id === "forms");
+        expect(forms?.pages).toEqual([{ id: "messages", title: "Form messages" }]);
+        expect((await fetch(site.base + api)).status).toBe(401);
+
+        const first = await call(page, "GET", api);
+        const view = first.json!["view"] as {
+          columns: string[];
+          filters: string[];
+          rows: { cells: { text: string }[] }[];
+        };
+        expect(view.columns).toEqual(["Received", "Form", "Status", "Message"]);
+        expect(view.filters).toEqual(["New", "Read", "Spam"]);
+        expect(view.rows.length).toBe(2);
+        expect(view.rows[0]!.cells[3]!.text).toBe("Name: Ben · Message: Hello from Ben");
+
+        // The screen: the New list, then Anna is marked as read and moves to the Read list.
+        await page.goto(site.base + "/admin/tools/plugins/forms/messages");
+        await page.getByRole("heading", { name: "Form messages", level: 2 }).waitFor();
+        const rows = page.getByRole("row");
+        await page.getByRole("row", { name: /Hello from Anna/ }).waitFor();
+        await page
+          .getByRole("row", { name: /Hello from Anna/ })
+          .getByRole("button", { name: "Mark as read" })
+          .click();
+        await page.getByText("Done: Mark as read.").waitFor();
+        expect(await rows.filter({ hasText: "Hello from Anna" }).count()).toBe(0);
+        await page.getByRole("button", { name: "Read", exact: true }).click();
+        await page.getByRole("row", { name: /Hello from Anna/ }).waitFor();
+        await page.getByRole("button", { name: "Spam" }).click();
+        await page.getByRole("row", { name: /Sent too fast/ }).waitFor();
+
+        // The download has the columns and every message of the list; a formula-like start is made harmless.
+        const csv = await page.context().request.get(`${site.base}${api}&filter=0&export=1`);
+        expect(csv.status()).toBe(200);
+        expect(csv.headers()["content-type"]).toContain("text/csv");
+        expect(csv.headers()["content-disposition"]).toContain("forms-messages.csv");
+        const lines = (await csv.text()).trim().split("\r\n");
+        expect(lines[0]).toBe("Received,Form,Status,Message");
+        expect(lines.length).toBe(2);
+        expect(lines[1]).toContain("Hello from Ben");
+
+        // Delete asks first, and then the message is gone.
+        await page.getByRole("button", { name: "Read", exact: true }).click();
+        await page
+          .getByRole("row", { name: /Hello from Anna/ })
+          .getByRole("button", { name: "Delete" })
+          .click();
+        await page.getByText("Are you sure?").waitFor();
+        await page.getByRole("button", { name: "Yes, Delete" }).click();
+        await page.getByText("Done: Delete.").waitFor();
+        await page.getByText("No messages here.").waitFor();
+
+        // Another person's request cannot do it from another address, and a page that does not exist is a 404.
+        const refused = await page.context().request.post(site.base + "/api/admin/plugin-pages", {
+          headers: { origin: "https://elsewhere.example" },
+          data: { plugin: "forms", page: "messages", action: "delete", key: "x" },
+        });
+        expect(refused.status()).toBe(403);
+        expect(
+          (await call(page, "GET", "/api/admin/plugin-pages?plugin=forms&page=nope")).status,
+        ).toBe(404);
+
+        // Switched off, the page is not available.
+        await call(page, "PATCH", "/api/admin/plugins", { id: "forms", enabled: false });
+        expect((await call(page, "GET", api)).status).toBe(404);
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 90_000);
+
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);
       const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {

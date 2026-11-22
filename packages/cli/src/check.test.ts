@@ -188,6 +188,38 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PL-72 admin pages: the pages are checked like a plugin file does, and need admin:pages",
+    async () => {
+      const adminPages = [
+        {
+          id: "items",
+          title: "Items",
+          view: { type: "table", source: "storage:items", columns: [{ field: "a", label: "A" }] },
+        },
+      ];
+      const good = await checkPlugin(
+        plugin(`export default {};`, { hooks: [], permissions: ["admin:pages"], adminPages }),
+      );
+      expect(good.issues).toEqual([]);
+      const noPermission = await checkPlugin(
+        plugin(`export default {};`, { hooks: [], adminPages }),
+      );
+      expect(errors(noPermission).map((e) => e.message)).toContain(
+        'A plugin with admin pages must list "admin:pages" in "permissions".',
+      );
+      const broken = await checkPlugin(
+        plugin(`export default {};`, {
+          hooks: [],
+          permissions: ["admin:pages"],
+          adminPages: [{ id: "items", title: "Items", view: { type: "chart" } }],
+        }),
+      );
+      expect(errors(broken)[0]?.message).toContain('"oksPage.adminPages"');
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

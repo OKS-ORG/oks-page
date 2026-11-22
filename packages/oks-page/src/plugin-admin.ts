@@ -4,6 +4,7 @@
 import type { Actor } from "@oks-page/core";
 import { newId, type SqlRunner } from "@oks-page/db";
 import {
+  readAdminPages,
   permissionRisk,
   permissionWords,
   readPluginFile,
@@ -33,6 +34,8 @@ export interface PluginInfo {
   blocks: string[];
   /** True when the plugin declares settings for the owner to fill in. */
   hasSettings: boolean;
+  /** The admin pages the plugin added (only while it is on and was given `admin:pages`). */
+  pages: { id: string; title: string }[];
 }
 
 export type PluginResult<T> =
@@ -94,6 +97,11 @@ export async function listPlugins(
         manifest["settings"] !== null &&
         typeof manifest["settings"] === "object" &&
         Object.keys(manifest["settings"] as object).length > 0,
+      pages: (() => {
+        if (stored !== "enabled" || !granted.includes("admin:pages")) return [];
+        const read = readAdminPages(manifest["adminPages"] ?? []);
+        return typeof read === "string" ? [] : read.map((x) => ({ id: x.id, title: x.title }));
+      })(),
     });
   }
   return out;

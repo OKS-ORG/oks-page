@@ -2,6 +2,7 @@
 // One JSON file holds the manifest, the built bundle and the bundle's hash, so a plugin can be moved between computers
 // without a network, and the same file can come from a marketplace later. Nothing here runs the code.
 import { createHash } from "node:crypto";
+import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
 import type { RouteInfo, SettingsSchema } from "./types.js";
 
@@ -24,6 +25,8 @@ export interface PluginFileManifest {
   settings?: SettingsSchema;
   /** The addresses the plugin adds, by route name (needs the permission `routes:public`). */
   routes?: Record<string, RouteInfo>;
+  /** The screens the plugin adds to the admin, as data (needs the permission `admin:pages`). */
+  adminPages?: AdminPageInfo[];
 }
 
 export interface PluginFile {
@@ -197,6 +200,14 @@ export function readPluginFile(text: string): PluginFileResult {
       return bad('A plugin with routes must ask for the permission "routes:public".');
     routes = read;
   }
+  let adminPages: AdminPageInfo[] | undefined;
+  if (mm["adminPages"] !== undefined) {
+    const read = readAdminPages(mm["adminPages"]);
+    if (typeof read === "string") return bad(read);
+    if (read.length > 0 && !permissions.includes("admin:pages"))
+      return bad('A plugin with admin pages must ask for the permission "admin:pages".');
+    adminPages = read;
+  }
   let blockInfo: PluginFileManifest["blockInfo"];
   if (mm["blockInfo"] !== undefined) {
     const info = mm["blockInfo"];
@@ -243,6 +254,7 @@ export function readPluginFile(text: string): PluginFileResult {
         ...(priority !== undefined ? { priority } : {}),
         ...(settings ? { settings } : {}),
         ...(routes && Object.keys(routes).length > 0 ? { routes } : {}),
+        ...(adminPages && adminPages.length > 0 ? { adminPages } : {}),
       },
       code: f["code"],
       integrity: f["integrity"],

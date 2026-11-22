@@ -315,15 +315,22 @@ export default {
       if (await tooOften(ctx, formId)) return thanks;
       const at = Date.now();
       const spam = why !== "";
+      const shown = values
+        .filter((v) => v.type !== "hidden")
+        .map((v) => ({ label: v.label, value: spam ? v.value.slice(0, 200) : v.value }));
       const message = {
         form: formId,
         title: def.title || "Form",
         status: spam ? "spam" : "new",
         at,
         ...(spam ? { why } : {}),
-        values: values
-          .filter((v) => v.type !== "hidden")
-          .map((v) => ({ label: v.label, value: spam ? v.value.slice(0, 200) : v.value })),
+        // One line for the Messages page: every answer with its label.
+        summary: shown
+          .filter((v) => v.value !== "")
+          .map((v) => `${v.label}: ${v.value}`)
+          .join(" · ")
+          .slice(0, 2000),
+        values: shown,
       };
       await ctx.storage.set(
         "messages",
