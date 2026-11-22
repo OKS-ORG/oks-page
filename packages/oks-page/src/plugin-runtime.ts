@@ -10,7 +10,9 @@ import {
 } from "@oks-page/sandbox";
 import type { SqlRunner } from "@oks-page/db";
 import path from "node:path";
+import { queueEmail } from "@oks-page/core";
 import { getRunner, getSiteId } from "./db";
+import { kickEmailJobs, siteSecrets } from "./mail";
 
 type Shared = typeof globalThis & { __oksPluginHost?: Promise<SandboxHost> };
 
@@ -107,6 +109,16 @@ async function start(): Promise<SandboxHost> {
     siteId,
     content,
     pluginSettings: pluginSettingsService(),
+    sendEmail: async (pluginId, mail) => {
+      const queued = await queueEmail(runner, siteId, siteSecrets(), {
+        key: `plugin-${pluginId}`.slice(0, 60),
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text,
+      });
+      if (queued.queued) kickEmailJobs();
+      return queued.queued ? { sent: true } : { sent: false, reason: queued.reason };
+    },
     workDir: process.env["OKS_PLUGINS_DIR"] ?? path.join(process.cwd(), ".oks", "plugins"),
   });
   await host.listen();

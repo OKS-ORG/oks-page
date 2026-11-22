@@ -43,11 +43,13 @@ export interface RouteRequest {
 export interface RouteReply {
   /** 200 to 599, but not a redirect: use `redirect`. Default 200. */
   status: number;
-  /** Exactly one of these is set. */
+  /** Exactly one of these is set: `json`, `text`, `redirect` or `page`. */
   json?: unknown;
   text?: string;
   /** A path on this site (starts with one slash): answered with a 303 so a form sent by a browser lands there. */
   redirect?: string;
+  /** A small page the site draws itself, for example "Thank you": a title and a short text, both shown as plain text. */
+  page?: { title: string; text: string };
 }
 
 export type RouteRun =

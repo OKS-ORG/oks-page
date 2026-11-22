@@ -26,6 +26,26 @@ export function tooOften(key: string, now = Date.now()): boolean {
   return false;
 }
 
+const escape = (text: string): string =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+/** The small page a plugin may ask for ("Thank you"): its title and text only, escaped, with a link back to the site. */
+function pageHtml(title: string, text: string, problem: boolean): string {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((t) => t.trim())
+    .filter((t) => t !== "")
+    .map((t) => `<p>${escape(t)}</p>`)
+    .join("");
+  const body = problem ? `<div role="alert">${paragraphs}</div>` : paragraphs;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escape(title)}</title></head><body><main style="max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif"><h1>${escape(title)}</h1>${body}<p><a href="/">Back to the site</a></p></main></body></html>`;
+}
+
 const HEADERS = { "cache-control": "private, no-store", "x-content-type-options": "nosniff" };
 const fail = (status: number, message: string) =>
   NextResponse.json({ error: { message } }, { status, headers: HEADERS });
@@ -122,6 +142,11 @@ async function handle(
     return new NextResponse(null, {
       status: 303,
       headers: { ...HEADERS, location: reply.redirect },
+    });
+  if (reply.page !== undefined)
+    return new NextResponse(pageHtml(reply.page.title, reply.page.text, reply.status >= 400), {
+      status: reply.status,
+      headers: { ...HEADERS, "content-type": "text/html; charset=utf-8" },
     });
   if (reply.text !== undefined)
     return new NextResponse(reply.text, {

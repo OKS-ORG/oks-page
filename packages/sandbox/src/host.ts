@@ -48,6 +48,9 @@ const ROUTE_PERMISSION: Record<string, string | null> = {
   "/content/update": "content:write",
   "/storage/get": null,
   "/storage/set": null,
+  "/storage/list": null,
+  "/storage/delete": null,
+  "/email/send": "email:send",
   "/settings/get": null,
   "/log": null,
   "/http/fetch": "network:fetch",
@@ -61,6 +64,11 @@ export interface HostOptions {
   /** The plugins' saved settings (PL-39). When set, a plugin reads its own settings from here, secrets in full; it can
    * never name another plugin, because the host looks them up by the calling plugin's own extension. */
   pluginSettings?: PluginSettings;
+  /** Sends one email for a plugin that has `email:send` (the site's email queue). `reason` is for the plugin's log. */
+  sendEmail?: (
+    pluginId: string,
+    mail: { to: string; subject: string; text: string },
+  ) => Promise<{ sent: boolean; reason?: string }>;
   /** A folder for each plugin's files. */
   workDir: string;
   /** A call that takes longer than this is stopped and the process killed. */
@@ -122,6 +130,7 @@ export class SandboxHost {
   readonly notices: OwnerNotice[] = [];
   readonly memoryLimit: MemoryLimitSupport;
   private readonly plugins = new Map<string, Loaded>();
+  private readonly emailCount = new Map<string, { hour: number; count: number }>();
   private readonly byToken = new Map<string, Loaded>();
   private server: Server | null = null;
   private hostPort = 0;
@@ -130,6 +139,7 @@ export class SandboxHost {
       HostOptions,
       | "settings"
       | "pluginSettings"
+      | "sendEmail"
       | "onDeveloperNote"
       | "runner"
       | "siteId"
@@ -141,6 +151,7 @@ export class SandboxHost {
       HostOptions,
       | "settings"
       | "pluginSettings"
+      | "sendEmail"
       | "onDeveloperNote"
       | "runner"
       | "siteId"
@@ -329,7 +340,7 @@ export class SandboxHost {
       (status >= 300 && status < 400)
     )
       return { ok: false, status: 502, message: "The plugin could not answer this request." };
-    const kinds = ["json", "text", "redirect"].filter((k) => a[k] !== undefined);
+    const kinds = ["json", "text", "redirect", "page"].filter((k) => a[k] !== undefined);
     if (kinds.length !== 1)
       return { ok: false, status: 502, message: "The plugin could not answer this request." };
     if (kinds[0] === "redirect") {
@@ -341,6 +352,21 @@ export class SandboxHost {
       )
         return { ok: false, status: 502, message: "The plugin could not answer this request." };
       return { ok: true, reply: { status: 303, redirect: to } };
+    }
+    if (kinds[0] === "page") {
+      const page = a["page"] as Record<string, unknown> | null;
+      const title = page?.["title"];
+      const text = page?.["text"];
+      if (
+        page === null ||
+        typeof page !== "object" ||
+        typeof title !== "string" ||
+        typeof text !== "string" ||
+        title.length > 200 ||
+        text.length > 4000
+      )
+        return { ok: false, status: 502, message: "The plugin could not answer this request." };
+      return { ok: true, reply: { status, page: { title, text } } };
     }
     if (kinds[0] === "text") {
       if (typeof a["text"] !== "string" || a["text"].length > 200_000)
@@ -963,6 +989,63 @@ const config :Workerd.Config = (
             );
             return send(200, { result: true });
           });
+        }
+        case "/storage/list": {
+          const limit = Math.min(Math.max(Math.trunc(Number(body["limit"]) || 50), 1), 200);
+          const desc = body["order"] === "desc";
+          const after = typeof body["after"] === "string" ? body["after"] : null;
+          const rows = await this.o.runner.all(
+            `select "key", "value", "updated_at" from "extension_storage" where "extension_id" = ? and "collection" = ?${
+              after === null ? "" : ` and "key" ${desc ? "<" : ">"} ?`
+            } order by "key" ${desc ? "desc" : "asc"} limit ${limit}`,
+            after === null
+              ? [p.extensionId, String(body["c"])]
+              : [p.extensionId, String(body["c"]), after],
+          );
+          return send(200, {
+            result: rows.map((r) => ({
+              key: String(r["key"]),
+              value:
+                this.o.runner.dialect === "sqlite" && typeof r["value"] === "string"
+                  ? (JSON.parse(r["value"]) as unknown)
+                  : r["value"],
+              updatedAt: new Date(r["updated_at"] as string | number | Date).getTime(),
+            })),
+          });
+        }
+        case "/storage/delete": {
+          await this.o.runner.all(
+            `delete from "extension_storage" where "extension_id" = ? and "collection" = ? and "key" = ?`,
+            [p.extensionId, String(body["c"]), String(body["k"])],
+          );
+          return send(200, { result: true });
+        }
+        case "/email/send": {
+          if (!this.o.sendEmail)
+            return send(501, { error: "email is not available", code: "no_email" });
+          const to = body["to"];
+          const subject = body["subject"];
+          const text = body["text"];
+          if (
+            typeof to !== "string" ||
+            typeof subject !== "string" ||
+            typeof text !== "string" ||
+            to.length > 254 ||
+            subject.length === 0 ||
+            subject.length > 200 ||
+            text.length > 20_000 ||
+            /[\r\n]/.test(to + subject)
+          )
+            return send(400, { error: "bad email", code: "bad_email" });
+          // At most 60 emails an hour for each plugin, so a plugin that loops cannot flood anyone's inbox.
+          const hour = Math.floor(Date.now() / 3_600_000);
+          const used = this.emailCount.get(p.manifest.id);
+          const count = used && used.hour === hour ? used.count : 0;
+          if (count >= 60)
+            return send(429, { error: "too many emails this hour", code: "email_limit" });
+          this.emailCount.set(p.manifest.id, { hour, count: count + 1 });
+          const sent = await this.o.sendEmail(p.manifest.id, { to, subject, text });
+          return send(200, { result: sent });
         }
         case "/settings/get":
           return send(200, {

@@ -13,7 +13,13 @@ function makeCtx(env, callId) {
   };
   return {
     content: { get: (id) => call("/content/get", { id }), update: (id, patch) => call("/content/update", { id, patch }) },
-    storage: { get: (c, k) => call("/storage/get", { c, k }), set: (c, k, v) => call("/storage/set", { c, k, v }) },
+    storage: {
+      get: (c, k) => call("/storage/get", { c, k }),
+      set: (c, k, v) => call("/storage/set", { c, k, v }),
+      list: (c, o) => call("/storage/list", { c, ...(o || {}) }),
+      delete: (c, k) => call("/storage/delete", { c, k }),
+    },
+    email: { send: (mail) => call("/email/send", mail) },
     settings: { get: (k) => call("/settings/get", { k }) },
     http: { fetch: (url, init) => call("/http/fetch", { url, init }) },
     log: (m) => call("/log", { m }),

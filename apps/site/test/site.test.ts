@@ -7951,6 +7951,118 @@ describe.skipIf(!findBrowser())(
       expect((await fetch(at("ping"))).status).toBe(404);
     });
 
+    test("PG-11: the Forms plugin draws a form on a page, takes what a visitor sends, tells spam from people, and goes with the plugin", async () => {
+      const page = await signedIn(owner);
+      const dir = new URL("../../forms-plugin/", import.meta.url);
+      const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8")) as {
+        version: string;
+        oksPage: Record<string, unknown>;
+      };
+      const code = readFileSync(new URL("src/index.js", dir), "utf8");
+      const rest: Record<string, unknown> = { ...pkg.oksPage };
+      delete rest.type;
+      const file = JSON.stringify({
+        format: 1,
+        manifest: { ...rest, version: pkg.version, author: "oks-page" },
+        code,
+        integrity: createHash("sha256").update(code).digest("hex"),
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file,
+        approved: ["routes:public", "email:send"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Contact",
+      });
+      const id = String(made.json!["id"]);
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Contact",
+          slugPart: "contact-us",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Write to us below.")),
+            {
+              id: "fm1",
+              type: "forms-form",
+              props: {
+                title: "Write to us",
+                fields: "Name*; Message*:long",
+                thanks: "Got it, thank you.",
+              },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const shown = await fetch(site.base + "/contact-us").then((r) => r.text());
+        expect(shown).toContain(
+          '<form class="oks-form" method="post" action="/api/oks/plugins/forms/send"',
+        );
+        expect(shown).toContain('name="message"');
+        expect(shown).not.toContain("data-oks-plugin-block");
+        // The form's rules come with the page's own style sheet.
+        let css = "";
+        for (const m of shown.matchAll(/<link rel="stylesheet" href="([^"]+)"/g))
+          css += await fetch(new URL(m[1]!, site.base)).then((r) => r.text());
+        expect(css).toContain(".oks-form{");
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        const formId = hidden("_form");
+        const token = hidden("_t");
+        expect(formId).toMatch(/^[0-9a-f]{16}$/);
+        expect(token).toMatch(/^\d+\.[0-9a-f]{32}$/);
+        const send = (fields: Record<string, string>) =>
+          fetch(`${site.base}/api/oks/plugins/forms/send`, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ _form: formId, _t: token, _hp: "", ...fields }).toString(),
+          });
+        // Sent at once, a form is told apart from a person (it is kept apart, and the sender is told nothing).
+        const quick = await send({ name: "Bot", message: "Hi" });
+        expect(quick.status).toBe(200);
+        expect(await quick.text()).toContain("Got it, thank you.");
+        await new Promise((r) => setTimeout(r, 3500));
+        const sent = await send({ name: "Anna <b>", message: "Hello" });
+        expect(sent.status).toBe(200);
+        expect(sent.headers.get("content-type")).toContain("text/html");
+        const thanks = await sent.text();
+        expect(thanks).toContain("<h1>Thank you</h1>");
+        expect(thanks).toContain("Got it, thank you.");
+        // A hidden field that was filled in is spam, and looks the same to the sender.
+        expect(await (await send({ name: "Bot", message: "Hi", _hp: "x" })).text()).toContain(
+          "Got it",
+        );
+        // Missing answers are named, on a page for screen readers (an alert), with the right status.
+        const wrong = await send({ name: "", message: "" });
+        expect(wrong.status).toBe(400);
+        const problems = await wrong.text();
+        expect(problems).toContain("Please check your answers");
+        expect(problems).toContain("Name: this is required.");
+        expect(problems).toContain('role="alert"');
+        // A form that was never drawn is not available.
+        const unknown = await fetch(`${site.base}/api/oks/plugins/forms/send`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "_form=0123456789abcdef&name=x",
+        });
+        expect(unknown.status).toBe(404);
+        // Switched off, the form leaves the page at once.
+        await call(page, "PATCH", "/api/admin/plugins", { id: "forms", enabled: false });
+        const off = await fetch(site.base + "/contact-us").then((r) => r.text());
+        expect(off).not.toContain("oks-form");
+        expect(off).not.toContain("data-oks-plugin-block");
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 60_000);
+
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);
       const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {

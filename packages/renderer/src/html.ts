@@ -13,6 +13,7 @@ import {
   isSafeColor,
   isSafeUrl,
   isSafeVideoUrl,
+  readForm,
   styleClass,
   type Block,
   type Style,
@@ -99,6 +100,84 @@ const inlineText = (content: unknown): string =>
         .map((item) => (item && typeof item === "object" ? str((item as Run).text) : ""))
         .join("")
     : "";
+
+// ---- form: fields with real labels, sent to one of a plugin's own addresses (spec 16) ----
+
+const INPUT_TYPES: Record<string, string> = {
+  text: "text",
+  email: "email",
+  tel: "tel",
+  number: "number",
+  date: "date",
+};
+const AUTOCOMPLETE: Record<string, string> = { email: "email", tel: "tel" };
+
+function formHtml(block: Block): string {
+  const form = readForm(props(block));
+  if (!form) return "";
+  const base = `f-${block.id.replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const parts: string[] = [];
+  if (form.title) parts.push(`<h2 class="oks-form-title">${escapeHtml(form.title)}</h2>`);
+  for (const f of form.fields) {
+    const id = `${base}-${f.name}`;
+    const label = escapeHtml(f.label);
+    const mark = f.required ? '<span aria-hidden="true"> *</span>' : "";
+    const help = f.help ? `<p class="oks-form-help" id="${id}-help">${escapeHtml(f.help)}</p>` : "";
+    const describedBy = f.help ? ` aria-describedby="${id}-help"` : "";
+    const req = f.required ? " required" : "";
+    const reqAria = f.required ? ' aria-required="true"' : "";
+    if (f.type === "hidden") {
+      parts.push(`<input type="hidden" name="${f.name}" value="${escapeHtml(f.value)}">`);
+    } else if (f.type === "consent") {
+      parts.push(
+        `<div class="oks-form-field"><label class="oks-form-choice" for="${id}"><input type="checkbox" id="${id}" name="${f.name}" value="yes"${req}${describedBy}> <span>${label}${mark}</span></label>${help}</div>`,
+      );
+    } else if (f.type === "radio" || f.type === "checkbox") {
+      const choices = f.options
+        .map(
+          (o, i) =>
+            `<label class="oks-form-choice" for="${id}-${i}"><input type="${f.type}" id="${id}-${i}" name="${f.name}" value="${escapeHtml(o)}"${i === 0 && f.type === "radio" ? req : ""}> <span>${escapeHtml(o)}</span></label>`,
+        )
+        .join("");
+      parts.push(
+        `<fieldset class="oks-form-field"${describedBy}><legend>${label}${mark}</legend>${help}${choices}</fieldset>`,
+      );
+    } else if (f.type === "select") {
+      const options = f.options
+        .map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`)
+        .join("");
+      parts.push(
+        `<div class="oks-form-field"><label for="${id}">${label}${mark}</label>${help}<select id="${id}" name="${f.name}"${req}${reqAria}${describedBy}><option value="">-</option>${options}</select></div>`,
+      );
+    } else if (f.type === "textarea") {
+      parts.push(
+        `<div class="oks-form-field"><label for="${id}">${label}${mark}</label>${help}<textarea id="${id}" name="${f.name}" rows="6"${f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : ""}${req}${reqAria}${describedBy}></textarea></div>`,
+      );
+    } else {
+      const auto = AUTOCOMPLETE[f.type] ? ` autocomplete="${AUTOCOMPLETE[f.type]}"` : "";
+      parts.push(
+        `<div class="oks-form-field"><label for="${id}">${label}${mark}</label>${help}<input type="${INPUT_TYPES[f.type] ?? "text"}" id="${id}" name="${f.name}"${f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : ""}${auto}${req}${reqAria}${describedBy}></div>`,
+      );
+    }
+  }
+  // A field no person sees or reaches; a program that fills in everything fills this in too (spec 15, section 4).
+  parts.push(
+    `<div class="oks-form-trap" aria-hidden="true"><label for="${base}-hp">Leave this empty</label><input type="text" id="${base}-hp" name="_hp" tabindex="-1" autocomplete="off"></div>`,
+  );
+  if (form.token) parts.push(`<input type="hidden" name="_t" value="${escapeHtml(form.token)}">`);
+  if (form.formId)
+    parts.push(`<input type="hidden" name="_form" value="${escapeHtml(form.formId)}">`);
+  if (form.note)
+    parts.push(
+      form.noteHref
+        ? `<p class="oks-form-note"><a href="${escapeHtml(form.noteHref)}">${escapeHtml(form.note)}</a></p>`
+        : `<p class="oks-form-note">${escapeHtml(form.note)}</p>`,
+    );
+  parts.push(
+    `<button type="submit" class="button button-solid">${escapeHtml(form.submit)}</button>`,
+  );
+  return `<form class="oks-form" method="post" action="${form.action}" enctype="application/x-www-form-urlencoded">${parts.join("")}</form>`;
+}
 
 // ---- video: only a few hosts, drawn through their privacy-friendly player address ----
 
@@ -341,6 +420,8 @@ function blockHtml(block: Block, ctx: Context): string {
       });
       return items.length > 0 ? `<ul class="social-links">${items.join("")}</ul>` : "";
     }
+    case "form":
+      return formHtml(block);
     case "map": {
       // Nothing is sent to a map company until the visitor follows the link (spec 06, 14.3).
       const query = str(p["query"]).trim().slice(0, 200);
@@ -422,6 +503,8 @@ export function pageCss(blocks: Block[], enabled?: readonly string[]): string {
     for (const block of list) {
       if (block === null || typeof block !== "object") continue;
       types.add(block.type);
+      // A plugin's block may draw a form when the page is shown, so the form's rules come with it.
+      if (PLUGIN_BLOCK_TYPE.test(block.type)) types.add("form");
       styles.push(blockStyle(block));
       walk(block.children, depth + 1);
     }

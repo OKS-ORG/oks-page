@@ -1,0 +1,90 @@
+{
+  "name": "@oks-page/forms-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The first-party Forms plugin: a form block, spam checks, the messages kept in the plugin's own storage and an email to the owner",
+  "type": "module",
+  "author": "oks-page",
+  "license": "MIT",
+  "oksPage": {
+    "type": "plugin",
+    "id": "forms",
+    "displayName": "Forms",
+    "description": "Contact forms for your pages: the message is checked for spam, kept, and emailed to you.",
+    "permissions": [
+      "email:send",
+      "routes:public"
+    ],
+    "hooks": [],
+    "blocks": [
+      "form"
+    ],
+    "blockInfo": {
+      "form": {
+        "label": "Form",
+        "settings": {
+          "title": {
+            "type": "text",
+            "label": "Title above the form"
+          },
+          "fields": {
+            "type": "text",
+            "label": "Fields: Name*; Email*:email; Topic:choice(A|B); Note:long"
+          },
+          "button": {
+            "type": "text",
+            "label": "Text of the send button"
+          },
+          "thanks": {
+            "type": "text",
+            "label": "Thank-you message"
+          },
+          "thanks_page": {
+            "type": "text",
+            "label": "Or go to this page after sending, e.g. /thanks"
+          },
+          "send_to": {
+            "type": "text",
+            "label": "Send to (addresses, commas); empty: plugin setting"
+          },
+          "note": {
+            "type": "text",
+            "label": "Line under the fields"
+          },
+          "confirm": {
+            "type": "boolean",
+            "label": "Email a confirmation to the sender (field Email)"
+          },
+          "confirm_text": {
+            "type": "text",
+            "label": "Text of the confirmation email"
+          }
+        }
+      }
+    },
+    "routes": {
+      "send": {
+        "method": "POST",
+        "maxBytes": 30000
+      }
+    },
+    "settings": {
+      "send_to": {
+        "type": "text",
+        "label": "Send messages to (addresses, separated by commas)"
+      },
+      "privacy_page": {
+        "type": "text",
+        "label": "Your privacy page, e.g. /privacy (linked under forms)"
+      },
+      "blocked_words": {
+        "type": "text",
+        "label": "Words that mark a message as spam, separated by commas"
+      },
+      "keep_months": {
+        "type": "number",
+        "label": "Months to keep messages (1 to 36, default 12)"
+      }
+    }
+  }
+}

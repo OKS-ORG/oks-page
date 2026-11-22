@@ -3,6 +3,7 @@ import { checkContent, type Repairs } from "./content.js";
 import { sanitizeProps } from "./props.js";
 import { checkStyle, convertPhysicalStyle } from "./styles.js";
 import { isSafeUrl, isSafeVideoUrl, isSafeColor, looksLikeScriptUrl } from "./schemes.js";
+import { FORM_KEYS, readForm } from "./form.js";
 
 export interface Block {
   id: string;
@@ -48,6 +49,7 @@ const BUILT_IN_TYPES = new Set([
   "icon",
   "map",
   "socialLinks",
+  "form",
   "accordion",
   "tabs",
   "tab",
@@ -146,6 +148,13 @@ function checkKnownTypeProps(type: string, props: Record<string, unknown>, repai
     props.images = cleanItems(props.images, ["src", "alt", "caption"], "src", repairs);
   if (type === "socialLinks" && "items" in props)
     props.items = cleanItems(props.items, ["network", "href"], "href", repairs);
+  if (type === "form") {
+    // A form may only post to a plugin's own address of this site; what cannot be kept safely is removed.
+    const form = readForm(props);
+    for (const key of FORM_KEYS) delete props[key];
+    if (form) Object.assign(props, form);
+    else repairs.add("removed_link");
+  }
   if (type === "video") {
     checkOneUrlProp(props, "src", isSafeVideoUrl, repairs);
   } else {

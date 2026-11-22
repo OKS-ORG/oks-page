@@ -12,6 +12,14 @@ import {
 
 export type { Block };
 export { convertOldStyles } from "./blocks.js";
+export {
+  FORM_ACTION,
+  FORM_FIELD_TYPES,
+  readForm,
+  type FormField,
+  type FormFieldType,
+  type FormProps,
+} from "./form.js";
 export { effectiveStyle, positionWarnings } from "./position.js";
 export {
   BREAKPOINTS,

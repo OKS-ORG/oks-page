@@ -26,6 +26,7 @@ const NAMES: Record<string, string> = {
   icon: "icon",
   map: "map",
   socialLinks: "social links block",
+  form: "form",
   accordion: "accordion",
   toggle: "accordion item",
   tabs: "tabs block",
@@ -47,6 +48,7 @@ const LEAVES = new Set([
   "audio",
   "map",
   "socialLinks",
+  "form",
 ]);
 
 /** Blocks that hold one kind of child and nothing else (the plain sentence says which). */
