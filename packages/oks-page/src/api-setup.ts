@@ -3,6 +3,8 @@ import { runSetup, SetupError, type SetupInput } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { CLIENT_HEADER, getAuth, requestOrigin } from "./auth";
 import { getRunner } from "./db";
+import { installDefaultPlugins } from "./first-party-plugins";
+import { pluginSettingsService } from "./plugin-runtime";
 
 const STATUS = { invalid: 400, already_set_up: 409, account: 422 } as const;
 
@@ -30,7 +32,7 @@ export async function POST(request: Request) {
     const auth = getAuth(requestOrigin(request)).auth;
     // Until trusted proxies are set up, every setup request counts as one client.
     const headers = { [CLIENT_HEADER]: "unknown" };
-    await runSetup(
+    const made = await runSetup(
       getRunner(),
       async ({ name, email, password }) => {
         const created = await auth.api.signUpEmail!({ body: { name, email, password }, headers });
@@ -38,6 +40,16 @@ export async function POST(request: Request) {
       },
       input,
     );
+    // New sites start with the Forms plugin on (spec 16). If it cannot be installed the site is still made.
+    const plugins = await installDefaultPlugins(
+      getRunner(),
+      made.siteId,
+      made.userId,
+      input.admin.email.trim(),
+      pluginSettingsService(),
+    );
+    if (!plugins.ok)
+      console.error("[oks] The Forms plugin could not be installed:", plugins.message);
     const signedIn: Response = await auth.api.signInEmail!({
       body: { email: input.admin.email, password: input.admin.password },
       asResponse: true,

@@ -8,3 +8,4 @@ apps/site/.export-build
 apps/site/out
 packages/core/src/font-files.ts
 .oks/
+packages/oks-page/src/forms-plugin-file.json

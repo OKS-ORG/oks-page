@@ -162,6 +162,21 @@ for (const { kind, open, skip } of openers) {
       rmSync(workDir, { recursive: true, force: true });
     });
 
+    test("the plugin file kept in the product package is what oks pack makes from this source", () => {
+      // New sites install that file (spec 16): it must not drift from the plugin that is tested here.
+      const kept = JSON.parse(
+        readFileSync(
+          new URL("../../../packages/oks-page/src/forms-plugin-file.json", import.meta.url),
+          "utf8",
+        ),
+      );
+      // Both read back the way a site reads a plugin file (the pages are normalised there).
+      const keptRead = readPluginFile(JSON.stringify(kept));
+      expect(keptRead.ok && keptRead.file).toEqual(file);
+      expect(kept.code).toBe(file.code);
+      expect(kept.integrity).toBe(file.integrity);
+    });
+
     test("the plugin passes the check and asks only for email and public addresses", () => {
       expect(file.manifest.permissions.sort()).toEqual([
         "admin:pages",

@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
+import { FORMS_PLUGIN_TEXT } from "./first-party-plugins";
 import { getRunner } from "./db";
 import { refreshPlugins } from "./refresh-cache";
 import {
@@ -100,6 +101,12 @@ export async function POST(request: Request) {
       file: fetched.text,
       source: `npm:${fetched.name}@${fetched.version}`,
     });
+  }
+  if (input.action === "bundled") {
+    // The plugins that ship with the product: the owner sees the same approval screen as for any plugin file.
+    const result = await previewPlugin(getRunner(), actor, member.siteId, FORMS_PLUGIN_TEXT);
+    if (!result.ok) return reply(result, STATUS[result.code]);
+    return NextResponse.json({ plugin: result.plugin, file: FORMS_PLUGIN_TEXT, source: "file" });
   }
   if (input.action === "saveSettings") {
     const body = input as { id?: unknown; values?: unknown };

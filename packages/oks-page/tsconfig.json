@@ -4,6 +4,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "jsx": "react-jsx",
+    "resolveJsonModule": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -12,7 +13,7 @@
       "@data": ["./src/data/server.ts"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "src/forms-plugin-file.json"],
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {

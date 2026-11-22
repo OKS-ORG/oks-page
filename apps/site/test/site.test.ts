@@ -7574,6 +7574,90 @@ describe.skipIf(!findBrowser())(
       for (const e of [tool.id, bad.id]) await call(page, "DELETE", `/api/admin/entries/${e}`);
     });
 
+    test("PG-14: a new site starts with the Forms plugin on, sending to the owner, which can be switched off, removed and added again from Tools > Plugins", async () => {
+      const page = await signedIn(owner);
+      // Made by the setup, with everything it asks for approved, a job and a Messages page, and the owner's own address.
+      const listed = await call(page, "GET", "/api/admin/plugins");
+      type Listed = {
+        id: string;
+        status: string;
+        permissions: { permission: string; approved: boolean }[];
+        pages: { id: string }[];
+        jobs: { name: string }[];
+      };
+      const forms = (listed.json!["plugins"] as Listed[]).find((p) => p.id === "forms");
+      expect(forms?.status).toBe("enabled");
+      expect(forms?.permissions.map((x) => [x.permission, x.approved]).sort()).toEqual([
+        ["admin:pages", true],
+        ["email:send", true],
+        ["routes:public", true],
+      ]);
+      expect(forms?.pages).toEqual([{ id: "messages", title: "Form messages" }]);
+      expect(forms?.jobs.map((j) => j.name)).toEqual(["keep"]);
+      const settings = await call(page, "GET", "/api/admin/plugins?settings=forms");
+      expect(
+        (settings.json!["settings"] as { values: Record<string, unknown> }).values["send_to"],
+      ).toBe(owner.email);
+      const log = await db.runner.all(
+        `select detail from audit_log where action = 'plugin.installed' and target_id = 'forms'`,
+      );
+      expect(log.length).toBe(1);
+      expect(JSON.stringify(log[0]!["detail"])).toContain("setup");
+
+      // A form block works at once, with nothing to install.
+      const made = await call(page, "POST", "/api/admin/entries", { type: "page", title: "Hello" });
+      const id = String(made.json!["id"]);
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Hello",
+          slugPart: "hello-forms",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Say hello.")),
+            {
+              id: "fm1",
+              type: "forms-form",
+              props: { title: "Say hello", fields: "Name*; Message*:long" },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        expect(await fetch(site.base + "/hello-forms").then((r) => r.text())).toContain(
+          '<form class="oks-form" method="post" action="/api/oks/plugins/forms/send"',
+        );
+
+        // On the Plugins screen it is listed, and there is nothing to add.
+        await page.goto(site.base + "/admin/tools/plugins");
+        await page.getByRole("row", { name: /Forms/ }).waitFor();
+        expect(await page.getByRole("button", { name: "Add Forms" }).count()).toBe(0);
+
+        // The owner can switch it off (the form goes from the page) and remove it.
+        await call(page, "PATCH", "/api/admin/plugins", { id: "forms", enabled: false });
+        expect(await fetch(site.base + "/hello-forms").then((r) => r.text())).not.toContain(
+          "oks-form",
+        );
+        expect((await call(page, "DELETE", "/api/admin/plugins?id=forms")).status).toBe(200);
+
+        // Then "Add Forms" brings it back, through the same approval screen as any plugin.
+        await page.goto(site.base + "/admin/tools/plugins");
+        await page.getByRole("button", { name: "Add Forms" }).click();
+        await page.getByRole("heading", { name: /^Add Forms / }).waitFor();
+        await page.getByLabel(/Add its own web addresses to your site/).waitFor();
+        await page.getByRole("button", { name: "Add plugin" }).click();
+        await page.getByText("Forms is added and switched on.").waitFor();
+        await page.getByRole("row", { name: /Forms/ }).waitFor();
+        expect(await page.getByRole("button", { name: "Add Forms" }).count()).toBe(0);
+        expect(await fetch(site.base + "/hello-forms").then((r) => r.text())).toContain("oks-form");
+      } finally {
+        // The later plugin tests start from a site with no plugins.
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 90_000);
+
     test("PG-01: a plugin file is added in Tools > Plugins with some permissions approved, switched off and on, and removed", async () => {
       const page = await signedIn(owner);
       const code = 'export default { hooks: { "content:afterSave": async (e) => e } };';

@@ -106,6 +106,28 @@ export function PluginsScreen({
     setAdding({ text: body.file, preview: body.plugin, source: body.source ?? "file" });
   }
 
+  async function addBundled() {
+    setProblem(null);
+    const response = await fetch("/api/admin/plugins", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "bundled" }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      plugin?: PluginPreview;
+      file?: string;
+      source?: string;
+      error?: { message?: string };
+    } | null;
+    if (!response.ok || !body?.plugin || !body.file) {
+      setAdding(null);
+      setProblem(body?.error?.message ?? "Forms could not be read.");
+      return;
+    }
+    setApproved(body.plugin.permissions.map((p) => p.permission));
+    setAdding({ text: body.file, preview: body.plugin, source: body.source ?? "file" });
+  }
+
   async function install() {
     if (!adding) return;
     setProblem(null);
@@ -178,6 +200,12 @@ export function PluginsScreen({
       <p style={{ minBlockSize: "1.5rem" }} role="status">
         {note}
       </p>
+      {plugins.some((p) => p.id === "forms") ? null : (
+        <p>
+          Ready-made: <strong>Forms</strong>, contact forms for your pages.{" "}
+          <Button onPress={() => void addBundled()}>Add Forms</Button>
+        </p>
+      )}
       <p>
         <label>
           Plugin file{" "}
