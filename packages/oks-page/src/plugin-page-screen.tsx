@@ -114,7 +114,16 @@ export function PluginPageScreen({
                 <tr key={row.key}>
                   {row.cells.map((cell, i) => (
                     <td key={i} style={{ verticalAlign: "top" }}>
-                      {cell.full !== undefined ? (
+                      {cell.links ? (
+                        cell.links.map((l, n) => (
+                          <span key={l.href}>
+                            {n > 0 ? ", " : ""}
+                            <a href={l.href} download>
+                              {l.text}
+                            </a>
+                          </span>
+                        ))
+                      ) : cell.full !== undefined ? (
                         <details>
                           <summary>{cell.text}</summary>
                           <div style={{ whiteSpace: "pre-wrap" }}>{cell.full}</div>

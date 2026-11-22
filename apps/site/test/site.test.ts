@@ -7590,6 +7590,7 @@ describe.skipIf(!findBrowser())(
       expect(forms?.permissions.map((x) => [x.permission, x.approved]).sort()).toEqual([
         ["admin:pages", true],
         ["email:send", true],
+        ["files:private", true],
         ["routes:public", true],
       ]);
       expect(forms?.pages).toEqual([{ id: "messages", title: "Form messages" }]);
@@ -8227,7 +8228,7 @@ describe.skipIf(!findBrowser())(
           filters: string[];
           rows: { cells: { text: string }[] }[];
         };
-        expect(view.columns).toEqual(["Received", "Form", "Status", "Message"]);
+        expect(view.columns).toEqual(["Received", "Form", "Status", "Message", "Files"]);
         expect(view.filters).toEqual(["New", "Read", "Spam"]);
         expect(view.rows.length).toBe(2);
         expect(view.rows[0]!.cells[3]!.text).toBe("Name: Ben · Message: Hello from Ben");
@@ -8254,7 +8255,7 @@ describe.skipIf(!findBrowser())(
         expect(csv.headers()["content-type"]).toContain("text/csv");
         expect(csv.headers()["content-disposition"]).toContain("forms-messages.csv");
         const lines = (await csv.text()).trim().split("\r\n");
-        expect(lines[0]).toBe("Received,Form,Status,Message");
+        expect(lines[0]).toBe("Received,Form,Status,Message,Files");
         expect(lines.length).toBe(2);
         expect(lines[1]).toContain("Hello from Ben");
 
@@ -8413,7 +8414,7 @@ describe.skipIf(!findBrowser())(
       const installed = await call(page, "POST", "/api/admin/plugins", {
         action: "install",
         file: bundled.json!["file"],
-        approved: ["admin:pages", "email:send", "routes:public"],
+        approved: ["admin:pages", "email:send", "files:private", "routes:public"],
       });
       expect(installed.status, JSON.stringify(installed.json)).toBe(200);
       const made = await call(page, "POST", "/api/admin/entries", {
@@ -8496,7 +8497,7 @@ describe.skipIf(!findBrowser())(
       const installed = await call(page, "POST", "/api/admin/plugins", {
         action: "install",
         file: bundled.json!["file"],
-        approved: ["admin:pages", "email:send", "routes:public"],
+        approved: ["admin:pages", "email:send", "files:private", "routes:public"],
       });
       expect(installed.status, JSON.stringify(installed.json)).toBe(200);
       const made = await call(page, "POST", "/api/admin/entries", {
@@ -8547,6 +8548,209 @@ describe.skipIf(!findBrowser())(
         await call(page, "DELETE", `/api/admin/entries/${id}`);
       }
     }, 120_000);
+
+    test("PG-17: a form with a file question takes pictures and PDF files privately, refuses everything else, opens them only for the owner, and deletes them with the message (FM-07)", async () => {
+      const page = await signedIn(owner);
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const pdf = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
+      const bundled = async (approved: string[]) => {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        const got = await call(page, "POST", "/api/admin/plugins", { action: "bundled" });
+        const done = await call(page, "POST", "/api/admin/plugins", {
+          action: "install",
+          file: got.json!["file"],
+          approved,
+        });
+        expect(done.status, JSON.stringify(done.json)).toBe(200);
+      };
+      await bundled(["admin:pages", "email:send", "files:private", "routes:public"]);
+      const made = await call(page, "POST", "/api/admin/entries", { type: "page", title: "Apply" });
+      const id = String(made.json!["id"]);
+      const fileRows = async (status?: string) =>
+        (
+          await db.runner.all(
+            `select "id", "name", "mime", "status" from extension_files${status ? ` where "status" = '${status}'` : ""} order by "name"`,
+          )
+        ).map((r) => ({
+          id: String(r["id"]),
+          name: String(r["name"]),
+          mime: String(r["mime"]),
+          status: String(r["status"]),
+        }));
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Apply",
+          slugPart: "apply-here",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Send us your CV.")),
+            {
+              id: "fm1",
+              type: "forms-form",
+              props: {
+                title: "Apply",
+                fields: [
+                  { label: "Name", kind: "text", required: true, options: "" },
+                  { label: "Your CV", kind: "file", required: false, options: "" },
+                  { label: "Message", kind: "long", required: false, options: "" },
+                ],
+                thanks: "Got it.",
+              },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const shown = await fetch(site.base + "/apply-here").then((r) => r.text());
+        // The form is sent in parts and the file question is a real field with a label.
+        expect(shown).toContain('enctype="multipart/form-data"');
+        expect(shown).toMatch(/<label for="[^"]*-your_cv">Your CV/);
+        expect(shown).toMatch(/<input type="file"[^>]*name="your_cv"[^>]*multiple/);
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        const send = (
+          fields: Record<string, string>,
+          files: { name: string; bytes: Uint8Array; type: string }[] = [],
+        ) => {
+          const form = new FormData();
+          for (const [k, v] of Object.entries({
+            _form: hidden("_form"),
+            _t: hidden("_t"),
+            _hp: "",
+            ...fields,
+          }))
+            form.append(k, v);
+          for (const f of files)
+            form.append("your_cv", new Blob([new Uint8Array(f.bytes)], { type: f.type }), f.name);
+          return fetch(`${site.base}/api/oks/plugins/forms/send`, { method: "POST", body: form });
+        };
+        await new Promise((r) => setTimeout(r, 3500)); // a form sent faster than a person can is kept apart
+
+        // A picture and a PDF are taken and the thank-you page is shown.
+        const sent = await send({ name: "Anna", message: "Hello" }, [
+          { name: "My Photo.PNG", bytes: png, type: "image/png" },
+          { name: "cv.pdf", bytes: pdf, type: "application/pdf" },
+        ]);
+        expect(sent.status).toBe(200);
+        expect(await sent.text()).toContain("Got it.");
+        const kept = await fileRows("kept");
+        expect(kept.map((f) => [f.name, f.mime])).toEqual([
+          ["My-Photo.png", "image/png"],
+          ["cv.pdf", "application/pdf"],
+        ]);
+
+        // Refused in plain words, on a page for screen readers, and nothing is kept.
+        const refuse = async (
+          files: { name: string; bytes: Uint8Array; type: string }[],
+          words: string,
+        ) => {
+          const r = await send({ name: "Anna" }, files);
+          expect(r.status).toBe(400);
+          const text = await r.text();
+          expect(text).toContain(words);
+          expect(text).toContain('role="alert"');
+          expect(await fileRows()).toHaveLength(2);
+        };
+        await refuse(
+          [
+            {
+              name: "evil.jpg",
+              bytes: Buffer.from("<html><script>alert(1)</script></html>"),
+              type: "image/jpeg",
+            },
+          ],
+          "This kind of file is not allowed.",
+        );
+        await refuse(
+          [
+            {
+              name: "logo.svg",
+              bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+              type: "image/svg+xml",
+            },
+          ],
+          "SVG",
+        );
+        await refuse(
+          [{ name: "photo.jpg", bytes: png, type: "image/jpeg" }],
+          "The file says it is .jpg but its content is image/png.",
+        );
+        await refuse(
+          Array.from({ length: 4 }, (_, i) => ({
+            name: `f${i}.png`,
+            bytes: png,
+            type: "image/png",
+          })),
+          "At most 3 files",
+        );
+        await refuse(
+          [
+            {
+              name: "huge.png",
+              bytes: Buffer.concat([png, Buffer.alloc(10 * 1024 * 1024)]),
+              type: "image/png",
+            },
+          ],
+          "The file is too big.",
+        );
+
+        // Not at any public address: not under the media folder, not guessable, and only a signed-in owner opens them.
+        const first = kept[0]!;
+        const url = `${site.base}/api/admin/plugin-files/${first.id}`;
+        expect((await fetch(url)).status).toBe(401);
+        expect((await fetch(`${site.base}/uploads/${first.id}`)).status).toBe(404);
+        expect((await fetch(`${site.base}/uploads/${first.name}`)).status).toBe(404);
+        const mine = await page.context().request.get(url);
+        expect(mine.status()).toBe(200);
+        expect(mine.headers()["content-type"]).toBe("image/png");
+        expect(mine.headers()["content-disposition"]).toContain("attachment");
+        expect(mine.headers()["x-content-type-options"]).toBe("nosniff");
+        expect(mine.headers()["cache-control"]).toContain("no-store");
+        expect(Buffer.from(await mine.body()).equals(png)).toBe(true);
+        expect(
+          (
+            await page
+              .context()
+              .request.get(`${site.base}/api/admin/plugin-files/${"0".repeat(26)}`)
+          ).status(),
+        ).toBe(404);
+
+        // The Messages page lists the files as links, and the owner opens one from there.
+        await page.goto(site.base + "/admin/tools/plugins/forms/messages");
+        await page.getByRole("link", { name: "My-Photo.png" }).waitFor();
+        expect(await page.getByRole("link", { name: "cv.pdf" }).getAttribute("href")).toBe(
+          `/api/admin/plugin-files/${kept[1]!.id}`,
+        );
+
+        // The files go with the message when the owner deletes it.
+        await page.getByRole("button", { name: "Delete" }).first().click();
+        await page.getByRole("button", { name: /^Yes, Delete/ }).click();
+        await page.getByText("Done: Delete.").waitFor();
+        expect(await fileRows("kept")).toEqual([]);
+        expect((await page.context().request.get(url)).status()).toBe(404);
+
+        // A message with no file still works, as an ordinary form.
+        const plain = await send({ name: "Ben", message: "No file" });
+        expect(plain.status).toBe(200);
+        expect(await fileRows("kept")).toEqual([]);
+
+        // Without the owner's approval of the permission, no file is taken at all.
+        await bundled(["admin:pages", "email:send", "routes:public"]);
+        const again = await send({ name: "Cleo" }, [
+          { name: "a.png", bytes: png, type: "image/png" },
+        ]);
+        expect(again.status).not.toBe(200);
+        expect(await fileRows()).toEqual([]);
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 150_000);
 
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);

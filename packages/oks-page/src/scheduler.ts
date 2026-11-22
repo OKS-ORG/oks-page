@@ -17,6 +17,7 @@ import {
 import { getRunner, getSiteId } from "./db";
 import { expireTags } from "./expire-tags";
 import { kickEmailJobs, runEmailJobs, siteSecrets } from "./mail";
+import { purgePendingFiles } from "./plugin-files";
 import { runPluginJobs } from "./plugin-jobs";
 import { pluginHost } from "./plugin-runtime";
 
@@ -84,6 +85,10 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
     if (gone > 0)
       console.log(`[oks] Deleted ${gone} item(s) that had been in the trash for 30 days.`);
   }
+  // Files that visitors sent and no plugin attached to anything are deleted after an hour.
+  await purgePendingFiles(getRunner(), now).catch((error: unknown) =>
+    console.error("[oks] Old files could not be cleaned up:", error),
+  );
   // The tasks plugins run by themselves (spec 04, section 9). Last, because a job may take up to 30 seconds. The
   // sandbox starts only when a job is due.
   try {

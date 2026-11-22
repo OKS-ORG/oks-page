@@ -30,6 +30,24 @@ export interface RouteInfo {
   maxBytes?: number;
   /** Only a signed-in person may use the route (the plugin then also gets who it is). */
   signedIn?: boolean;
+  /**
+   * The route takes files sent with a form (needs the permission `files:private`; a POST route only). The site reads
+   * them, checks their type from their bytes like it does for the Media library (pictures and PDF), keeps them privately
+   * and hands the plugin only a reference to each, never the bytes. At most `files` files of `maxFileBytes` each.
+   */
+  uploads?: { files: number; maxFileBytes: number };
+}
+
+/** A file a visitor sent, as the plugin sees it: a reference. The plugin may attach it to one of its stored items. */
+export interface RouteFile {
+  /** The name of the form field it came in. */
+  field: string;
+  id: string;
+  /** The name, cleaned by the site, with an extension that agrees with the content. */
+  name: string;
+  /** The type read from the bytes. */
+  type: string;
+  size: number;
 }
 
 /** What the site hands to a plugin's route. Nothing in it names the visitor beyond what they sent. */
@@ -45,6 +63,9 @@ export interface RouteRequest {
   contentType: string;
   /** Who is signed in, for a route that needs it. */
   user?: { id: string };
+  /** The files that came with the form, for a route that takes uploads. They are kept privately for an hour unless the
+   * plugin attaches them to a stored item. */
+  files?: RouteFile[];
 }
 
 /** What a plugin's route answers; the site turns it into a web answer. */

@@ -16,6 +16,7 @@ export const FORM_FIELD_TYPES = [
   "checkbox",
   "consent",
   "hidden",
+  "file",
 ] as const;
 export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 

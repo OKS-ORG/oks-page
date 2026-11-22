@@ -5,6 +5,7 @@
 import type { Actor } from "@oks-page/core";
 import { newId, type SqlRunner } from "@oks-page/db";
 import { collectionOf, readAdminPages, type AdminPageInfo } from "@oks-page/sandbox";
+import { deleteItemFiles } from "./plugin-files";
 
 export type PageResult<T> =
   ({ ok: true } & T) | { ok: false; code: "forbidden" | "invalid" | "not_found"; message: string };
@@ -23,6 +24,8 @@ export interface PluginPageLink {
 export interface PluginCell {
   /** What is shown (cut short when it is long). */
   text: string;
+  /** For a column of files: a link to each, for people who may open them. */
+  links?: { text: string; href: string }[];
   /** The whole text, when `text` was cut. */
   full?: string;
 }
@@ -148,8 +151,23 @@ function fieldOf(item: { key: string; value: unknown; updatedAt: number }, path:
 
 const two = (n: number) => String(n).padStart(2, "0");
 
-function show(value: unknown, format: "text" | "datetime"): string {
+/** The files of a stored item that a column of files shows: each has an id and a name. */
+function filesOf(value: unknown): { id: string; name: string }[] {
+  if (!Array.isArray(value)) return [];
+  return (value as unknown[]).flatMap((f) => {
+    const x = f !== null && typeof f === "object" ? (f as Record<string, unknown>) : {};
+    return typeof x["id"] === "string" && x["id"].length === 26 && typeof x["name"] === "string"
+      ? [{ id: x["id"], name: x["name"] }]
+      : [];
+  });
+}
+
+function show(value: unknown, format: "text" | "datetime" | "files"): string {
   if (value === null || value === undefined) return "";
+  if (format === "files")
+    return filesOf(value)
+      .map((f) => f.name)
+      .join("; ");
   if (format === "datetime") {
     const d = typeof value === "number" || typeof value === "string" ? new Date(value) : null;
     if (d && Number.isFinite(d.getTime()))
@@ -217,6 +235,15 @@ async function readItems(
 
 function cellsOf(page: AdminPageInfo, item: Item): PluginCell[] {
   return page.view.columns.map((c) => {
+    if (c.format === "files") {
+      const files = filesOf(fieldOf(item, c.field));
+      return {
+        text: files.map((f) => f.name).join(", "),
+        ...(files.length > 0
+          ? { links: files.map((f) => ({ text: f.name, href: `/api/admin/plugin-files/${f.id}` })) }
+          : {}),
+      };
+    }
     const full = show(fieldOf(item, c.field), c.format ?? "text");
     const max = c.truncate ?? 80;
     return full.length > max
@@ -304,6 +331,8 @@ export async function actOnPluginPage(
       `delete from "extension_storage" where "extension_id" = ? and "collection" = ? and "key" = ?`,
       [found.extensionId, found.collection, key],
     );
+    // The files kept with the item go with it.
+    await deleteItemFiles(runner, found.extensionId, found.collection, key);
   } else {
     let value = rows[0]!["value"];
     if (typeof value === "string" && runner.dialect === "sqlite")

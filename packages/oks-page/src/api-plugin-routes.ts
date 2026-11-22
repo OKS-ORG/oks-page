@@ -2,10 +2,17 @@
 // The site reads the request (at most the size the route declared, never more than 100 000 bytes), hands the plugin only
 // the parts it needs, and turns the plugin's answer into JSON, plain text or a redirect to a page of this site. A plugin
 // never sees headers or cookies, and a plugin that is off, missing or not allowed the permission gives a plain 404.
-import { ROUTE_BODY_DEFAULT, ROUTE_BODY_MOST, type RouteRequest } from "@oks-page/sandbox";
+import {
+  ROUTE_BODY_DEFAULT,
+  ROUTE_BODY_MOST,
+  type RouteFile,
+  type RouteRequest,
+} from "@oks-page/sandbox";
 import { NextResponse } from "next/server";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin } from "./api-entries";
+import { getRunner } from "./db";
+import { receiveFiles } from "./plugin-files";
 import { pluginHost } from "./plugin-runtime";
 
 const MINUTE = 60 * 1000;
@@ -71,6 +78,58 @@ async function readLimited(request: Request, max: number): Promise<string | null
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** What a form sent with `multipart/form-data` holds: the text answers, and the files (a file input left empty is no file). */
+interface MultipartForm {
+  /** The text answers as `a=1&b=2`, so a plugin reads them like any other form. */
+  text: string;
+  files: { field: string; name: string; bytes: Uint8Array }[];
+}
+
+/**
+ * Reads a form that may carry files, never more than the files and the text the route allows. Returns `"too_big"` when it
+ * is more, `"bad"` when it cannot be read.
+ */
+async function readMultipart(
+  request: Request,
+  textMax: number,
+  uploads: { files: number; maxFileBytes: number },
+): Promise<MultipartForm | "too_big" | "bad"> {
+  const cap = uploads.files * uploads.maxFileBytes + textMax + 64 * 1024;
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > cap) return "too_big";
+  if (!request.body) return "bad";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > cap) {
+      await reader.cancel();
+      return "too_big";
+    }
+    chunks.push(value);
+  }
+  let form: FormData;
+  try {
+    form = await new Response(Buffer.concat(chunks), {
+      headers: { "content-type": request.headers.get("content-type") ?? "" },
+    }).formData();
+  } catch {
+    return "bad";
+  }
+  const params = new URLSearchParams();
+  const files: MultipartForm["files"] = [];
+  for (const [field, value] of form) {
+    if (typeof value === "string") params.append(field, value);
+    else if (value.size > 0 || value.name !== "")
+      files.push({ field, name: value.name, bytes: new Uint8Array(await value.arrayBuffer()) });
+  }
+  const text = params.toString();
+  return Buffer.byteLength(text) > textMax ? "too_big" : { text, files };
+}
+
 function dataOf(contentType: string, body: string): Record<string, unknown> | null {
   try {
     if (contentType === "application/json") {
@@ -116,12 +175,34 @@ async function handle(
     user = { id: member.user.id };
   }
   const max = Math.min(info.maxBytes ?? ROUTE_BODY_DEFAULT, ROUTE_BODY_MOST);
-  const body = method === "POST" ? await readLimited(request, max) : "";
+  let contentType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  let body: string | null;
+  let sent: MultipartForm | null = null;
+  // Files are taken only for a route that declared uploads and a plugin the owner approved `files:private` for.
+  const uploads = host.allowed(plugin, "files:private") ? info.uploads : undefined;
+  if (method === "POST" && uploads && contentType === "multipart/form-data") {
+    const read = await readMultipart(request, max, uploads);
+    if (read === "too_big") return fail(413, "This request is too big.");
+    if (read === "bad") return fail(400, "The form could not be read.");
+    sent = read;
+    // The plugin reads the answers as it would from any form; the files come as references.
+    body = read.text;
+    contentType = "application/x-www-form-urlencoded";
+  } else body = method === "POST" ? await readLimited(request, max) : "";
   if (body === null) return fail(413, "This request is too big.");
-  const contentType = (request.headers.get("content-type") ?? "")
-    .split(";")[0]!
-    .trim()
-    .toLowerCase();
+  let files: RouteFile[] | undefined;
+  if (sent && uploads && sent.files.length > 0) {
+    const extensionId = host.extensionOf(plugin);
+    const stored = extensionId
+      ? await receiveFiles(getRunner(), extensionId, uploads, sent.files)
+      : ({ ok: false, message: "Files cannot be received now." } as const);
+    if (!stored.ok)
+      return new NextResponse(pageHtml("Please check your files", stored.message, true), {
+        status: 400,
+        headers: { ...HEADERS, "content-type": "text/html; charset=utf-8" },
+      });
+    files = stored.files;
+  }
   const query: Record<string, string> = {};
   let count = 0;
   for (const [k, v] of new URL(request.url).searchParams) {
@@ -135,6 +216,7 @@ async function handle(
     data: dataOf(contentType, body),
     contentType,
     ...(user ? { user } : {}),
+    ...(files ? { files } : {}),
   });
   if (!answer.ok) return fail(answer.status, answer.message);
   const reply = answer.reply;

@@ -365,6 +365,20 @@ export async function seedEverything(db: TestDb): Promise<void> {
     size_bytes: 7,
     updated_at: T,
   });
+  // A file's bytes, with the values that damage text (a zero, bytes above 127, line breaks), to prove they survive a move.
+  await ins(db, "extension_files", {
+    id: id(900),
+    extension_id: ext,
+    name: "report.pdf",
+    mime: "application/pdf",
+    size_bytes: 8,
+    sha256: "aa",
+    status: "kept",
+    collection: "c",
+    key: "k",
+    data: Buffer.from([0, 255, 128, 10, 13, 65, 0, 200]),
+    created_at: T,
+  });
   await ins(db, "extension_settings", {
     extension_id: ext,
     key: "units",

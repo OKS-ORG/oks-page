@@ -18,8 +18,10 @@ export const ADMIN_ACTIONS_MOST = 4;
 export interface AdminColumn {
   field: string;
   label: string;
-  /** `datetime` reads a number of milliseconds (or a date text) and shows the date and time. Default `text`. */
-  format?: "text" | "datetime";
+  /** `datetime` reads a number of milliseconds (or a date text) and shows the date and time. `files` reads a list of
+   * files kept for the item (each with an `id` and a `name`) and shows a link to each, for people who may open them.
+   * Default `text`. */
+  format?: "text" | "datetime" | "files";
   /** Longer text is cut to this many characters and opens in full under a "Show all" control. Default 80, at most 400. */
   truncate?: number;
 }
@@ -111,8 +113,13 @@ export function readAdminPages(value: unknown): AdminPageInfo[] | string {
       const label = text(c["label"], 60);
       if (typeof c["field"] !== "string" || !FIELD.test(c["field"]) || label === null)
         return bad("a column needs a field name and a label of at most 60 characters.");
-      if (c["format"] !== undefined && c["format"] !== "text" && c["format"] !== "datetime")
-        return bad('a column\'s format must be "text" or "datetime".');
+      if (
+        c["format"] !== undefined &&
+        c["format"] !== "text" &&
+        c["format"] !== "datetime" &&
+        c["format"] !== "files"
+      )
+        return bad('a column\'s format must be "text", "datetime" or "files".');
       if (
         c["truncate"] !== undefined &&
         (typeof c["truncate"] !== "number" ||
@@ -124,7 +131,7 @@ export function readAdminPages(value: unknown): AdminPageInfo[] | string {
       columns.push({
         field: c["field"],
         label,
-        ...(c["format"] ? { format: c["format"] as "text" | "datetime" } : {}),
+        ...(c["format"] ? { format: c["format"] as "text" | "datetime" | "files" } : {}),
         ...(c["truncate"] !== undefined ? { truncate: c["truncate"] as number } : {}),
       });
     }

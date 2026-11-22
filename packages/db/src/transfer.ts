@@ -10,7 +10,7 @@ import { is } from "drizzle-orm";
 import * as pgSchema from "./schema/pg.js";
 import type { SqlRunner } from "./runner.js";
 
-type Family = "text" | "boolean" | "time" | "integer" | "real" | "json";
+type Family = "text" | "boolean" | "time" | "integer" | "real" | "json" | "binary";
 interface TableMeta {
   name: string;
   columns: { name: string; family: Family }[];
@@ -20,8 +20,10 @@ interface TableMeta {
   selfParent: string | null;
 }
 
-const familyOf = (columnType: string): Family => {
+const familyOf = (columnType: string, sqlType = ""): Family => {
   const t = columnType.toLowerCase();
+  // A file's bytes (PostgreSQL bytea) travel as base64 text in the dump.
+  if (sqlType === "bytea") return "binary";
   if (t.includes("boolean")) return "boolean";
   if (t.includes("timestamp")) return "time";
   if (t.includes("json")) return "json";
@@ -42,7 +44,10 @@ export function tablesInOrder(): TableMeta[] {
       }));
       return {
         name: c.name,
-        columns: c.columns.map((col) => ({ name: col.name, family: familyOf(col.columnType) })),
+        columns: c.columns.map((col) => ({
+          name: col.name,
+          family: familyOf(col.columnType, col.getSQLType()),
+        })),
         primaryKey: [
           ...c.columns.filter((col) => col.primary).map((col) => col.name),
           ...c.primaryKeys.flatMap((p) => p.columns.map((col) => col.name)),
@@ -83,6 +88,8 @@ const fromDb = (dialect: SqlRunner["dialect"], family: Family, v: unknown): unkn
     case "integer":
     case "real":
       return Number(v);
+    case "binary":
+      return Buffer.from(v as Uint8Array).toString("base64");
     case "text":
       return String(v);
   }
@@ -95,6 +102,8 @@ const toDb = (dialect: SqlRunner["dialect"], family: Family, v: unknown): unknow
       return dialect === "postgres" ? new Date(v as number) : v;
     case "json":
       return JSON.stringify(v);
+    case "binary":
+      return Buffer.from(v as string, "base64");
     default:
       return v;
   }

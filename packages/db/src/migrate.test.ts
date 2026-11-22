@@ -218,6 +218,7 @@ describe("sqlite migrations", () => {
       "0009_search_index",
       "0010_known_devices",
       "0011_calm_lockjaw",
+      "0012_yellow_quasimodo",
     ]);
   });
 });
@@ -360,6 +361,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0009_search_index",
       "0010_known_devices",
       "0011_sloppy_the_hunter",
+      "0012_chilly_sabra",
     ]);
   });
 });

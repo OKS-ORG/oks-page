@@ -18,7 +18,12 @@ describe("the Forms plugin file kept in the package", () => {
     if (!read.ok) return;
     const m = read.file.manifest;
     expect(m.id).toBe("forms");
-    expect([...m.permissions].sort()).toEqual(["admin:pages", "email:send", "routes:public"]);
+    expect([...m.permissions].sort()).toEqual([
+      "admin:pages",
+      "email:send",
+      "files:private",
+      "routes:public",
+    ]);
     expect(m.blocks).toEqual(["form"]);
     expect(Object.keys(m.routes ?? {})).toEqual(["send"]);
     expect(Object.keys(m.jobs ?? {})).toEqual(["keep"]);

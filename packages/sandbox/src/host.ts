@@ -52,6 +52,7 @@ const ROUTE_PERMISSION: Record<string, string | null> = {
   "/storage/list": null,
   "/storage/delete": null,
   "/email/send": "email:send",
+  "/files/attach": "files:private",
   "/settings/get": null,
   "/log": null,
   "/http/fetch": "network:fetch",
@@ -291,6 +292,16 @@ export class SandboxHost {
     return body.result
       ? { ...body.result, routes: body.result.routes ?? [], jobs: body.result.jobs ?? [] }
       : null;
+  }
+
+  /** True when the owner approved this permission for the plugin (the permissions the host was given when it loaded it). */
+  allowed(id: string, permission: string): boolean {
+    return this.plugins.get(id)?.manifest.permissions.includes(permission) ?? false;
+  }
+
+  /** The row of a plugin in the `extensions` table (its stored items and files belong to it), or null when it is unknown. */
+  extensionOf(id: string): string | null {
+    return this.plugins.get(id)?.extensionId ?? null;
   }
 
   /** The jobs a plugin declared, by name, or none when it is unknown or switched off. The site reads this to know
@@ -1057,11 +1068,31 @@ const config :Workerd.Config = (
           });
         }
         case "/storage/delete": {
-          await this.o.runner.all(
-            `delete from "extension_storage" where "extension_id" = ? and "collection" = ? and "key" = ?`,
-            [p.extensionId, String(body["c"]), String(body["k"])],
-          );
+          const item = [p.extensionId, String(body["c"]), String(body["k"])];
+          // The files kept with an item go with it.
+          await this.o.runner.transaction(async (tx) => {
+            await tx.all(
+              `delete from "extension_storage" where "extension_id" = ? and "collection" = ? and "key" = ?`,
+              item,
+            );
+            await tx.all(
+              `delete from "extension_files" where "extension_id" = ? and "collection" = ? and "key" = ?`,
+              item,
+            );
+          });
           return send(200, { result: true });
+        }
+        case "/files/attach": {
+          // Only this plugin's own files that were just received can be attached; the files then belong to the item.
+          const ids = (Array.isArray(body["ids"]) ? (body["ids"] as unknown[]) : [])
+            .filter((x): x is string => typeof x === "string" && x.length === 26)
+            .slice(0, 10);
+          if (ids.length === 0) return send(200, { result: 0 });
+          const rows = await this.o.runner.all(
+            `update "extension_files" set "status" = 'kept', "collection" = ?, "key" = ? where "extension_id" = ? and "status" = 'pending' and "id" in (${ids.map(() => "?").join(", ")}) returning "id"`,
+            [String(body["c"]), String(body["k"]), p.extensionId, ...ids],
+          );
+          return send(200, { result: rows.length });
         }
         case "/email/send": {
           if (!this.o.sendEmail)

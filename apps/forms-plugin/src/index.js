@@ -26,6 +26,8 @@ const KINDS = {
   checkbox: "checkbox",
   consent: "consent",
   hidden: "hidden",
+  file: "file",
+  upload: "file",
 };
 
 const clean = (value, max) =>
@@ -88,13 +90,16 @@ function addField(fields, taken, labelText, kind, required, choices) {
     .map((o) => clean(o, 100))
     .filter((o) => o !== "");
   if ((type === "select" || type === "radio" || type === "checkbox") && list.length === 0) return;
+  // One file question for a form: the site takes at most 3 files for a message.
+  if (type === "file" && fields.some((f) => f.type === "file")) return;
   fields.push({
     name: nameOf(label || "hidden", taken, fields.length),
     label,
     type,
     required: required === true && type !== "hidden",
-    options: type === "hidden" ? [] : list.slice(0, 30),
+    options: type === "hidden" || type === "file" ? [] : list.slice(0, 30),
     value: type === "hidden" ? (list[0] ?? "") : "",
+    ...(type === "file" ? { help: "Up to 3 pictures or PDF files, 10 MB each." } : {}),
   });
 }
 
@@ -168,9 +173,10 @@ const problem = (status, title, text) => ({ status, page: { title, text } });
 const EMAIL = /^[^\s@,;<>]{1,64}@[^\s@,;<>]{1,190}\.[^\s@,;<>]{2,}$/;
 
 /** What was sent for each field, or the plain sentences for what is wrong with it. */
-function readValues(def, params) {
+function readValues(def, params, received) {
   const values = [];
   const errors = [];
+  const files = [];
   for (const f of def.fields) {
     const all = params
       .getAll(f.name)
@@ -179,7 +185,13 @@ function readValues(def, params) {
     let value;
     const fail = (why) => errors.push(`${f.label || f.name}: ${why}`);
     if (f.type === "hidden") value = f.value;
-    else if (f.type === "consent") {
+    else if (f.type === "file") {
+      // The site read and checked the files; here are only references to those that came in this field.
+      const mine = received.filter((x) => x.field === f.name);
+      if (f.required && mine.length === 0) fail("choose a file.");
+      files.push(...mine);
+      value = mine.map((x) => x.name).join(", ");
+    } else if (f.type === "consent") {
       value = all[0] === "yes" ? "yes" : "no";
       if (f.required && value !== "yes") fail("this must be ticked.");
     } else if (f.type === "checkbox") {
@@ -215,7 +227,7 @@ function readValues(def, params) {
     }
     values.push({ name: f.name, label: f.label || f.name, type: f.type, value });
   }
-  return { values, errors };
+  return { values, errors, files };
 }
 
 /** Why a message looks like spam, or "" (spec 15, section 4: no outside service). */
@@ -326,7 +338,7 @@ export default {
           "This form is not available",
           "Go back, reload the page and try again.",
         );
-      const { values, errors } = readValues(def, params);
+      const { values, errors, files } = readValues(def, params, req.files ?? []);
       const why = await spamReason(ctx, def, formId, params, values);
       if (
         (params.get("_t") ?? "") !== "" &&
@@ -360,6 +372,10 @@ export default {
         at,
         ...(spam ? { why } : {}),
         // One line for the Messages page: every answer with its label.
+        // The files kept with the message (a message that was kept apart as spam keeps none).
+        ...(!spam && files.length > 0
+          ? { files: files.map((f) => ({ id: f.id, name: f.name, type: f.type, size: f.size })) }
+          : {}),
         summary: shown
           .filter((v) => v.value !== "")
           .map((v) => `${v.label}: ${v.value}`)
@@ -367,11 +383,15 @@ export default {
           .slice(0, 2000),
         values: shown,
       };
-      await ctx.storage.set(
-        "messages",
-        `${String(at).padStart(15, "0")}-${hex(crypto.getRandomValues(new Uint8Array(3)))}`,
-        message,
-      );
+      const key = `${String(at).padStart(15, "0")}-${hex(crypto.getRandomValues(new Uint8Array(3)))}`;
+      await ctx.storage.set("messages", key, message);
+      // The files belong to the message from now on: they are deleted when it is. Files of a spam message are not kept.
+      if (!spam && files.length > 0)
+        await ctx.files.attach(
+          files.map((f) => f.id),
+          "messages",
+          key,
+        );
       await forget(ctx);
       if (!spam) {
         const owner = addresses(def.send_to || (await ctx.settings.get("send_to")));
@@ -380,6 +400,9 @@ export default {
           `A message was sent from the form "${title}".`,
           "",
           ...message.values.map((v) => `${v.label}: ${v.value}`),
+          ...(files.length > 0
+            ? ["", "The files are kept privately. Open them in Tools > Plugins > Form messages."]
+            : []),
           "",
           `Received: ${new Date(at).toISOString()}`,
         ].join("\n");

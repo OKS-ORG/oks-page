@@ -438,6 +438,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
 `,
     },
     {
+      path: "app/api/admin/plugin-files/[id]/route.ts",
+      content: `export { GET } from ${from("api-plugin-files")};\n`,
+    },
+    {
       path: "app/api/admin/plugin-pages/route.ts",
       content: `export { GET, POST } from ${from("api-plugin-pages")};
 `,

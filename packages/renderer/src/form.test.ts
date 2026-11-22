@@ -115,3 +115,33 @@ describe("the form block", () => {
     expect(pageCss([])).not.toContain(".oks-form");
   });
 });
+
+describe("a form that asks for files", () => {
+  const fields = [
+    { name: "name", label: "Name", type: "text", required: true },
+    { name: "cv", label: "Your CV", type: "file", required: true, help: "Up to 3 files." },
+  ];
+
+  test("is sent in parts, and the file question has a real label, takes several files and says which kinds", () => {
+    const out = html(form({ fields }));
+    expect(out).toContain('enctype="multipart/form-data"');
+    expect(out).toMatch(
+      /<label for="[^"]*-cv">Your CV<span aria-hidden="true"> \*<\/span><\/label>/,
+    );
+    const input = /<input type="file"[^>]*>/.exec(out)?.[0] ?? "";
+    expect(input).toContain('name="cv"');
+    expect(input).toContain("multiple");
+    expect(input).toContain("application/pdf");
+    expect(input).toContain("image/png");
+    expect(input).not.toContain("svg");
+    expect(input).toContain("required");
+    expect(input).toContain("aria-describedby");
+    expect(out).toContain("Up to 3 files.");
+  });
+
+  test("a form without a file question stays a plain form", () => {
+    const out = html(form({ fields: [fields[0]!] }));
+    expect(out).toContain('enctype="application/x-www-form-urlencoded"');
+    expect(out).not.toContain('type="file"');
+  });
+});

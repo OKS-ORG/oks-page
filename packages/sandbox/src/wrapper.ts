@@ -20,6 +20,7 @@ function makeCtx(env, callId) {
       delete: (c, k) => call("/storage/delete", { c, k }),
     },
     email: { send: (mail) => call("/email/send", mail) },
+    files: { attach: (ids, c, k) => call("/files/attach", { ids, c, k }) },
     settings: { get: (k) => call("/settings/get", { k }) },
     http: { fetch: (url, init) => call("/http/fetch", { url, init }) },
     log: (m) => call("/log", { m }),

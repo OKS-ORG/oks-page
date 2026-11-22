@@ -110,6 +110,16 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   if (typeof routes === "string") add("error", "manifest", `"oksPage.routes": ${routes}`);
   else if (Object.keys(routes).length > 0 && !permissions?.includes("routes:public"))
     add("error", "manifest", 'A plugin with routes must list "routes:public" in "permissions".');
+  else if (
+    typeof routes !== "string" &&
+    Object.values(routes).some((r) => r.uploads) &&
+    !permissions?.includes("files:private")
+  )
+    add(
+      "error",
+      "manifest",
+      'A plugin whose route takes files must list "files:private" in "permissions".',
+    );
   const jobs = raw["jobs"] === undefined ? {} : readJobs(raw["jobs"]);
   if (typeof jobs === "string") add("error", "manifest", `"oksPage.jobs": ${jobs}`);
   if (raw["adminPages"] !== undefined) {

@@ -243,6 +243,38 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PL-80 uploads: a route that takes files needs files:private, a POST route and sound limits",
+    async () => {
+      const source = `export default { routes: { send: async () => ({ json: 1 }) } };`;
+      const routes = (u: unknown) => ({ send: { method: "POST", uploads: u } });
+      const limits = { files: 3, maxFileBytes: 1_000_000 };
+      const good = await checkPlugin(
+        plugin(source, {
+          hooks: [],
+          permissions: ["routes:public", "files:private"],
+          routes: routes(limits),
+        }),
+      );
+      expect(good.issues).toEqual([]);
+      const noPermission = await checkPlugin(
+        plugin(source, { hooks: [], permissions: ["routes:public"], routes: routes(limits) }),
+      );
+      expect(errors(noPermission).map((e) => e.message)).toContain(
+        'A plugin whose route takes files must list "files:private" in "permissions".',
+      );
+      const tooMany = await checkPlugin(
+        plugin(source, {
+          hooks: [],
+          permissions: ["routes:public", "files:private"],
+          routes: routes({ files: 4, maxFileBytes: 1000 }),
+        }),
+      );
+      expect(errors(tooMany)[0]?.message).toContain('"oksPage.routes"');
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

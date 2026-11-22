@@ -13,6 +13,7 @@ import {
   SandboxHost,
   readPluginFile,
   type PluginFile,
+  type RouteFile,
   type RouteReply,
 } from "../../../packages/sandbox/src/index.js";
 
@@ -56,6 +57,7 @@ for (const { kind, open, skip } of openers) {
       form: Drawn,
       values: Record<string, string | string[]>,
       over: Record<string, string> = {},
+      files: RouteFile[] = [],
     ): Promise<RouteReply | { status: number; message: string }> => {
       const body = new URLSearchParams({ _form: form.formId, _t: form.token, _hp: "", ...over });
       for (const [k, v] of Object.entries(values))
@@ -66,9 +68,27 @@ for (const { kind, open, skip } of openers) {
         body: body.toString(),
         data: null,
         contentType: "application/x-www-form-urlencoded",
+        ...(files.length > 0 ? { files } : {}),
       });
       return r.ok ? r.reply : r;
     };
+
+    /** A file the site received for this plugin and is waiting to be attached (the site made the row, as it does for a visitor). */
+    const received = async (n: number, name: string, field = "your_cv"): Promise<RouteFile> => {
+      const id = `FILE${String(n).padStart(22, "0")}`;
+      await db.run(
+        `insert into extension_files (id, extension_id, name, mime, size_bytes, sha256, status, data, created_at) values (?, ?, ?, 'application/pdf', 5, 'x', 'pending', ?, ?)`,
+        [id, EXT, name, Buffer.from([1, 2, 3, 4, 5]), T],
+      );
+      return { field, id, name, type: "application/pdf", size: 5 };
+    };
+    const fileRows = async () =>
+      (
+        await db.runner.all(
+          `select "id", "status", "collection" from extension_files where extension_id = ? order by "id"`,
+          [EXT],
+        )
+      ).map((r) => [String(r["id"]).replace(/^FILE0*/, ""), String(r["status"]), r["collection"]]);
 
     const stored = async (): Promise<
       {
@@ -77,6 +97,7 @@ for (const { kind, open, skip } of openers) {
         title: string;
         at: number;
         summary: string;
+        files?: { id: string; name: string; type: string; size: number }[];
         values: { label: string; value: string }[];
       }[]
     > => {
@@ -181,6 +202,7 @@ for (const { kind, open, skip } of openers) {
       expect(file.manifest.permissions.sort()).toEqual([
         "admin:pages",
         "email:send",
+        "files:private",
         "routes:public",
       ]);
       // The Messages page is data: a table over the plugin's own storage.
@@ -266,6 +288,108 @@ for (const { kind, open, skip } of openers) {
       const signup = await draw(presets[3]!.settings);
       expect(signup.html).toMatch(/type="checkbox"[^>]*required/);
       expect(signup.html).not.toMatch(/type="checkbox"[^>]*checked/);
+    });
+
+    test("a file question is drawn with its help, there is only one per form, and the key stays a kind of the list", async () => {
+      const d = await draw({
+        fields: [
+          { label: "Name", kind: "text", required: true },
+          { label: "Your CV", kind: "file", required: false },
+          { label: "Another file", kind: "file" },
+        ],
+      });
+      const fields = d.fields as {
+        label: string;
+        type: string;
+        help?: string;
+        required: boolean;
+      }[];
+      expect(fields.map((f) => [f.label, f.type])).toEqual([
+        ["Name", "text"],
+        ["Your CV", "file"],
+      ]);
+      expect(fields[1]!.help).toBe("Up to 3 pictures or PDF files, 10 MB each.");
+      expect(d.html).toContain('enctype="multipart/form-data"');
+      expect(d.html).toMatch(/<input type="file"[^>]*name="your_cv"[^>]*multiple/);
+      // The line of text knows the same kind.
+      const line = await draw({ fields: "Name*; Your CV:file" });
+      expect((line.fields as { type: string }[]).map((f) => f.type)).toEqual(["text", "file"]);
+    });
+
+    test("files that came with a message are attached to it, listed in the message and the email, and go with it", async () => {
+      const form = await draw({ title: "Apply", fields: "Name*; Your CV*:file" });
+      await sleep(3200); // a form sent faster than a person can is kept apart as spam
+      const cv = await received(1, "cv-anna.pdf");
+      const extra = await received(2, "letter.pdf");
+      const before = mails.length;
+      const r = await send(form, { name: "Anna" }, {}, [cv, extra]);
+      expect((r as { status: number }).status).toBe(200);
+      const last = (await stored()).at(-1)!;
+      expect(last.files?.map((f) => f.name)).toEqual(["cv-anna.pdf", "letter.pdf"]);
+      expect(last.summary).toBe("Name: Anna · Your CV: cv-anna.pdf, letter.pdf");
+      expect(mails.length).toBe(before + 1);
+      expect(mails[before]!.text).toContain("The files are kept privately");
+      expect(mails[before]!.text).toContain("Your CV: cv-anna.pdf, letter.pdf");
+      // Attached, with the message's own key.
+      const key = String(
+        (
+          await db.runner.all(
+            `select "key" from extension_storage where extension_id = ? and collection = 'messages' order by "key" desc limit 1`,
+            [EXT],
+          )
+        )[0]!["key"],
+      );
+      const rows = await db.runner.all(
+        `select "id", "status", "collection", "key" from extension_files where extension_id = ? order by "id"`,
+        [EXT],
+      );
+      expect(
+        rows.map((x) => [String(x["status"]), String(x["collection"]), String(x["key"])]),
+      ).toEqual([
+        ["kept", "messages", key],
+        ["kept", "messages", key],
+      ]);
+      // The keeping job deletes an old message, and the files go with it.
+      await db.run(
+        `update extension_storage set key = ? where extension_id = ? and collection = 'messages' and key = ?`,
+        ["000000000000001-old", EXT, key],
+      );
+      await db.run(
+        `update extension_files set key = '000000000000001-old' where extension_id = ?`,
+        [EXT],
+      );
+      await db.run(
+        `update extension_storage set value = ? where extension_id = ? and key = '000000000000001-old'`,
+        [JSON.stringify({ ...last, at: Date.now() - 500 * 24 * 60 * 60 * 1000 }), EXT],
+      );
+      expect(await host.runJob("forms", "keep")).toEqual({ ok: true });
+      expect(await fileRows()).toEqual([]);
+    });
+
+    test("a required file that did not come, and files of another question, are handled", async () => {
+      const form = await draw({ fields: "Name*; Your CV*:file" });
+      await sleep(3200);
+      const before = (await stored()).length;
+      const none = await send(form, { name: "Ben" });
+      expect((none as { status: number }).status).toBe(400);
+      expect(JSON.stringify(none)).toContain("Your CV: choose a file.");
+      // A file that came in a field the form does not have is not attached.
+      const stray = await received(3, "stray.pdf", "somewhere_else");
+      const again = await send(form, { name: "Ben" }, {}, [stray]);
+      expect((again as { status: number }).status).toBe(400);
+      expect((await stored()).length).toBe(before);
+      expect((await fileRows()).filter((x) => x[0] === "3")).toEqual([["3", "pending", null]]);
+    });
+
+    test("a message kept apart as spam keeps no files: they stay unattached and go with the hour", async () => {
+      const form = await draw({ fields: "Name*; Your CV:file" });
+      const cv = await received(4, "spam.pdf");
+      const r = await send(form, { name: "Bot" }, { _hp: "x" }, [cv]);
+      expect((r as { status: number }).status).toBe(200);
+      const last = (await stored()).at(-1)!;
+      expect(last.status).toBe("spam");
+      expect(last.files).toBeUndefined();
+      expect((await fileRows()).find((x) => x[0] === "4")).toEqual(["4", "pending", null]);
     });
 
     test("rows of the list that make no sense are left out, and a list with nothing usable falls back to the standard form", async () => {

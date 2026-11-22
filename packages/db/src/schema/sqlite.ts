@@ -13,6 +13,7 @@ import {
   text,
   unique,
   uniqueIndex,
+  blob,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -829,6 +830,36 @@ export const extensionStorage = sqliteTable(
   ],
 );
 
+// The files visitors send to a plugin (spec 16, section 6; permission `files:private`). They are kept here, in the
+// database, never in the public media folder, and are opened only through an admin address for people who may manage
+// plugins. A file starts as `pending` (it was received) and becomes `kept` when the plugin attaches it to one of its
+// stored items; deleting the item deletes the file, and so does removing the plugin.
+export const extensionFiles = sqliteTable(
+  "extension_files",
+  {
+    id: text("id").primaryKey().notNull(),
+    extensionId: text("extension_id")
+      .notNull()
+      .references(() => extensions.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    status: text("status").notNull(),
+    collection: text("collection"),
+    key: text("key"),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    check("ck_extension_files_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_extension_files_extension_id_ulid", sql`length(${t.extensionId}) = 26`),
+    check("ck_extension_files_status", sql`${t.status} in ('pending', 'kept')`),
+    index("ix_extension_files_item").on(t.extensionId, t.collection, t.key),
+    index("ix_extension_files_status").on(t.status, t.createdAt),
+  ],
+);
+
 // A plugin's settings (spec 04, section 9). A secret setting holds only its sealed value, never the plain secret (PL-39).
 export const extensionSettings = sqliteTable(
   "extension_settings",
@@ -1114,6 +1145,7 @@ export const tableNames = [
   "extension_previous_versions",
   "extension_permissions",
   "extension_storage",
+  "extension_files",
   "extension_settings",
   "redirects",
   "not_found_log",

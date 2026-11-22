@@ -85,6 +85,13 @@
       "when": 1795147477498,
       "tag": "0011_sloppy_the_hunter",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795358205010,
+      "tag": "0012_chilly_sabra",
+      "breakpoints": true
     }
   ]
 }

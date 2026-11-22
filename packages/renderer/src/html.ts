@@ -142,6 +142,11 @@ function formHtml(block: Block): string {
       parts.push(
         `<fieldset class="oks-form-field"${describedBy}><legend>${label}${mark}</legend>${help}${choices}</fieldset>`,
       );
+    } else if (f.type === "file") {
+      // Pictures and PDF files only (the site checks the bytes again); several may be chosen.
+      parts.push(
+        `<div class="oks-form-field"><label for="${id}">${label}${mark}</label>${help}<input type="file" id="${id}" name="${f.name}" multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,.jpg,.jpeg,.png,.gif,.webp,.avif,.pdf"${req}${reqAria}${describedBy}></div>`,
+      );
     } else if (f.type === "select") {
       const options = f.options
         .map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`)
@@ -176,7 +181,11 @@ function formHtml(block: Block): string {
   parts.push(
     `<button type="submit" class="button button-solid">${escapeHtml(form.submit)}</button>`,
   );
-  return `<form class="oks-form" method="post" action="${form.action}" enctype="application/x-www-form-urlencoded">${parts.join("")}</form>`;
+  // A form that asks for a file is sent in parts; any other stays a plain form.
+  const enctype = form.fields.some((f) => f.type === "file")
+    ? "multipart/form-data"
+    : "application/x-www-form-urlencoded";
+  return `<form class="oks-form" method="post" action="${form.action}" enctype="${enctype}">${parts.join("")}</form>`;
 }
 
 // ---- video: only a few hosts, drawn through their privacy-friendly player address ----

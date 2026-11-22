@@ -21,6 +21,7 @@ const PLAIN: Record<string, string> = {
   "site:head": "Add tags to every page's head",
   "site:scripts": "Add scripts to your public pages",
   "routes:public": "Add its own web addresses to your site",
+  "files:private": "Keep the files that visitors send, privately",
   "admin:pages": "Add admin pages and dashboard cards",
   cron: "Run tasks on a schedule",
 };
@@ -73,6 +74,7 @@ export function permissionRisk(permission: string): "low" | "medium" | "high" {
       "comments:moderate",
       "menus:write",
       "routes:public",
+      "files:private",
       "cron",
     ].includes(permission)
   )

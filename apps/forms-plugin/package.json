@@ -14,6 +14,7 @@
     "permissions": [
       "admin:pages",
       "email:send",
+      "files:private",
       "routes:public"
     ],
     "hooks": [],
@@ -81,6 +82,10 @@
                   {
                     "value": "consent",
                     "label": "A box to tick to agree"
+                  },
+                  {
+                    "value": "file",
+                    "label": "File upload (pictures and PDF)"
                   }
                 ]
               },
@@ -293,6 +298,11 @@
               "field": "summary",
               "label": "Message",
               "truncate": 140
+            },
+            {
+              "field": "files",
+              "label": "Files",
+              "format": "files"
             }
           ],
           "filters": [
@@ -346,7 +356,11 @@
     "routes": {
       "send": {
         "method": "POST",
-        "maxBytes": 30000
+        "maxBytes": 30000,
+        "uploads": {
+          "files": 3,
+          "maxFileBytes": 10485760
+        }
       }
     },
     "settings": {

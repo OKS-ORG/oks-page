@@ -261,6 +261,8 @@ function readSettings(value: unknown, where: string, block = false): SettingsSch
   return out;
 }
 
+export const UPLOAD_FILES_MOST = 3;
+export const UPLOAD_FILE_BYTES_MOST = 10 * 1024 * 1024;
 export const ROUTE_BODY_DEFAULT = 20_000;
 export const ROUTE_BODY_MOST = 100_000;
 
@@ -272,7 +274,12 @@ export function readRoutes(value: unknown): Record<string, RouteInfo> | string {
   if (entries.length > 20) return "The plugin has too many routes.";
   const out: Record<string, RouteInfo> = {};
   for (const [name, raw] of entries) {
-    const r = raw as { method?: unknown; maxBytes?: unknown; signedIn?: unknown } | null;
+    const r = raw as {
+      method?: unknown;
+      maxBytes?: unknown;
+      signedIn?: unknown;
+      uploads?: unknown;
+    } | null;
     if (
       !BLOCK.test(name) ||
       r === null ||
@@ -286,10 +293,30 @@ export function readRoutes(value: unknown): Record<string, RouteInfo> | string {
       (r.signedIn !== undefined && typeof r.signedIn !== "boolean")
     )
       return `The route "${name.slice(0, 40)}" is not valid.`;
+    let uploads: RouteInfo["uploads"];
+    if (r.uploads !== undefined) {
+      const u = r.uploads as { files?: unknown; maxFileBytes?: unknown } | null;
+      if (
+        r.method !== "POST" ||
+        u === null ||
+        typeof u !== "object" ||
+        typeof u.files !== "number" ||
+        !Number.isInteger(u.files) ||
+        u.files < 1 ||
+        u.files > UPLOAD_FILES_MOST ||
+        typeof u.maxFileBytes !== "number" ||
+        !Number.isInteger(u.maxFileBytes) ||
+        u.maxFileBytes < 1 ||
+        u.maxFileBytes > UPLOAD_FILE_BYTES_MOST
+      )
+        return `The route "${name.slice(0, 40)}" is not valid: "uploads" needs a POST route, "files" from 1 to ${UPLOAD_FILES_MOST} and "maxFileBytes" up to ${UPLOAD_FILE_BYTES_MOST}.`;
+      uploads = { files: u.files, maxFileBytes: u.maxFileBytes };
+    }
     out[name] = {
       method: r.method,
       ...(r.maxBytes !== undefined ? { maxBytes: r.maxBytes as number } : {}),
       ...(r.signedIn ? { signedIn: true } : {}),
+      ...(uploads ? { uploads } : {}),
     };
   }
   return out;
@@ -388,6 +415,8 @@ export function readPluginFile(text: string): PluginFileResult {
     if (typeof read === "string") return bad(read);
     if (Object.keys(read).length > 0 && !permissions.includes("routes:public"))
       return bad('A plugin with routes must ask for the permission "routes:public".');
+    if (Object.values(read).some((r) => r.uploads) && !permissions.includes("files:private"))
+      return bad('A plugin whose route takes files must ask for the permission "files:private".');
     routes = read;
   }
   let jobs: Record<string, JobInfo> | undefined;
