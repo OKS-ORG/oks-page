@@ -21,6 +21,7 @@ import {
 } from "@oks-page/content-safety";
 import { ICON_NAMES, pageCss, writeBlocks } from "@oks-page/renderer";
 import { Button } from "oks-ui";
+import { PluginListEditor, type ListItemField } from "./plugin-list-editor.js";
 import {
   cloneElement,
   useCallback,
@@ -227,12 +228,41 @@ const NATURAL_DISPLAY: Record<string, string> = {
 const readStyle = (b: Block, sizes: readonly string[]): Style =>
   checkStyle(b.props["style"], sizes).style;
 
+/** One setting of a plugin's block. A text may be a drop-down list, and a list asks for several items of the same kind. */
+export type PluginBlockField =
+  | {
+      key: string;
+      label: string;
+      type: "text";
+      options?: { value: string; label: string }[];
+      default?: string;
+    }
+  | { key: string; label: string; type: "number"; default?: number }
+  | { key: string; label: string; type: "boolean"; default?: boolean }
+  | {
+      key: string;
+      label: string;
+      type: "list";
+      itemName: string;
+      item: ListItemField[];
+      most: number;
+      default?: Record<string, string | boolean>[];
+    };
+
 /** A block a plugin adds: its type (`<plugin-id>-<block>`), its name in the list, and the fields of its settings. */
 export interface PluginBlockInfo {
   type: string;
   label: string;
-  fields: { key: string; label: string; type: "text" | "number" | "boolean" }[];
+  fields: PluginBlockField[];
 }
+
+/** What a new block of a plugin starts with: the values its settings say. */
+const startOf = (fields: PluginBlockField[]): Record<string, unknown> =>
+  Object.fromEntries(
+    fields.flatMap((f) =>
+      f.default === undefined ? [] : [[f.key, structuredClone(f.default)] as const],
+    ),
+  );
 
 export interface LayoutEditorProps {
   label?: string;
@@ -273,7 +303,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
       ...(props.pluginBlocks ?? []).map((p) => ({
         type: p.type,
         label: p.label,
-        make: () => block(p.type),
+        make: () => block(p.type, startOf(p.fields)),
       })),
     ],
     [props.pluginBlocks],
@@ -665,29 +695,71 @@ export function LayoutEditor(props: LayoutEditorProps) {
         .flatMap((p) =>
           p.fields.map((f) => (
             <div key={`${p.type}:${f.key}`}>
-              {f.type === "boolean"
-                ? field(
-                    f.label,
-                    <input
-                      type="checkbox"
-                      checked={place.block.props[f.key] === true}
-                      onChange={(e) => setProp(f.key, e.target.checked)}
-                    />,
-                  )
-                : field(
-                    f.label,
-                    <input
-                      type={f.type === "number" ? "number" : "text"}
-                      style={{ width: "100%" }}
-                      value={String(place.block.props[f.key] ?? "")}
-                      onChange={(e) =>
-                        setProp(
-                          f.key,
-                          f.type === "number" ? Number(e.target.value) : e.target.value,
-                        )
-                      }
-                    />,
-                  )}
+              {f.type === "list" ? (
+                // A list that an older page kept as one line of text stays a text until the person chooses the list.
+                typeof place.block.props[f.key] === "string" ? (
+                  <>
+                    {field(
+                      f.label,
+                      <input
+                        style={{ width: "100%" }}
+                        value={String(place.block.props[f.key])}
+                        onChange={(e) => setProp(f.key, e.target.value)}
+                      />,
+                    )}
+                    <Button onPress={() => setProp(f.key, structuredClone(f.default ?? []))}>
+                      Use the list of {f.itemName}s instead
+                    </Button>
+                  </>
+                ) : (
+                  <PluginListEditor
+                    label={f.label}
+                    itemName={f.itemName}
+                    item={f.item}
+                    most={f.most}
+                    value={place.block.props[f.key]}
+                    onChange={(rows) => setProp(f.key, rows)}
+                  />
+                )
+              ) : f.type === "text" && f.options ? (
+                field(
+                  f.label,
+                  <select
+                    value={String(place.block.props[f.key] ?? "")}
+                    onChange={(e) => setProp(f.key, e.target.value)}
+                  >
+                    {f.options.some((o) => o.value === place.block.props[f.key]) ? null : (
+                      <option value={String(place.block.props[f.key] ?? "")}>Choose…</option>
+                    )}
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>,
+                )
+              ) : f.type === "boolean" ? (
+                field(
+                  f.label,
+                  <input
+                    type="checkbox"
+                    checked={place.block.props[f.key] === true}
+                    onChange={(e) => setProp(f.key, e.target.checked)}
+                  />,
+                )
+              ) : (
+                field(
+                  f.label,
+                  <input
+                    type={f.type === "number" ? "number" : "text"}
+                    style={{ width: "100%" }}
+                    value={String(place.block.props[f.key] ?? "")}
+                    onChange={(e) =>
+                      setProp(f.key, f.type === "number" ? Number(e.target.value) : e.target.value)
+                    }
+                  />,
+                )
+              )}
             </div>
           )),
         )}

@@ -72,23 +72,46 @@ export function parseFields(text) {
   for (const part of String(text).split(/[;\n]/)) {
     const m = /^(.*?)\s*(\*)?\s*(?::\s*([a-z]+)\s*(?:\(([^)]*)\))?)?\s*$/i.exec(part.trim());
     if (!m || fields.length >= MOST_FIELDS) continue;
-    const label = clean(m[1], 200);
-    const type = KINDS[(m[3] ?? "text").toLowerCase()];
-    if (!type || (label === "" && type !== "hidden")) continue;
-    const list = (m[4] ?? "")
-      .split("|")
-      .map((o) => clean(o, 100))
-      .filter((o) => o !== "");
-    if ((type === "select" || type === "radio" || type === "checkbox") && list.length === 0)
-      continue;
-    fields.push({
-      name: nameOf(label || "hidden", taken, fields.length),
-      label,
-      type,
-      required: m[2] === "*" && type !== "hidden",
-      options: type === "hidden" ? [] : list.slice(0, 30),
-      value: type === "hidden" ? (list[0] ?? "") : "",
-    });
+    addField(fields, taken, m[1], m[3] ?? "text", m[2] === "*", m[4] ?? "");
+  }
+  return fields;
+}
+
+/** Adds one field when it is sound: a question (a hidden value needs none), a known kind, and choices where the kind asks. */
+function addField(fields, taken, labelText, kind, required, choices) {
+  if (fields.length >= MOST_FIELDS) return;
+  const label = clean(labelText, 200);
+  const type = KINDS[String(kind).toLowerCase()];
+  if (!type || (label === "" && type !== "hidden")) return;
+  const list = String(choices)
+    .split("|")
+    .map((o) => clean(o, 100))
+    .filter((o) => o !== "");
+  if ((type === "select" || type === "radio" || type === "checkbox") && list.length === 0) return;
+  fields.push({
+    name: nameOf(label || "hidden", taken, fields.length),
+    label,
+    type,
+    required: required === true && type !== "hidden",
+    options: type === "hidden" ? [] : list.slice(0, 30),
+    value: type === "hidden" ? (list[0] ?? "") : "",
+  });
+}
+
+/** The fields the page builder's list makes: a list of { label, kind, required, options }. */
+export function fieldsFromList(rows) {
+  const fields = [];
+  const taken = new Set();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== "object") continue;
+    addField(
+      fields,
+      taken,
+      row.label,
+      row.kind || "text",
+      row.required === true,
+      row.options ?? "",
+    );
   }
   return fields;
 }
@@ -96,9 +119,11 @@ export function parseFields(text) {
 /** What a block's settings say, cleaned. Two blocks that say the same thing are the same form. */
 function definition(props) {
   const p = props && typeof props === "object" ? props : {};
-  const fields = parseFields(
-    typeof p.fields === "string" && p.fields.trim() ? p.fields : DEFAULT_FIELDS,
-  );
+  // The page builder keeps the fields as a list; a form written as one line of text (Name*; Email*:email) still works.
+  const made = Array.isArray(p.fields)
+    ? fieldsFromList(p.fields)
+    : parseFields(typeof p.fields === "string" ? p.fields : "");
+  const fields = made.length > 0 ? made : parseFields(DEFAULT_FIELDS);
   return {
     title: clean(p.title, 200),
     fields,

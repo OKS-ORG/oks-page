@@ -65,8 +65,31 @@ export type RouteRun =
 
 /** One setting a plugin declares. A `secret` (an API key) is sealed at rest and never shown in full again (PL-39). */
 export interface SettingField {
-  type: "text" | "number" | "boolean" | "secret";
+  type: "text" | "number" | "boolean" | "secret" | "list";
   label?: string;
+  /** For `text` in a block: the values the person may choose from, drawn as a drop-down list. */
+  options?: SettingOption[];
+  /** For `list` (a block's settings only): the answers asked for each item, by name. */
+  item?: Record<string, ItemField>;
+  /** For `list`: the most items. Default 30. */
+  most?: number;
+  /** For `list`: what one item is called, in lower-case words ("field"). Default "item". */
+  itemName?: string;
+  /** For a block's settings: the value a new block starts with. */
+  default?: unknown;
+}
+
+/** One value of a drop-down list: what is stored, and what the person reads. */
+export interface SettingOption {
+  value: string;
+  label: string;
+}
+
+/** One answer asked for each item of a list setting: a short text (or a choice from `options`) or a yes or no. */
+export interface ItemField {
+  type: "text" | "boolean";
+  label: string;
+  options?: SettingOption[];
 }
 
 export type SettingsSchema = Record<string, SettingField>;

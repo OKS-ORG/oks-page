@@ -29,8 +29,90 @@
             "label": "Title above the form"
           },
           "fields": {
-            "type": "text",
-            "label": "Fields: Name*; Email*:email; Topic:choice(A|B); Note:long"
+            "type": "list",
+            "label": "Form fields",
+            "itemName": "field",
+            "most": 30,
+            "item": {
+              "label": {
+                "type": "text",
+                "label": "Question"
+              },
+              "kind": {
+                "type": "text",
+                "label": "Answer type",
+                "options": [
+                  {
+                    "value": "text",
+                    "label": "Short text"
+                  },
+                  {
+                    "value": "email",
+                    "label": "Email address"
+                  },
+                  {
+                    "value": "phone",
+                    "label": "Phone number"
+                  },
+                  {
+                    "value": "long",
+                    "label": "Long text"
+                  },
+                  {
+                    "value": "number",
+                    "label": "Number"
+                  },
+                  {
+                    "value": "date",
+                    "label": "Date"
+                  },
+                  {
+                    "value": "radio",
+                    "label": "Round buttons (one answer)"
+                  },
+                  {
+                    "value": "select",
+                    "label": "Drop-down list (one answer)"
+                  },
+                  {
+                    "value": "ticks",
+                    "label": "Tick boxes (several answers)"
+                  },
+                  {
+                    "value": "consent",
+                    "label": "A box to tick to agree"
+                  }
+                ]
+              },
+              "required": {
+                "type": "boolean",
+                "label": "Must be answered"
+              },
+              "options": {
+                "type": "text",
+                "label": "Choices, with a bar between: Red|Blue"
+              }
+            },
+            "default": [
+              {
+                "label": "Name",
+                "kind": "text",
+                "required": true,
+                "options": ""
+              },
+              {
+                "label": "Email",
+                "kind": "email",
+                "required": true,
+                "options": ""
+              },
+              {
+                "label": "Message",
+                "kind": "long",
+                "required": true,
+                "options": ""
+              }
+            ]
           },
           "button": {
             "type": "text",

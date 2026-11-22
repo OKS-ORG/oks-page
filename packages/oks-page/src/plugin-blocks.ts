@@ -8,6 +8,32 @@ import type { SqlRunner } from "@oks-page/db";
 import { getRunner, getSiteId } from "./db";
 import { pluginHost } from "./plugin-runtime";
 
+/** One value of a drop-down list in a block's settings. */
+export interface PluginBlockOption {
+  value: string;
+  label: string;
+}
+
+/** One setting of a plugin's block, as the page builder draws it. */
+export type PluginBlockField =
+  | { key: string; label: string; type: "text"; options?: PluginBlockOption[]; default?: string }
+  | { key: string; label: string; type: "number"; default?: number }
+  | { key: string; label: string; type: "boolean"; default?: boolean }
+  | {
+      key: string;
+      label: string;
+      type: "list";
+      itemName: string;
+      item: {
+        key: string;
+        label: string;
+        type: "text" | "boolean";
+        options?: PluginBlockOption[];
+      }[];
+      most: number;
+      default?: Record<string, string | boolean>[];
+    };
+
 export interface PluginBlockType {
   /** The block's type in a page: `<plugin-id>-<block>`. */
   type: string;
@@ -16,7 +42,7 @@ export interface PluginBlockType {
   /** The name in the editor's list of blocks. */
   label: string;
   /** The fields of the block's settings (a secret has no place in the editor). */
-  fields: { key: string; label: string; type: "text" | "number" | "boolean" }[];
+  fields: PluginBlockField[];
 }
 
 const parse = (value: unknown): Record<string, unknown> => {
@@ -27,6 +53,84 @@ const parse = (value: unknown): Record<string, unknown> => {
     return {};
   }
 };
+
+const options = (v: unknown): PluginBlockOption[] | undefined =>
+  Array.isArray(v)
+    ? (v as unknown[]).flatMap((o) => {
+        const x = parse(o);
+        return typeof x["value"] === "string" && typeof x["label"] === "string"
+          ? [{ value: x["value"], label: x["label"] }]
+          : [];
+      })
+    : undefined;
+
+/** One setting of a block as the editor draws it. The manifest was checked when the plugin was added; this is careful anyway. */
+function fieldOf(key: string, field: Record<string, unknown>): PluginBlockField[] {
+  const type = field["type"];
+  const label = typeof field["label"] === "string" ? field["label"] : key;
+  if (type === "boolean")
+    return [
+      {
+        key,
+        label,
+        type,
+        ...(typeof field["default"] === "boolean" ? { default: field["default"] } : {}),
+      },
+    ];
+  if (type === "number")
+    return [
+      {
+        key,
+        label,
+        type,
+        ...(typeof field["default"] === "number" ? { default: field["default"] } : {}),
+      },
+    ];
+  if (type === "text") {
+    const list = options(field["options"]);
+    return [
+      {
+        key,
+        label,
+        type,
+        ...(list && list.length > 0 ? { options: list } : {}),
+        ...(typeof field["default"] === "string" ? { default: field["default"] } : {}),
+      },
+    ];
+  }
+  if (type === "list") {
+    const item = Object.entries(parse(field["item"])).flatMap(([k, raw]) => {
+      const x = parse(raw);
+      const t = x["type"];
+      if (t !== "text" && t !== "boolean") return [];
+      const list = options(x["options"]);
+      return [
+        {
+          key: k,
+          label: typeof x["label"] === "string" ? x["label"] : k,
+          type: t as "text" | "boolean",
+          ...(list && list.length > 0 ? { options: list } : {}),
+        },
+      ];
+    });
+    if (item.length === 0) return [];
+    const most = Number(field["most"]);
+    return [
+      {
+        key,
+        label,
+        type,
+        itemName: typeof field["itemName"] === "string" ? field["itemName"] : "item",
+        item,
+        most: Number.isInteger(most) && most >= 1 && most <= 50 ? most : 30,
+        ...(Array.isArray(field["default"])
+          ? { default: field["default"] as Record<string, string | boolean>[] }
+          : {}),
+      },
+    ];
+  }
+  return [];
+}
 
 /** The blocks of the plugins that are switched on. */
 export async function pluginBlockTypes(
@@ -52,12 +156,7 @@ export async function pluginBlockTypes(
         pluginId,
         block: name,
         label: `${typeof entry["label"] === "string" ? entry["label"] : name} (${pluginId})`,
-        fields: Object.entries(settings).flatMap(([key, f]) => {
-          const field = parse(f);
-          const type = field["type"];
-          if (type !== "text" && type !== "number" && type !== "boolean") return [];
-          return [{ key, label: typeof field["label"] === "string" ? field["label"] : key, type }];
-        }),
+        fields: Object.entries(settings).flatMap(([key, f]) => fieldOf(key, parse(f))),
       });
     }
   }

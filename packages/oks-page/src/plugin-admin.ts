@@ -300,11 +300,10 @@ export async function loadPluginSettings(
   if (!actor.can("plugins.manage")) return fail("forbidden", "You may not manage plugins.");
   const found = await schemaOf(runner, siteId, key);
   if (!found) return fail("not_found", "This plugin is not installed.");
-  const fields = Object.entries(found.schema).map(([k, f]) => ({
-    key: k,
-    label: f.label ?? k,
-    type: f.type,
-  }));
+  // A list belongs to a block's settings (the editor draws it); the plugin's own settings never have one.
+  const fields = Object.entries(found.schema).flatMap(([k, f]) =>
+    f.type === "list" ? [] : [{ key: k, label: f.label ?? k, type: f.type }],
+  );
   if (fields.length === 0) return fail("not_found", "This plugin has no settings.");
   let values: Record<string, unknown>;
   try {

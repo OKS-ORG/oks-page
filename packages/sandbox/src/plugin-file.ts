@@ -4,7 +4,14 @@
 import { createHash } from "node:crypto";
 import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
-import type { JobInfo, RouteInfo, SettingsSchema } from "./types.js";
+import type {
+  ItemField,
+  JobInfo,
+  RouteInfo,
+  SettingField,
+  SettingOption,
+  SettingsSchema,
+} from "./types.js";
 
 export const PLUGIN_FILE_FORMAT = 1;
 /** The biggest plugin file the site takes (the bundle itself is limited more tightly by `oks check`). */
@@ -76,27 +83,172 @@ const list = (value: unknown, label: string, test: (s: string) => boolean): stri
   return items;
 };
 
-/** A list of settings, or the words for what is wrong with it. */
-function readSettings(value: unknown, where: string): SettingsSchema | string {
+export const LIST_ITEMS_MOST = 50;
+export const LIST_ITEMS_DEFAULT = 30;
+const LIST_ITEM_FIELDS_MOST = 8;
+const OPTIONS_MOST = 30;
+const TEXT_DEFAULT_MOST = 2000;
+
+/** The choices of a drop-down list, or the words for what is wrong with them. */
+function readOptions(value: unknown): SettingOption[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > OPTIONS_MOST) return null;
+  const out: SettingOption[] = [];
+  for (const o of value as unknown[]) {
+    const x = o as { value?: unknown; label?: unknown } | null;
+    if (
+      x === null ||
+      typeof x !== "object" ||
+      typeof x.value !== "string" ||
+      x.value.length > 60 ||
+      typeof x.label !== "string" ||
+      x.label.length === 0 ||
+      x.label.length > 80 ||
+      out.some((y) => y.value === x.value)
+    )
+      return null;
+    out.push({ value: x.value, label: x.label });
+  }
+  return out;
+}
+
+/** The answers asked for each item of a list setting, or null when they are not valid. */
+function readItemFields(value: unknown): Record<string, ItemField> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length < 1 || entries.length > LIST_ITEM_FIELDS_MOST) return null;
+  const out: Record<string, ItemField> = {};
+  for (const [key, raw] of entries) {
+    const f = raw as { type?: unknown; label?: unknown; options?: unknown } | null;
+    if (
+      !SETTING_KEY.test(key) ||
+      f === null ||
+      typeof f !== "object" ||
+      (f.type !== "text" && f.type !== "boolean") ||
+      typeof f.label !== "string" ||
+      f.label.length === 0 ||
+      f.label.length > 80
+    )
+      return null;
+    let options: SettingOption[] | undefined;
+    if (f.options !== undefined) {
+      if (f.type !== "text") return null;
+      const read = readOptions(f.options);
+      if (read === null) return null;
+      options = read;
+    }
+    out[key] = { type: f.type, label: f.label, ...(options ? { options } : {}) };
+  }
+  return out;
+}
+
+/** The items a new block starts with: each answer is a text of a sound length or a yes or no, of the kind asked for. */
+function readListDefault(
+  value: unknown,
+  item: Record<string, ItemField>,
+  most: number,
+): Record<string, string | boolean>[] | null {
+  if (!Array.isArray(value) || value.length > most) return null;
+  const out: Record<string, string | boolean>[] = [];
+  for (const row of value as unknown[]) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) return null;
+    const one: Record<string, string | boolean> = {};
+    for (const [key, v] of Object.entries(row as Record<string, unknown>)) {
+      const f = item[key];
+      if (!f) return null;
+      if (f.type === "boolean" ? typeof v !== "boolean" : typeof v !== "string" || v.length > 500)
+        return null;
+      if (f.options && !f.options.some((o) => o.value === v)) return null;
+      one[key] = v as string | boolean;
+    }
+    out.push(one);
+  }
+  return out;
+}
+
+/**
+ * A list of settings, or the words for what is wrong with it. In a block's settings (`block` true) a text may be a
+ * drop-down list, a list of items may be asked for, and any setting may say what a new block starts with.
+ */
+function readSettings(value: unknown, where: string, block = false): SettingsSchema | string {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return `The plugin's ${where} are not valid.`;
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length > 40) return `The plugin has too many ${where}.`;
   const out: SettingsSchema = {};
   for (const [key, field] of entries) {
-    const ft = field as { type?: unknown; label?: unknown } | null;
+    const ft = field as {
+      type?: unknown;
+      label?: unknown;
+      options?: unknown;
+      item?: unknown;
+      most?: unknown;
+      itemName?: unknown;
+      default?: unknown;
+    } | null;
+    const types = block
+      ? ["text", "number", "boolean", "secret", "list"]
+      : ["text", "number", "boolean", "secret"];
     if (
       !SETTING_KEY.test(key) ||
       ft === null ||
       typeof ft !== "object" ||
-      !["text", "number", "boolean", "secret"].includes(String(ft.type)) ||
+      !types.includes(String(ft.type)) ||
       (ft.label !== undefined && (typeof ft.label !== "string" || ft.label.length > 80))
     )
       return `The setting "${key}" is not valid.`;
-    out[key] = {
-      type: ft.type as "text" | "number" | "boolean" | "secret",
+    const read: SettingField = {
+      type: ft.type as SettingField["type"],
       ...(typeof ft.label === "string" ? { label: ft.label } : {}),
     };
+    const bad = `The setting "${key}" is not valid.`;
+    if (
+      !block &&
+      (ft.options !== undefined ||
+        ft.item !== undefined ||
+        ft.most !== undefined ||
+        ft.itemName !== undefined ||
+        ft.default !== undefined)
+    )
+      return bad;
+    if (ft.options !== undefined) {
+      const options = ft.type === "text" ? readOptions(ft.options) : null;
+      if (options === null) return bad;
+      read.options = options;
+    }
+    if (ft.type === "list") {
+      const item = readItemFields(ft.item);
+      if (item === null) return bad;
+      const most = ft.most === undefined ? LIST_ITEMS_DEFAULT : ft.most;
+      if (typeof most !== "number" || !Number.isInteger(most) || most < 1 || most > LIST_ITEMS_MOST)
+        return bad;
+      read.item = item;
+      read.most = most;
+      if (ft.itemName !== undefined) {
+        if (typeof ft.itemName !== "string" || !/^[a-z][a-z ]{0,29}$/.test(ft.itemName)) return bad;
+        read.itemName = ft.itemName;
+      }
+      if (ft.default !== undefined) {
+        const rows = readListDefault(ft.default, item, most);
+        if (rows === null) return bad;
+        read.default = rows;
+      }
+    } else {
+      if (ft.item !== undefined || ft.most !== undefined || ft.itemName !== undefined) return bad;
+      if (ft.default !== undefined) {
+        const d = ft.default;
+        const sound =
+          ft.type === "text"
+            ? typeof d === "string" &&
+              d.length <= TEXT_DEFAULT_MOST &&
+              (!read.options || read.options.some((o) => o.value === d))
+            : ft.type === "number"
+              ? typeof d === "number" && Number.isFinite(d)
+              : ft.type === "boolean" && typeof d === "boolean";
+        if (!sound) return bad;
+        read.default = d;
+      }
+    }
+    out[key] = read;
   }
   return out;
 }
@@ -263,7 +415,7 @@ export function readPluginFile(text: string): PluginFileResult {
         return bad(`The information about the block "${name}" is not valid.`);
       let blockSettings: SettingsSchema | undefined;
       if (e.settings !== undefined) {
-        const read = readSettings(e.settings, `block "${name}"`);
+        const read = readSettings(e.settings, `block "${name}"`, true);
         if (typeof read === "string") return bad(read);
         // A block's fields are drawn in the editor, where a secret has no place.
         if (Object.values(read).some((f) => f.type === "secret"))

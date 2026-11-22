@@ -217,6 +217,56 @@ for (const { kind, open, skip } of openers) {
       expect(html).not.toMatch(/https?:\/\//);
     });
 
+    test("the page builder's list of fields makes the same form as the line of text, and a form written either way is sent", async () => {
+      const list = [
+        { label: "Name", kind: "text", required: true, options: "" },
+        { label: "Email", kind: "email", required: true, options: "" },
+        { label: "Topic", kind: "select", required: false, options: "Sales|Support" },
+        { label: "Colours", kind: "ticks", required: false, options: "Red|Blue" },
+        { label: "Agree", kind: "consent", required: false, options: "" },
+      ];
+      const fromList = await draw({ title: "Same", fields: list });
+      const fromText = await draw({
+        title: "Same",
+        fields:
+          "Name*; Email*:email; Topic:select(Sales|Support); Colours:ticks(Red|Blue); Agree:consent",
+      });
+      // The same definition is the same form: one identity, the same drawing.
+      expect(fromList.formId).toBe(fromText.formId);
+      // (Each drawing carries its own signed time, which is the only thing that may differ.)
+      const withoutTime = (html: string) => html.replace(/(name="_t" value=")[^"]*/, "$1");
+      expect(withoutTime(fromList.html)).toBe(withoutTime(fromText.html));
+      expect(fromList.html).toContain('<option value="Support">');
+      const r = await send(fromList, { name: "Lia", email: "lia@example.com", agree: "yes" });
+      expect((r as { status: number }).status).toBe(200);
+      expect((await stored()).some((m) => m.summary.includes("Name: Lia"))).toBe(true);
+    });
+
+    test("rows of the list that make no sense are left out, and a list with nothing usable falls back to the standard form", async () => {
+      const mixed = await draw({
+        fields: [
+          { label: "Fine", kind: "text", required: true },
+          { label: "", kind: "text" },
+          { label: "No choices", kind: "select", options: "" },
+          { label: "Odd kind", kind: "script" },
+          "not a row",
+          null,
+          { label: "Pick", kind: "radio", options: "A|B" },
+        ],
+      });
+      expect(mixed.fields.map((f) => (f as { label?: string }).label)).toEqual(["Fine", "Pick"]);
+      const standard = await draw({ fields: "Name*; Email*:email; Message*:long" });
+      for (const fields of [[], [{ label: "", kind: "text" }], "", "   ", undefined, 7]) {
+        const d = await draw({ fields });
+        expect(d.formId).toBe(standard.formId);
+      }
+      // At most 30 fields, as with the line of text.
+      const many = await draw({
+        fields: Array.from({ length: 45 }, (_, i) => ({ label: `Question ${i}`, kind: "text" })),
+      });
+      expect(many.fields.length).toBe(30);
+    });
+
     test("a form that sends to an address outside the plugin's own is not drawn", () => {
       const out = checkBlocks({
         version: 1,

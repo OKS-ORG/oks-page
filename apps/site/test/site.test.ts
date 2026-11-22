@@ -8404,6 +8404,91 @@ describe.skipIf(!findBrowser())(
       }
     }, 90_000);
 
+    test("PG-15: the Form block in the page builder has a list of fields: a new form starts with Name, Email and Message, and fields are edited, added, moved and removed", async () => {
+      const page = await signedIn(owner);
+      // Forms from the product itself, added the way an owner adds it (a new site already has it, so it goes first).
+      await call(page, "DELETE", "/api/admin/plugins?id=forms");
+      const bundled = await call(page, "POST", "/api/admin/plugins", { action: "bundled" });
+      expect(bundled.status, JSON.stringify(bundled.json)).toBe(200);
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: bundled.json!["file"],
+        approved: ["admin:pages", "email:send", "routes:public"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Builder",
+      });
+      const id = String(made.json!["id"]);
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Builder",
+          slugPart: "builder-form",
+          status: "published",
+          blocks: [b("paragraph", {}, [], words("Fill this in."))],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        await page.goto(site.base + `/admin/pages/${id}`);
+        await page.getByLabel("Add a block").waitFor();
+        await page.getByLabel("Add a block").selectOption({ label: "Form (forms)" });
+        await page.getByRole("button", { name: "Add", exact: true }).click();
+
+        // A new form starts with the three standard fields, each with its question, kind and required box.
+        await page.getByRole("group", { name: "Form fields" }).waitFor();
+        expect(await page.getByLabel("Question (field 1)").inputValue()).toBe("Name");
+        expect(await page.getByLabel("Question (field 2)").inputValue()).toBe("Email");
+        expect(await page.getByLabel("Answer type (field 2)").inputValue()).toBe("email");
+        expect(await page.getByLabel("Must be answered (field 3)").isChecked()).toBe(true);
+        expect(await page.getByLabel("Question (field 4)").count()).toBe(0);
+        // The first field cannot move up, and the last cannot move down.
+        expect(await page.getByRole("button", { name: "Move field 1 up" }).isDisabled()).toBe(true);
+        expect(await page.getByRole("button", { name: "Move field 3 down" }).isDisabled()).toBe(
+          true,
+        );
+
+        // Change one, add two, move one and remove one.
+        await page.getByLabel("Question (field 2)").fill("Your email");
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByLabel("Question (field 4)").fill("Phone");
+        await page.getByLabel("Answer type (field 4)").selectOption({ label: "Phone number" });
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByLabel("Question (field 5)").fill("Topic");
+        await page
+          .getByLabel("Answer type (field 5)")
+          .selectOption({ label: "Drop-down list (one answer)" });
+        await page
+          .getByLabel("Choices, with a bar between: Red|Blue (field 5)")
+          .fill("Sales|Support");
+        await page.getByRole("button", { name: "Move field 4 up" }).click();
+        await page.getByRole("button", { name: "Remove field 1" }).click();
+        // Now: Your email, Phone, Message, Topic.
+        expect(await page.getByLabel("Question (field 1)").inputValue()).toBe("Your email");
+        expect(await page.getByLabel("Question (field 2)").inputValue()).toBe("Phone");
+        expect(await page.getByLabel("Question (field 3)").inputValue()).toBe("Message");
+        expect(await page.getByLabel("Question (field 4)").inputValue()).toBe("Topic");
+        expect(await page.getByLabel("Question (field 5)").count()).toBe(0);
+
+        await page.getByRole("button", { name: "Save", exact: true }).first().click();
+        await page.getByText("Saved.").first().waitFor();
+
+        // The visitor sees exactly that form, with real labels and the drop-down list.
+        const shown = await fetch(site.base + "/builder-form").then((r) => r.text());
+        expect(shown).toContain('<form class="oks-form"');
+        for (const label of ["Your email", "Phone", "Message", "Topic"])
+          expect(shown).toMatch(new RegExp(`<label for="[^"]*">${label}`));
+        expect(shown).toContain('<option value="Support">');
+        expect(shown).not.toMatch(/<label for="[^"]*">Name/);
+        expect(shown).toMatch(
+          /name="your_email"[^>]*type="email"|type="email"[^>]*name="your_email"/,
+        );
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 120_000);
+
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);
       const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {
