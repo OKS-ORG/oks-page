@@ -37,7 +37,7 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
   const savedSections = await insertableSections(getRunner(), member.siteId);
   const screens = await loadScreenSizes(getRunner(), member.siteId);
   const pluginBlocks = (await pluginBlockTypes(getRunner(), member.siteId)).map(
-    ({ type, label, fields }) => ({ type, label, fields }),
+    ({ type, label, fields, presets }) => ({ type, label, fields, presets }),
   );
   const typeInfo = (await listContentTypes(getRunner(), member.siteId)).find(
     (t) => t.key === entry.type,

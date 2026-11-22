@@ -43,6 +43,8 @@ export interface PluginBlockType {
   label: string;
   /** The fields of the block's settings (a secret has no place in the editor). */
   fields: PluginBlockField[];
+  /** Ready-made versions: each is offered in the editor's list and starts a block with its settings. */
+  presets: { label: string; settings: Record<string, unknown> }[];
 }
 
 const parse = (value: unknown): Record<string, unknown> => {
@@ -157,6 +159,14 @@ export async function pluginBlockTypes(
         block: name,
         label: `${typeof entry["label"] === "string" ? entry["label"] : name} (${pluginId})`,
         fields: Object.entries(settings).flatMap(([key, f]) => fieldOf(key, parse(f))),
+        presets: (Array.isArray(entry["presets"]) ? (entry["presets"] as unknown[]) : []).flatMap(
+          (p) => {
+            const x = parse(p);
+            return typeof x["label"] === "string"
+              ? [{ label: x["label"], settings: parse(x["settings"]) }]
+              : [];
+          },
+        ),
       });
     }
   }

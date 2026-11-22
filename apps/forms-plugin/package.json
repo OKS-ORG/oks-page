@@ -142,7 +142,128 @@
             "type": "text",
             "label": "Text of the confirmation email"
           }
-        }
+        },
+        "presets": [
+          {
+            "label": "Contact form",
+            "settings": {
+              "title": "Contact us",
+              "fields": [
+                {
+                  "label": "Name",
+                  "kind": "text",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Email",
+                  "kind": "email",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Message",
+                  "kind": "long",
+                  "required": true,
+                  "options": ""
+                }
+              ],
+              "button": "Send message",
+              "thanks": "Thank you. We will write back soon."
+            }
+          },
+          {
+            "label": "Ask for an offer",
+            "settings": {
+              "title": "Ask for an offer",
+              "fields": [
+                {
+                  "label": "Name",
+                  "kind": "text",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Email",
+                  "kind": "email",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Phone",
+                  "kind": "phone",
+                  "required": false,
+                  "options": ""
+                },
+                {
+                  "label": "What do you need?",
+                  "kind": "long",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "When do you need it?",
+                  "kind": "select",
+                  "required": false,
+                  "options": "As soon as possible|This month|Later|Just looking"
+                }
+              ],
+              "button": "Ask for an offer",
+              "thanks": "Thank you. We will send you an offer soon."
+            }
+          },
+          {
+            "label": "Call me back",
+            "settings": {
+              "title": "Call me back",
+              "fields": [
+                {
+                  "label": "Name",
+                  "kind": "text",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Phone number",
+                  "kind": "phone",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "Best time to call",
+                  "kind": "select",
+                  "required": false,
+                  "options": "Morning|Afternoon|Evening"
+                }
+              ],
+              "button": "Call me back",
+              "thanks": "Thank you. We will call you back."
+            }
+          },
+          {
+            "label": "Newsletter sign-up",
+            "settings": {
+              "title": "Stay in touch",
+              "fields": [
+                {
+                  "label": "Email",
+                  "kind": "email",
+                  "required": true,
+                  "options": ""
+                },
+                {
+                  "label": "I agree to get news by email",
+                  "kind": "consent",
+                  "required": true,
+                  "options": ""
+                }
+              ],
+              "button": "Sign up",
+              "thanks": "Thank you for signing up.",
+              "note": "We use your email only to send you news. You can ask us to stop at any time."
+            }
+          }
+        ]
       }
     },
     "adminPages": [

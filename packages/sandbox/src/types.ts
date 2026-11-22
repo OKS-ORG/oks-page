@@ -79,6 +79,12 @@ export interface SettingField {
   default?: unknown;
 }
 
+/** A ready-made version of a plugin's block: its name in the page builder's list and the settings a new block starts with. */
+export interface BlockPreset {
+  label: string;
+  settings: Record<string, unknown>;
+}
+
 /** One value of a drop-down list: what is stored, and what the person reads. */
 export interface SettingOption {
   value: string;

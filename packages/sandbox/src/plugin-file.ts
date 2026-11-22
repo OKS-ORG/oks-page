@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
 import type {
+  BlockPreset,
   ItemField,
   JobInfo,
   RouteInfo,
@@ -27,7 +28,7 @@ export interface PluginFileManifest {
   hooks: string[];
   blocks: string[];
   /** The name shown in the editor and the settings form of each block, by block name. */
-  blockInfo?: Record<string, { label: string; settings?: SettingsSchema }>;
+  blockInfo?: Record<string, { label: string; settings?: SettingsSchema; presets?: BlockPreset[] }>;
   priority?: number;
   settings?: SettingsSchema;
   /** The addresses the plugin adds, by route name (needs the permission `routes:public`). */
@@ -165,6 +166,26 @@ function readListDefault(
   return out;
 }
 
+export const PRESETS_MOST = 12;
+
+/** A value for one setting of a block, when it fits what the setting asks for (a text that is one of the choices, a list
+ * of items of the right kind, and so on). */
+function readValue(f: SettingField, d: unknown): { ok: true; value: unknown } | { ok: false } {
+  if (f.type === "list") {
+    const rows = f.item ? readListDefault(d, f.item, f.most ?? LIST_ITEMS_DEFAULT) : null;
+    return rows === null ? { ok: false } : { ok: true, value: rows };
+  }
+  const sound =
+    f.type === "text"
+      ? typeof d === "string" &&
+        d.length <= TEXT_DEFAULT_MOST &&
+        (!f.options || f.options.some((o) => o.value === d))
+      : f.type === "number"
+        ? typeof d === "number" && Number.isFinite(d)
+        : f.type === "boolean" && typeof d === "boolean";
+  return sound ? { ok: true, value: d } : { ok: false };
+}
+
 /**
  * A list of settings, or the words for what is wrong with it. In a block's settings (`block` true) a text may be a
  * drop-down list, a list of items may be asked for, and any setting may say what a new block starts with.
@@ -227,26 +248,13 @@ function readSettings(value: unknown, where: string, block = false): SettingsSch
         if (typeof ft.itemName !== "string" || !/^[a-z][a-z ]{0,29}$/.test(ft.itemName)) return bad;
         read.itemName = ft.itemName;
       }
-      if (ft.default !== undefined) {
-        const rows = readListDefault(ft.default, item, most);
-        if (rows === null) return bad;
-        read.default = rows;
-      }
-    } else {
-      if (ft.item !== undefined || ft.most !== undefined || ft.itemName !== undefined) return bad;
-      if (ft.default !== undefined) {
-        const d = ft.default;
-        const sound =
-          ft.type === "text"
-            ? typeof d === "string" &&
-              d.length <= TEXT_DEFAULT_MOST &&
-              (!read.options || read.options.some((o) => o.value === d))
-            : ft.type === "number"
-              ? typeof d === "number" && Number.isFinite(d)
-              : ft.type === "boolean" && typeof d === "boolean";
-        if (!sound) return bad;
-        read.default = d;
-      }
+    } else if (ft.item !== undefined || ft.most !== undefined || ft.itemName !== undefined) {
+      return bad;
+    }
+    if (ft.default !== undefined) {
+      const v = readValue(read, ft.default);
+      if (!v.ok) return bad;
+      read.default = v.value;
     }
     out[key] = read;
   }
@@ -403,7 +411,7 @@ export function readPluginFile(text: string): PluginFileResult {
       return bad('The plugin\'s "blockInfo" is not valid.');
     blockInfo = {};
     for (const [name, entry] of Object.entries(info as Record<string, unknown>)) {
-      const e = entry as { label?: unknown; settings?: unknown } | null;
+      const e = entry as { label?: unknown; settings?: unknown; presets?: unknown } | null;
       if (
         !blocks.includes(name) ||
         e === null ||
@@ -422,7 +430,50 @@ export function readPluginFile(text: string): PluginFileResult {
           return bad(`The block "${name}" cannot have a secret setting.`);
         blockSettings = read;
       }
-      blockInfo[name] = { label: e.label, ...(blockSettings ? { settings: blockSettings } : {}) };
+      // Ready-made versions: each says what the block's settings start as, and must fit the settings the block asks for.
+      let presets: BlockPreset[] | undefined;
+      if (e.presets !== undefined) {
+        const notValid = `The ready-made versions of the block "${name}" are not valid.`;
+        if (
+          !blockSettings ||
+          !Array.isArray(e.presets) ||
+          e.presets.length < 1 ||
+          e.presets.length > PRESETS_MOST
+        )
+          return bad(notValid);
+        presets = [];
+        for (const raw of e.presets as unknown[]) {
+          const x = raw as { label?: unknown; settings?: unknown } | null;
+          if (
+            x === null ||
+            typeof x !== "object" ||
+            typeof x.label !== "string" ||
+            x.label.length === 0 ||
+            x.label.length > 80 ||
+            presets.some((p) => p.label === x.label) ||
+            x.settings === null ||
+            typeof x.settings !== "object" ||
+            Array.isArray(x.settings)
+          )
+            return bad(notValid);
+          const values: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(x.settings as Record<string, unknown>)) {
+            const setting = blockSettings[k];
+            const r = setting ? readValue(setting, v) : null;
+            if (!r || !r.ok)
+              return bad(
+                `The ready-made version "${x.label.slice(0, 40)}" of the block "${name}" has a setting that does not fit: ${k.slice(0, 40)}.`,
+              );
+            values[k] = r.value;
+          }
+          presets.push({ label: x.label, settings: values });
+        }
+      }
+      blockInfo[name] = {
+        label: e.label,
+        ...(blockSettings ? { settings: blockSettings } : {}),
+        ...(presets ? { presets } : {}),
+      };
     }
   }
   return {

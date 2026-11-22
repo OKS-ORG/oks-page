@@ -254,6 +254,8 @@ export interface PluginBlockInfo {
   type: string;
   label: string;
   fields: PluginBlockField[];
+  /** Ready-made versions: each is in the list of blocks to add, and starts a block with these settings. */
+  presets?: { label: string; settings: Record<string, unknown> }[];
 }
 
 /** What a new block of a plugin starts with: the values its settings say. */
@@ -299,12 +301,22 @@ export function LayoutEditor(props: LayoutEditorProps) {
     : devices[devices.length - 1]!.key;
   const catalogue = useMemo(
     () => [
-      ...CATALOGUE,
-      ...(props.pluginBlocks ?? []).map((p) => ({
-        type: p.type,
-        label: p.label,
-        make: () => block(p.type, startOf(p.fields)),
-      })),
+      ...CATALOGUE.map((c) => ({ ...c, key: c.type })),
+      ...(props.pluginBlocks ?? []).flatMap((p) => [
+        {
+          key: p.type,
+          type: p.type,
+          label: p.label,
+          make: () => block(p.type, startOf(p.fields)),
+        },
+        // A ready-made version is its own entry in the list: the same block, started with its own settings.
+        ...(p.presets ?? []).map((preset, i) => ({
+          key: `${p.type}#${i}`,
+          type: p.type,
+          label: `${p.label}: ${preset.label}`,
+          make: () => block(p.type, { ...startOf(p.fields), ...structuredClone(preset.settings) }),
+        })),
+      ]),
     ],
     [props.pluginBlocks],
   );
@@ -372,7 +384,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
 
   // ---- adding ----
   function add() {
-    const entry = catalogue.find((c) => c.type === adding);
+    const entry = catalogue.find((c) => c.key === adding);
     if (!entry) return;
     const fresh = entry.make();
     // Inside the chosen block if it takes this one; else after it, or after the block that holds it, and so on up.
@@ -1126,7 +1138,7 @@ export function LayoutEditor(props: LayoutEditorProps) {
           Add a block{" "}
           <select value={adding} onChange={(e) => setAdding(e.target.value)}>
             {catalogue.map((c) => (
-              <option key={c.type} value={c.type}>
+              <option key={c.key} value={c.key}>
                 {c.label}
               </option>
             ))}

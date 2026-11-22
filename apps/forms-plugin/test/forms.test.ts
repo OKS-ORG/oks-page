@@ -242,6 +242,32 @@ for (const { kind, open, skip } of openers) {
       expect((await stored()).some((m) => m.summary.includes("Name: Lia"))).toBe(true);
     });
 
+    test("the ready-made forms are Contact, Ask for an offer, Call me back and Newsletter sign-up, and each makes a whole form", async () => {
+      const presets = file.manifest.blockInfo?.["form"]?.presets ?? [];
+      expect(presets.map((p) => p.label)).toEqual([
+        "Contact form",
+        "Ask for an offer",
+        "Call me back",
+        "Newsletter sign-up",
+      ]);
+      const ids = new Set<string>();
+      for (const preset of presets) {
+        const rows = preset.settings["fields"] as { label: string }[];
+        const drawn = await draw(preset.settings);
+        // Every row of the ready-made list is a field of the form (none was left out), under a form of its own.
+        expect(drawn.fields.map((f) => (f as { label?: string }).label)).toEqual(
+          rows.map((r) => r.label),
+        );
+        ids.add(drawn.formId);
+        expect(drawn.html).toContain(`>${String(preset.settings["button"])}</button>`);
+      }
+      expect(ids.size).toBe(4);
+      // The sign-up asks for agreement to get news, and it is never ticked in advance (FM-09).
+      const signup = await draw(presets[3]!.settings);
+      expect(signup.html).toMatch(/type="checkbox"[^>]*required/);
+      expect(signup.html).not.toMatch(/type="checkbox"[^>]*checked/);
+    });
+
     test("rows of the list that make no sense are left out, and a list with nothing usable falls back to the standard form", async () => {
       const mixed = await draw({
         fields: [

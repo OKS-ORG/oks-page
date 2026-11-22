@@ -145,3 +145,112 @@ describe("the settings of a plugin's block", () => {
     expect(read({}, { s: { type: "text", label: "T" } }).ok).toBe(true);
   });
 });
+
+// ---- ready-made versions of a block: each is a name and the settings a new block starts with
+const withPresets = (
+  presets: unknown,
+  settings: unknown = {
+    mode: {
+      type: "text",
+      label: "Mode",
+      options: [
+        { value: "a", label: "A" },
+        { value: "b", label: "B" },
+      ],
+    },
+    size: { type: "number", label: "Size" },
+    rows: list(),
+  },
+) =>
+  readPluginFile(
+    JSON.stringify(
+      makePluginFile(
+        {
+          id: "demo-blocks",
+          version: "1.0.0",
+          displayName: "Demo",
+          description: "d",
+          author: "a",
+          permissions: [],
+          hooks: [],
+          blocks: ["card"],
+          blockInfo: { card: { label: "Card", settings, presets } },
+        } as never,
+        "export default {};",
+      ),
+    ),
+  );
+
+describe("ready-made versions of a plugin's block", () => {
+  test("a name and the settings it starts with are read, and only settings that fit are kept", () => {
+    const r = withPresets([
+      {
+        label: "Small",
+        settings: { mode: "a", size: 1, rows: [{ title: "x", kind: "b", on: true }] },
+      },
+      { label: "Plain", settings: {} },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const presets = r.file.manifest.blockInfo!["card"]!.presets!;
+    expect(presets.map((p) => p.label)).toEqual(["Small", "Plain"]);
+    expect(presets[0]!.settings).toEqual({
+      mode: "a",
+      size: 1,
+      rows: [{ title: "x", kind: "b", on: true }],
+    });
+  });
+
+  test.each([
+    ["no list", "x"],
+    ["an empty list", []],
+    ["13 of them", Array.from({ length: 13 }, (_, i) => ({ label: `P${i}`, settings: {} }))],
+    [
+      "a name twice",
+      [
+        { label: "A", settings: {} },
+        { label: "A", settings: {} },
+      ],
+    ],
+    ["no name", [{ label: "", settings: {} }]],
+    ["a name that is too long", [{ label: "x".repeat(81), settings: {} }]],
+    ["settings that are not an object", [{ label: "A", settings: [] }]],
+    ["a setting the block does not have", [{ label: "A", settings: { nope: "x" } }]],
+    ["a text that is not one of the choices", [{ label: "A", settings: { mode: "zzz" } }]],
+    ["a number that is a text", [{ label: "A", settings: { size: "big" } }]],
+    [
+      "a list row with a key the item does not ask for",
+      [{ label: "A", settings: { rows: [{ nope: "x" }] } }],
+    ],
+    [
+      "more list rows than the most",
+      [{ label: "A", settings: { rows: Array.from({ length: 6 }, () => ({ title: "x" })) } }],
+    ],
+  ])("%s is refused in plain words", (_name, presets) => {
+    const r = withPresets(presets);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain("ready-made version");
+  });
+
+  test("a block with no settings cannot have ready-made versions", () => {
+    const r = readPluginFile(
+      JSON.stringify(
+        makePluginFile(
+          {
+            id: "demo-blocks",
+            version: "1.0.0",
+            displayName: "Demo",
+            description: "d",
+            author: "a",
+            permissions: [],
+            hooks: [],
+            blocks: ["card"],
+            blockInfo: { card: { label: "Card", presets: [{ label: "A", settings: {} }] } },
+          } as never,
+          "export default {};",
+        ),
+      ),
+    );
+    expect(r.ok).toBe(false);
+  });
+});

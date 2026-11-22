@@ -8489,6 +8489,65 @@ describe.skipIf(!findBrowser())(
       }
     }, 120_000);
 
+    test("PG-16: the page builder offers the ready-made forms by name, and a new block starts as the one chosen", async () => {
+      const page = await signedIn(owner);
+      await call(page, "DELETE", "/api/admin/plugins?id=forms");
+      const bundled = await call(page, "POST", "/api/admin/plugins", { action: "bundled" });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: bundled.json!["file"],
+        approved: ["admin:pages", "email:send", "routes:public"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Offers",
+      });
+      const id = String(made.json!["id"]);
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Offers",
+          slugPart: "offers-form",
+          status: "published",
+          blocks: [b("paragraph", {}, [], words("Ask us."))],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        await page.goto(site.base + `/admin/pages/${id}`);
+        await page.getByLabel("Add a block").waitFor();
+        // The plain Form block and the four ready-made forms are in the list, each under its own name.
+        const names = await page.getByLabel("Add a block").locator("option").allInnerTexts();
+        expect(names.filter((n) => n.startsWith("Form (forms)"))).toEqual([
+          "Form (forms)",
+          "Form (forms): Contact form",
+          "Form (forms): Ask for an offer",
+          "Form (forms): Call me back",
+          "Form (forms): Newsletter sign-up",
+        ]);
+        await page.getByLabel("Add a block").selectOption({ label: "Form (forms): Call me back" });
+        await page.getByRole("button", { name: "Add", exact: true }).click();
+        // The block starts as the ready-made form: its fields, its title and its button.
+        await page.getByRole("group", { name: "Form fields" }).waitFor();
+        expect(await page.getByLabel("Question (field 1)").inputValue()).toBe("Name");
+        expect(await page.getByLabel("Question (field 2)").inputValue()).toBe("Phone number");
+        expect(await page.getByLabel("Answer type (field 3)").inputValue()).toBe("select");
+        expect(await page.getByLabel("Question (field 4)").count()).toBe(0);
+        expect(await page.getByLabel("Text of the send button").inputValue()).toBe("Call me back");
+        // It can be changed like any form.
+        await page.getByLabel("Title above the form").fill("Phone us back");
+        await page.getByRole("button", { name: "Save", exact: true }).first().click();
+        await page.getByText("Saved.").first().waitFor();
+        const shown = await fetch(site.base + "/offers-form").then((r) => r.text());
+        expect(shown).toContain("Phone us back");
+        expect(shown).toMatch(/<label for="[^"]*">Phone number/);
+        expect(shown).toContain('<option value="Evening">');
+        expect(shown).toContain(">Call me back</button>");
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 120_000);
+
     test("PG-05: a plugin's settings form comes from its manifest, a secret is sealed and never shown again, and the plugin reads them", async () => {
       const page = await signedIn(owner);
       const code = `export default { hooks: { "content:beforeSave": async (e, ctx) => {
