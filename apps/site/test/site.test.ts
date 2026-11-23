@@ -12199,7 +12199,12 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
   beforeAll(async () => {
     db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-privacy-")), "site.sqlite"));
-    site = await startSite("sqlite", db, { OKS_SECRET: "p".repeat(40) });
+    // The clean-up of old data runs every 2 seconds here (it runs once a day on a real site).
+    site = await startSite("sqlite", db, {
+      OKS_SECRET: "p".repeat(40),
+      OKS_SCHEDULER_SECONDS: "1",
+      OKS_KEEPING_SECONDS: "2",
+    });
     const made = await fetch(site.base + "/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -12287,6 +12292,97 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
       .waitFor();
     await page.getByText("This address is not secure (no https).", { exact: false }).waitFor();
     expect(await axeViolations(page)).toEqual([]);
+  });
+
+  test("PR-08: the keeping times are shown with their limits, shortened and saved, a longer time is refused, and the clean-up deletes old data on its own", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const DAY = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * DAY);
+    const rows = async (table: string) =>
+      Number((await db.run(`select count(*) as n from ${table}`))[0]!["n"]);
+
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByRole("heading", { name: "How long data is kept", level: 2 }).waitFor();
+    const email = page.getByLabel("Days to keep: Record of emails sent");
+    const audit = page.getByLabel("Days to keep: Audit log");
+    const searches = page.getByLabel("Days to keep: Site search counts");
+    expect([
+      await email.inputValue(),
+      await audit.inputValue(),
+      await searches.inputValue(),
+    ]).toEqual(["30", "365", "90"]);
+    await page.getByText("30 days (from 1)").waitFor();
+    // What the site does not keep for a time is said too.
+    await page.getByText("Nothing to delete: the site does not keep them.").waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+
+    // A longer time is refused in words and nothing changes; a shorter one is saved and shown after a reload.
+    // The field itself says 30 is the most (the browser stops the form), and the site refuses it too if it is sent anyway.
+    await email.fill("60");
+    expect(await email.evaluate((el) => (el as HTMLInputElement).validity.rangeOverflow)).toBe(
+      true,
+    );
+    const tooLong = await page.request.put(site.base + "/api/admin/settings/privacy", {
+      headers: { origin: site.base },
+      data: { keeping: { email_log: 60 } },
+    });
+    expect(tooLong.status()).toBe(400);
+    expect(JSON.stringify(await tooLong.json())).toContain(
+      "Record of emails sent: choose a number of days from 1 to 30.",
+    );
+    expect((await db.run("select value from settings where key = 'keeping'")).length).toBe(0);
+    await email.fill("7");
+    await page.getByRole("button", { name: "Save keeping times" }).click();
+    await page.getByText("The keeping times are saved.", { exact: false }).waitFor();
+    await page.reload();
+    expect(await page.getByLabel("Days to keep: Record of emails sent").inputValue()).toBe("7");
+    await page.getByText("30 days (from 1) · shortened").waitFor();
+    const nobody = await fetch(site.base + "/api/admin/settings/privacy", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ keeping: { email_log: 1 } }),
+    });
+    expect(nobody.status).toBe(401);
+
+    // The site's own clean-up deletes what is past its time (8 days is past 7; 3 days and a fresh one are not), and the page says so.
+    const mail = (id: string, when: Date) =>
+      db.run(
+        "insert into email_log (id, site_id, email_key, to_address, subject, provider, status, attempts, created_at) values (?, ?, 'k', 'x@example.com', 's', 'smtp', 'sent', 1, ?)",
+        [id, siteId, when],
+      );
+    await mail("MAIL00000000000000000000A1", ago(8));
+    await mail("MAIL00000000000000000000A2", ago(3));
+    const oldAudit = (id: string, days: number) =>
+      db.run(
+        "insert into audit_log (id, site_id, actor_type, actor_id, action, detail, created_at) values (?, ?, 'system', 'x', 'test.old', '{}', ?)",
+        [id, siteId, ago(days)],
+      );
+    await oldAudit("AUDT00000000000000000000A1", 400);
+    await oldAudit("AUDT00000000000000000000A2", 300);
+    await expect
+      .poll(async () => (await db.run("select id from email_log")).map((r) => String(r["id"])), {
+        timeout: 20_000,
+      })
+      .toEqual(["MAIL00000000000000000000A2"]);
+    await expect
+      .poll(
+        async () =>
+          (await db.run("select id from audit_log where action = 'test.old'")).map((r) =>
+            String(r["id"]),
+          ),
+        { timeout: 20_000 },
+      )
+      .toEqual(["AUDT00000000000000000000A2"]);
+    expect(await rows("email_log")).toBe(1);
+    await page.reload();
+    await page.getByText(/Last clean-up: \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/).waitFor();
+    await page.close();
   });
 });
 

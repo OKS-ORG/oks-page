@@ -4,6 +4,7 @@ import {
   SMTP_PRESETS,
   loadEmailSettings,
   loadGeneralSettings,
+  saveKeeping,
   savePrivacyPage,
   writePrivacyDraft,
 } from "@oks-page/core";
@@ -23,6 +24,17 @@ export async function PUT(request: Request) {
     input = (await request.json()) as Record<string, unknown>;
   } catch {
     return reply({ code: "invalid", message: "The request was not understood." }, 400);
+  }
+  // The times personal data is kept for (spec 18, section 6) are saved on their own, apart from the privacy page.
+  if (input["keeping"] !== undefined) {
+    const saved = await saveKeeping(
+      getRunner(),
+      await actorOf(member),
+      member.siteId,
+      input["keeping"],
+    );
+    if (!saved.ok) return reply(saved, saved.code === "forbidden" ? 403 : 400);
+    return NextResponse.json({ ok: true, keeping: saved.keeping });
   }
   const result = await savePrivacyPage(
     getRunner(),

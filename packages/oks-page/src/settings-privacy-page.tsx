@@ -2,8 +2,10 @@
 import {
   SITE_COOKIES,
   consentNeeded,
+  KEEPING_RULES,
   isSetupDone,
   listPrivacyPageChoices,
+  loadKeeping,
   loadPrivacySettings,
   noVisitorCookies,
 } from "@oks-page/core";
@@ -44,6 +46,8 @@ export default async function PrivacySettingsPage() {
         consentNeeded={consentNeeded()}
         initial={await loadPrivacySettings(getRunner(), member.siteId)}
         pages={await listPrivacyPageChoices(getRunner(), member.siteId)}
+        keeping={await loadKeeping(getRunner(), member.siteId)}
+        keepingRules={KEEPING_RULES}
       />
     </AdminFrame>
   );

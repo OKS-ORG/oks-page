@@ -8,9 +8,9 @@ import {
   loadGeneralSettings,
   publishDue,
   purgeEditingNotices,
-  purgeSearchStats,
   purgeTrash,
   queueEmail,
+  runKeeping,
   runDailyDomainCheck,
   type MayPublish,
 } from "@oks-page/core";
@@ -24,6 +24,9 @@ import { pluginHost } from "./plugin-runtime";
 
 const SECOND = 1000;
 const PURGE_EVERY = 60 * 60 * SECOND;
+/** How often what is past its keeping time is deleted: once a day, or OKS_KEEPING_SECONDS when it is set. */
+const keepingEvery = (): number =>
+  Math.max(1, Number(process.env["OKS_KEEPING_SECONDS"]) || 24 * 60 * 60) * SECOND;
 
 const mayPublish: MayPublish = async ({ siteId, userId, type, authorId }) => {
   const caps = await capabilitiesOf(getRunner(), siteId, userId);
@@ -34,6 +37,7 @@ const mayPublish: MayPublish = async ({ siteId, userId, type, authorId }) => {
 };
 
 let lastPurge = 0;
+let lastKeeping = 0;
 let lastEmailUpkeep = 0;
 
 /**
@@ -81,10 +85,16 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
   if (now() - lastPurge >= PURGE_EVERY) {
     lastPurge = now();
     await purgeEditingNotices(getRunner(), now);
-    await purgeSearchStats(getRunner(), now);
     const gone = await purgeTrash(getRunner(), now);
     if (gone > 0)
       console.log(`[oks] Deleted ${gone} item(s) that had been in the trash for 30 days.`);
+  }
+  // Once a day: what is past its keeping time (spec 18, section 6) is deleted, with the times each site chose.
+  if (now() - lastKeeping >= keepingEvery()) {
+    lastKeeping = now();
+    await runKeeping(getRunner(), now).catch((error: unknown) =>
+      console.error("[oks] The keeping times could not be applied:", error),
+    );
   }
   // Privacy requests whose link ran out are forgotten, and answered ones after a year.
   await purgePrivacyRequests(getRunner(), now).catch((error: unknown) =>
