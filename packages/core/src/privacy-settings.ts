@@ -144,10 +144,39 @@ export interface PrivacyFacts {
   siteName: string;
   /** The email provider's name when email is set up ("Brevo", "Other"), or null. */
   emailProvider: string | null;
+  /** The cookies and outside addresses the switched-on plugins declare (spec 18, section 2). */
+  pluginUses?: {
+    plugin: string;
+    cookies: { name: string; why: string; keptFor?: string }[];
+    hosts: { host: string; why: string }[];
+  }[];
+  /** The companies that videos set to "load at once" come from. */
+  loadAtOnce?: string[];
 }
 
 /** The blocks of a draft privacy page, from what the site really uses (spec 18, section 4). */
 export function privacyDraftBlocks(facts: PrivacyFacts): unknown[] {
+  const uses = facts.pluginUses ?? [];
+  const cookieLines = uses.flatMap((u) =>
+    u.cookies.map((c) =>
+      paragraph(
+        `cookie-${u.plugin}-${c.name}`,
+        `${c.name} (plugin ${u.plugin}): ${c.why}${c.keptFor ? ` Kept for ${c.keptFor}.` : ""}`,
+      ),
+    ),
+  );
+  const outsideLines = [
+    ...uses.flatMap((u) =>
+      u.hosts.map((h) =>
+        paragraph(`host-${u.plugin}-${h.host}`, `${h.host} (plugin ${u.plugin}): ${h.why}`),
+      ),
+    ),
+    ...[...new Set(facts.loadAtOnce ?? [])].map((c) =>
+      paragraph(`video-${c}`, `${c}: a video that loads when the page opens.`),
+    ),
+  ];
+  const cookieCount = cookieLines.length;
+  const outsideCount = outsideLines.length;
   const blocks: unknown[] = [
     paragraph(
       "intro",
@@ -156,13 +185,19 @@ export function privacyDraftBlocks(facts: PrivacyFacts): unknown[] {
     heading("cookies-h", "Cookies"),
     paragraph(
       "cookies",
-      "Visitors get no cookies. People who sign in to work on the site get two: one keeps them signed in, and one lets the site recognise their browser, so it can warn them about a sign-in from a new one. Both are needed for signing in safely.",
+      cookieCount === 0
+        ? "Visitors get no cookies. People who sign in to work on the site get two: one keeps them signed in, and one lets the site recognise their browser, so it can warn them about a sign-in from a new one. Both are needed for signing in safely."
+        : "People who sign in to work on the site get two cookies: one keeps them signed in, and one lets the site recognise their browser, so it can warn them about a sign-in from a new one. Both are needed for signing in safely. Plugins on the site set these cookies in a visitor's browser:",
     ),
+    ...cookieLines,
     heading("outside-h", "Content from other companies"),
     paragraph(
       "outside",
-      "The site loads nothing from other companies, so no other company learns about your visit.",
+      outsideCount === 0
+        ? "The site loads nothing from other companies, so no other company learns about your visit."
+        : "Some parts of the site load content from other companies. They learn that your browser visited, and your address:",
     ),
+    ...outsideLines,
     heading("stats-h", "Visitor statistics"),
     paragraph("stats", "The site does not count or follow visitors."),
   ];

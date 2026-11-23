@@ -16,6 +16,7 @@ import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
+import { loadConsentNeeds } from "./consent-needs";
 import { getRunner } from "./db";
 import { PrivacySettingsScreen } from "./privacy-settings-screen";
 import { SettingsLinks } from "./settings-links";
@@ -29,6 +30,7 @@ export default async function PrivacySettingsPage() {
   if (!member) redirect("/admin/login");
   const actor = await actorOf(member);
   if (!actor.can("settings.manage")) redirect("/admin");
+  const needs = await loadConsentNeeds(getRunner(), member.siteId);
   return (
     <AdminFrame
       nav={navFor((c) => actor.can(c))}
@@ -43,7 +45,8 @@ export default async function PrivacySettingsPage() {
       <PrivacySettingsScreen
         cookies={SITE_COOKIES}
         noVisitorCookies={noVisitorCookies()}
-        consentNeeded={consentNeeded()}
+        consentNeeded={consentNeeded() || needs.needed}
+        needs={needs}
         initial={await loadPrivacySettings(getRunner(), member.siteId)}
         pages={await listPrivacyPageChoices(getRunner(), member.siteId)}
         keeping={await loadKeeping(getRunner(), member.siteId)}

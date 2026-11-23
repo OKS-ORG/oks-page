@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
+import { loadConsentNeeds } from "./consent-needs";
 import { getRunner } from "./db";
 
 export async function PUT(request: Request) {
@@ -58,9 +59,16 @@ export async function POST(request: Request) {
   const provider = email.settings?.working
     ? (SMTP_PRESETS.find((p) => p.key === email.settings?.provider)?.label ?? "your email provider")
     : null;
+  const needs = await loadConsentNeeds(getRunner(), member.siteId);
   const result = await writePrivacyDraft(getRunner(), actor, member.siteId, {
     siteName: general.siteName,
     emailProvider: provider,
+    pluginUses: needs.plugins.map((p) => ({
+      plugin: p.plugin,
+      cookies: p.cookies,
+      hosts: p.outsideHosts,
+    })),
+    loadAtOnce: needs.videos.map((v) => v.company),
   });
   if (!result.ok) return reply(result, result.code === "forbidden" ? 403 : 400);
   return NextResponse.json(

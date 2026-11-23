@@ -3,6 +3,7 @@
 // privacy page (choose one, or have a draft written). Visitor counts come in a later release.
 import type { KeepingRule, KeepingView, PrivacySettings, SiteCookie } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
+import type { ConsentNeeds } from "./consent-needs";
 import { useState, type FormEvent } from "react";
 
 const FIELD: React.CSSProperties = {
@@ -15,6 +16,7 @@ export function PrivacySettingsScreen({
   cookies,
   noVisitorCookies,
   consentNeeded,
+  needs,
   initial,
   pages,
   keeping,
@@ -23,6 +25,7 @@ export function PrivacySettingsScreen({
   cookies: SiteCookie[];
   noVisitorCookies: boolean;
   consentNeeded: boolean;
+  needs: ConsentNeeds;
   initial: PrivacySettings;
   pages: { id: string; title: string; status: string }[];
   keeping: KeepingView;
@@ -107,8 +110,42 @@ export function PrivacySettingsScreen({
                 <td>{c.needed ? "Not asked (needed)" : "Asked first"}</td>
               </tr>
             ))}
+            {needs.plugins.flatMap((p) =>
+              p.cookies.map((c) => (
+                <tr key={`${p.plugin}-${c.name}`}>
+                  <th scope="row">{c.name}</th>
+                  <td>Visitors (plugin {p.plugin})</td>
+                  <td>{c.why}</td>
+                  <td>{c.purpose === "essential" ? "Not asked (needed)" : "Asked first"}</td>
+                </tr>
+              )),
+            )}
           </tbody>
         </table>
+      </section>
+      <section aria-labelledby="privacy-outside">
+        <h2 id="privacy-outside">Other companies</h2>
+        {needs.plugins.some((p) => p.outsideHosts.length > 0) || needs.videos.length > 0 ? (
+          <ul>
+            {needs.plugins.flatMap((p) =>
+              p.outsideHosts.map((h) => (
+                <li key={`${p.plugin}-${h.host}`}>
+                  {h.host} (plugin {p.plugin}): {h.why}{" "}
+                  {h.purpose === "essential" ? "Not asked (needed)." : "Asked first."}
+                </li>
+              )),
+            )}
+            {needs.videos.map((v) => (
+              <li key={v.entryId + v.company}>
+                {v.company}: a video on{" "}
+                <a href={`/admin/pages/${v.entryId}`}>{v.title || "a page"}</a> loads when the page
+                opens. Asked first. Turn off “load at once” on the video to stop that.
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Your site loads nothing from other companies.</p>
+        )}
       </section>
       <section aria-labelledby="privacy-consent">
         <h2 id="privacy-consent">Consent notice</h2>

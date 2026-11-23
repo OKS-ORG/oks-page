@@ -3,6 +3,12 @@
 // without a network, and the same file can come from a marketplace later. Nothing here runs the code.
 import { createHash } from "node:crypto";
 import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
+import {
+  readCookies,
+  readOutsideHosts,
+  type PluginCookie,
+  type PluginOutsideHost,
+} from "./consent.js";
 import { readPersonalData, type PersonalDataSource } from "./personal-data.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
 import type {
@@ -40,6 +46,10 @@ export interface PluginFileManifest {
   jobs?: Record<string, JobInfo>;
   /** Where the plugin keeps data about people, for the site's privacy tool (spec 18, section 5). */
   personalData?: PersonalDataSource[];
+  /** The cookies the plugin sets in a visitor's browser (spec 18, section 2). */
+  cookies?: PluginCookie[];
+  /** The other companies' addresses the plugin calls from a visitor's browser (spec 18, section 2). */
+  outsideHosts?: PluginOutsideHost[];
 }
 
 export interface PluginFile {
@@ -434,6 +444,18 @@ export function readPluginFile(text: string): PluginFileResult {
     if (typeof read === "string") return bad(read);
     personalData = read;
   }
+  let cookies: PluginCookie[] | undefined;
+  if (mm["cookies"] !== undefined) {
+    const read = readCookies(mm["cookies"]);
+    if (typeof read === "string") return bad(read);
+    cookies = read;
+  }
+  let outsideHosts: PluginOutsideHost[] | undefined;
+  if (mm["outsideHosts"] !== undefined) {
+    const read = readOutsideHosts(mm["outsideHosts"]);
+    if (typeof read === "string") return bad(read);
+    outsideHosts = read;
+  }
   let adminPages: AdminPageInfo[] | undefined;
   if (mm["adminPages"] !== undefined) {
     const read = readAdminPages(mm["adminPages"]);
@@ -534,6 +556,8 @@ export function readPluginFile(text: string): PluginFileResult {
         ...(adminPages && adminPages.length > 0 ? { adminPages } : {}),
         ...(jobs && Object.keys(jobs).length > 0 ? { jobs } : {}),
         ...(personalData && personalData.length > 0 ? { personalData } : {}),
+        ...(cookies && cookies.length > 0 ? { cookies } : {}),
+        ...(outsideHosts && outsideHosts.length > 0 ? { outsideHosts } : {}),
       },
       code: f["code"],
       integrity: f["integrity"],

@@ -12463,6 +12463,81 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await page.getByText(/Last clean-up: \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/).waitFor();
     await page.close();
   });
+
+  test("PR-02: a plugin's cookie and outside address and a video that loads at once are listed as needing consent, and the draft privacy page names them", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
+
+    // A new site: nothing needs consent.
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByText("No cookie banner needed").waitFor();
+    await page.getByText("Your site loads nothing from other companies.").waitFor();
+
+    await db.run(
+      "insert into extensions (id, site_id, key, kind, version, tier, status, manifest, installed_at) values (?, ?, 'visit-counter', 'plugin', '1.0.0', 'runtime', 'enabled', ?, ?)",
+      [
+        "EXT000000000000000000000C1",
+        siteId,
+        JSON.stringify({
+          cookies: [{ name: "vc_seen", purpose: "statistics", why: "Counts returning visitors." }],
+          outsideHosts: [{ host: "maps.example.com", purpose: "media", why: "Shows the map." }],
+        }),
+        new Date(),
+      ],
+    );
+    await db.run(
+      `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+       values (?, ?, 'page', 'published', 'Our film', 'our-film', ?, '{}', ?, '', '', '{}', '{}', ?, ?, ?)`,
+      [
+        "ENT000000000000000000000C1",
+        siteId,
+        userId,
+        JSON.stringify({
+          version: 1,
+          blocks: [
+            {
+              id: "v1",
+              type: "video",
+              props: { src: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", loadNow: true },
+            },
+          ],
+        }),
+        new Date(),
+        new Date(),
+        new Date(),
+      ],
+    );
+    await page.reload();
+    await page.getByText("Something on your site needs visitors to agree first").waitFor();
+    await page.getByRole("rowheader", { name: "vc_seen" }).waitFor();
+    await page.getByText("maps.example.com (plugin visit-counter): Shows the map.").waitFor();
+    await page.getByText("youtube.com: a video on").waitFor();
+    expect(await page.getByText("No cookie banner needed").count()).toBe(0);
+    expect(await axeViolations(page)).toEqual([]);
+
+    // The draft names them.
+    const made = await page.request.post(site.base + "/api/admin/settings/privacy", {
+      headers: { origin: site.base },
+    });
+    expect(made.status()).toBe(201);
+    const body = JSON.stringify(
+      (
+        await db.run(
+          "select body from entries where title = 'Privacy' order by created_at desc limit 1",
+        )
+      )[0]!["body"],
+    );
+    expect(body).toContain("vc_seen (plugin visit-counter): Counts returning visitors.");
+    expect(body).toContain("maps.example.com (plugin visit-counter): Shows the map.");
+    expect(body).toContain("youtube.com: a video that loads when the page opens.");
+    await page.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {

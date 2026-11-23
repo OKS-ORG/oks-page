@@ -294,6 +294,29 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PR-02 consent: the declared cookies and outside addresses are checked like a plugin file does",
+    async () => {
+      const cookies = [
+        { name: "vc_seen", purpose: "statistics", why: "Counts returning visitors." },
+      ];
+      const outsideHosts = [{ host: "maps.example.com", purpose: "media", why: "Shows the map." }];
+      const good = await checkPlugin(
+        plugin(`export default {};`, { hooks: [], cookies, outsideHosts }),
+      );
+      expect(good.issues).toEqual([]);
+      const badCookie = await checkPlugin(
+        plugin(`export default {};`, { hooks: [], cookies: [{ name: "a b" }] }),
+      );
+      expect(errors(badCookie)[0]?.message).toContain('"oksPage.cookies"');
+      const badHost = await checkPlugin(
+        plugin(`export default {};`, { hooks: [], outsideHosts: [{ host: "nodot" }] }),
+      );
+      expect(errors(badHost)[0]?.message).toContain('"oksPage.outsideHosts"');
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

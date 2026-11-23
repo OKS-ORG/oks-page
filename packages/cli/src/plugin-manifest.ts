@@ -37,6 +37,12 @@ export function pluginManifestOf(pkg: Record<string, unknown>): PluginFileManife
     ...(Array.isArray(raw["personalData"])
       ? { personalData: raw["personalData"] as NonNullable<PluginFileManifest["personalData"]> }
       : {}),
+    ...(Array.isArray(raw["cookies"])
+      ? { cookies: raw["cookies"] as NonNullable<PluginFileManifest["cookies"]> }
+      : {}),
+    ...(Array.isArray(raw["outsideHosts"])
+      ? { outsideHosts: raw["outsideHosts"] as NonNullable<PluginFileManifest["outsideHosts"]> }
+      : {}),
     ...(Array.isArray(raw["adminPages"])
       ? { adminPages: raw["adminPages"] as NonNullable<PluginFileManifest["adminPages"]> }
       : {}),

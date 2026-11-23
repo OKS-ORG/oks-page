@@ -47,6 +47,33 @@ describe("privacy facts", () => {
     );
     expect(withEmail).toContain("the email service Brevo");
   });
+
+  test("PR-05: the draft lists the cookies and outside companies that plugins and videos bring", () => {
+    const text = words(
+      privacyDraftBlocks({
+        siteName: "Anna's Garden",
+        emailProvider: null,
+        pluginUses: [
+          {
+            plugin: "stats",
+            cookies: [
+              { name: "stats_visit", why: "Counts returning visitors.", keptFor: "30 days" },
+            ],
+            hosts: [{ host: "maps.example.com", why: "Shows the map." }],
+          },
+        ],
+        loadAtOnce: ["youtube.com", "youtube.com"],
+      }),
+    );
+    expect(text).toContain(
+      "stats_visit (plugin stats): Counts returning visitors. Kept for 30 days.",
+    );
+    expect(text).toContain("maps.example.com (plugin stats): Shows the map.");
+    expect(text).toContain("youtube.com: a video that loads when the page opens.");
+    expect(text.match(/youtube\.com: a video/g)?.length).toBe(1);
+    expect(text).not.toContain("Visitors get no cookies");
+    expect(text).not.toContain("loads nothing from other companies");
+  });
 });
 
 for (const { kind, open, skip } of openers) {

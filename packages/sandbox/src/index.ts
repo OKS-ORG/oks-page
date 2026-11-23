@@ -1,5 +1,6 @@
 export * from "./admin-pages.js";
 export * from "./cgroup.js";
+export * from "./consent.js";
 export * from "./host.js";
 export * from "./permission-text.js";
 export * from "./personal-data.js";

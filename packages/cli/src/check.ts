@@ -6,6 +6,8 @@ import { openMemoryDatabase } from "@oks-page/db/memory";
 import {
   readAdminPages,
   readJobs,
+  readCookies,
+  readOutsideHosts,
   readPersonalData,
   readRoutes,
   SandboxHost,
@@ -126,6 +128,14 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   if (raw["personalData"] !== undefined) {
     const found = readPersonalData(raw["personalData"]);
     if (typeof found === "string") add("error", "manifest", `"oksPage.personalData": ${found}`);
+  }
+  if (raw["cookies"] !== undefined) {
+    const found = readCookies(raw["cookies"]);
+    if (typeof found === "string") add("error", "manifest", `"oksPage.cookies": ${found}`);
+  }
+  if (raw["outsideHosts"] !== undefined) {
+    const found = readOutsideHosts(raw["outsideHosts"]);
+    if (typeof found === "string") add("error", "manifest", `"oksPage.outsideHosts": ${found}`);
   }
   if (raw["adminPages"] !== undefined) {
     const pages = readAdminPages(raw["adminPages"]);
