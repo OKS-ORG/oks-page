@@ -2,6 +2,7 @@ export * from "./admin-pages.js";
 export * from "./cgroup.js";
 export * from "./host.js";
 export * from "./permission-text.js";
+export * from "./personal-data.js";
 export * from "./npm-package.js";
 export * from "./plugin-file.js";
 export * from "./safe-fetch.js";

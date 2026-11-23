@@ -5,6 +5,7 @@
 /** A name in a stored item: `status`, `values.email`, or `$key` and `$updatedAt` (the item's key and the time it was saved). */
 const FIELD =
   /^(?:\$key|\$updatedAt|[A-Za-z_][A-Za-z0-9_]{0,39}(?:\.[A-Za-z_][A-Za-z0-9_]{0,39}){0,2})$/;
+export { FIELD as FIELD_PATH };
 const PAGE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const COLLECTION = /^[a-z][a-z0-9_-]{0,39}$/;
 const ACTION_ID = /^[a-z][a-z0-9-]{0,39}$/;

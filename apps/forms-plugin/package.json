@@ -380,6 +380,31 @@
         "type": "number",
         "label": "Months to keep messages (1 to 36, default 12)"
       }
-    }
+    },
+    "personalData": [
+      {
+        "id": "form-messages",
+        "label": "Form messages",
+        "source": "storage:messages",
+        "match": [
+          "emails"
+        ],
+        "show": [
+          {
+            "field": "at",
+            "label": "Received",
+            "format": "datetime"
+          },
+          {
+            "field": "title",
+            "label": "Form"
+          },
+          {
+            "field": "summary",
+            "label": "Message"
+          }
+        ]
+      }
+    ]
   }
 }

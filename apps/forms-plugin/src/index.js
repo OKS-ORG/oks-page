@@ -365,9 +365,18 @@ export default {
       const shown = values
         .filter((v) => v.type !== "hidden")
         .map((v) => ({ label: v.label, value: spam ? v.value.slice(0, 200) : v.value }));
+      // The addresses in the message, in one plain form, so the privacy tool can find a person's messages (spec 18, section 5).
+      const emails = [
+        ...new Set(
+          values
+            .filter((v) => v.type === "email" && EMAIL.test(v.value))
+            .map((v) => v.value.trim().toLowerCase()),
+        ),
+      ];
       const message = {
         form: formId,
         title: def.title || "Form",
+        emails,
         status: spam ? "spam" : "new",
         at,
         ...(spam ? { why } : {}),

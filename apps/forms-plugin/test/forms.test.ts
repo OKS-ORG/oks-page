@@ -97,6 +97,7 @@ for (const { kind, open, skip } of openers) {
         title: string;
         at: number;
         summary: string;
+        emails?: string[];
         files?: { id: string; name: string; type: string; size: number }[];
         values: { label: string; value: string }[];
       }[]
@@ -205,6 +206,12 @@ for (const { kind, open, skip } of openers) {
         "files:private",
         "routes:public",
       ]);
+      // The messages are declared as personal data, found by their email addresses.
+      expect(file.manifest.personalData?.[0]).toMatchObject({
+        id: "form-messages",
+        source: "storage:messages",
+        match: ["emails"],
+      });
       // The Messages page is data: a table over the plugin's own storage.
       expect(file.manifest.adminPages?.[0]).toMatchObject({
         id: "messages",
@@ -464,6 +471,8 @@ for (const { kind, open, skip } of openers) {
       const last = messages[messages.length - 1]!;
       expect(last.status).toBe("new");
       expect(last.title).toBe("Contact us");
+      // The address is kept in one plain form, in a field of its own, so a privacy request can find the message (spec 18).
+      expect(last.emails).toEqual(["anna@example.com"]);
       expect(last.values).toContainEqual({ label: "Name", value: "Anna <b>Berg</b>" });
       expect(last.values).toContainEqual({ label: "Colours", value: "Red, Blue" });
       // One line for the Messages page, every answer with its label.

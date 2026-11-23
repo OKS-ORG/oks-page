@@ -275,6 +275,25 @@ describe("PL-41 oks check", () => {
   );
 
   test(
+    "PL-84 personal data: the declaration is checked like a plugin file does",
+    async () => {
+      const personalData = [
+        { id: "messages", label: "Messages", source: "storage:messages", match: ["emails"] },
+      ];
+      const good = await checkPlugin(plugin(`export default {};`, { hooks: [], personalData }));
+      expect(good.issues).toEqual([]);
+      const bad = await checkPlugin(
+        plugin(`export default {};`, {
+          hooks: [],
+          personalData: [{ id: "messages", label: "Messages", source: "elsewhere", match: [] }],
+        }),
+      );
+      expect(errors(bad)[0]?.message).toContain('"oksPage.personalData"');
+    },
+    T,
+  );
+
+  test(
     "PL-41 a plugin that uses a permission it did not declare fails, naming the hook and the exact permission",
     async () => {
       const source = `export default { hooks: { "content:afterSave": async (e, ctx) => { await ctx.content.update("sample", { title: "changed" }); return e; } } };`;

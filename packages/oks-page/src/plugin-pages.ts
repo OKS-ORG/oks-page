@@ -132,7 +132,10 @@ export async function listPluginPages(
 }
 
 /** A value of a stored item by name: `status`, `values.email`, `$key`, `$updatedAt`. Only an item's own fields are read. */
-function fieldOf(item: { key: string; value: unknown; updatedAt: number }, path: string): unknown {
+export function fieldOf(
+  item: { key: string; value: unknown; updatedAt: number },
+  path: string,
+): unknown {
   if (path === "$key") return item.key;
   if (path === "$updatedAt") return item.updatedAt;
   let at: unknown = item.value;
@@ -162,7 +165,7 @@ function filesOf(value: unknown): { id: string; name: string }[] {
   });
 }
 
-function show(value: unknown, format: "text" | "datetime" | "files"): string {
+export function show(value: unknown, format: "text" | "datetime" | "files"): string {
   if (value === null || value === undefined) return "";
   if (format === "files")
     return filesOf(value)

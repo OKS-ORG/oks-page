@@ -34,6 +34,9 @@ export function pluginManifestOf(pkg: Record<string, unknown>): PluginFileManife
     ...(raw["jobs"] && typeof raw["jobs"] === "object" && !Array.isArray(raw["jobs"])
       ? { jobs: raw["jobs"] as NonNullable<PluginFileManifest["jobs"]> }
       : {}),
+    ...(Array.isArray(raw["personalData"])
+      ? { personalData: raw["personalData"] as NonNullable<PluginFileManifest["personalData"]> }
+      : {}),
     ...(Array.isArray(raw["adminPages"])
       ? { adminPages: raw["adminPages"] as NonNullable<PluginFileManifest["adminPages"]> }
       : {}),

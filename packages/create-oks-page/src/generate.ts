@@ -277,6 +277,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
 `,
     },
     {
+      path: "app/admin/tools/privacy/page.tsx",
+      content: `export { default, metadata } from ${from("tools-privacy-page")};\n`,
+    },
+    {
       path: "app/admin/tools/search/page.tsx",
       content: `export { default, metadata } from ${from("tools-search-page")};\n`,
     },
@@ -440,6 +444,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/plugin-files/[id]/route.ts",
       content: `export { GET } from ${from("api-plugin-files")};\n`,
+    },
+    {
+      path: "app/api/admin/privacy-requests/route.ts",
+      content: `export { POST } from ${from("api-privacy-requests")};\n`,
     },
     {
       path: "app/api/admin/plugin-pages/route.ts",

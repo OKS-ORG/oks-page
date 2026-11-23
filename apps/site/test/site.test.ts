@@ -22,7 +22,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, relative, sep } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, inflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { openSqlite } from "@oks-page/db/testing";
 import axe from "axe-core";
@@ -8746,6 +8746,160 @@ describe.skipIf(!findBrowser())(
         ]);
         expect(again.status).not.toBe(200);
         expect(await fileRows()).toEqual([]);
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=forms");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 150_000);
+
+    test("PG-18: a privacy request finds a person's form messages and files by their email address, exports them as a ZIP, deletes them, and leaves a record without the data (FM-08)", async () => {
+      const page = await signedIn(owner);
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      await call(page, "DELETE", "/api/admin/plugins?id=forms");
+      const got = await call(page, "POST", "/api/admin/plugins", { action: "bundled" });
+      const done = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: got.json!["file"],
+        approved: ["admin:pages", "email:send", "files:private", "routes:public"],
+      });
+      expect(done.status, JSON.stringify(done.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", { type: "page", title: "Ask" });
+      const id = String(made.json!["id"]);
+      try {
+        const saved = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Ask",
+          slugPart: "ask-us",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Ask us.")),
+            {
+              id: "fm1",
+              type: "forms-form",
+              props: {
+                fields: [
+                  { label: "Name", kind: "text", required: true, options: "" },
+                  { label: "Email", kind: "email", required: true, options: "" },
+                  { label: "Your CV", kind: "file", required: false, options: "" },
+                ],
+                thanks: "Got it.",
+              },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const shown = await fetch(site.base + "/ask-us").then((r) => r.text());
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        const send = (name: string, email: string, withFile: boolean) => {
+          const form = new FormData();
+          for (const [k, v] of Object.entries({
+            _form: hidden("_form"),
+            _t: hidden("_t"),
+            _hp: "",
+            name,
+            email,
+          }))
+            form.append(k, v);
+          if (withFile)
+            form.append(
+              "your_cv",
+              new Blob([new Uint8Array(png)], { type: "image/png" }),
+              "cv.png",
+            );
+          return fetch(`${site.base}/api/oks/plugins/forms/send`, { method: "POST", body: form });
+        };
+        await new Promise((r) => setTimeout(r, 3500));
+        expect((await send("Anna", "Anna.Privacy@Example.com", true)).status).toBe(200);
+        expect((await send("Ben", "ben.privacy@example.com", false)).status).toBe(200);
+        const files = async () => (await db.runner.all(`select "id" from extension_files`)).length;
+        expect(await files()).toBe(1);
+
+        // Not for visitors, and not for people who may not manage the settings.
+        const probe = {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "find", email: "anna.privacy@example.com" }),
+        };
+        expect((await fetch(site.base + "/api/admin/privacy-requests", probe)).status).toBe(401);
+
+        // The tool is in the Tools menu. The address is found whatever its capitals.
+        await page.goto(site.base + "/admin");
+        await page.getByRole("link", { name: "Privacy requests" }).first().click();
+        await page.getByRole("heading", { name: "Privacy requests", level: 2 }).waitFor();
+        await page.getByLabel("Email address").fill("  ANNA.privacy@example.com ");
+        await page.getByRole("button", { name: "Find", exact: true }).click();
+        await page.getByRole("heading", { name: "Found for anna.privacy@example.com" }).waitFor();
+        await page.getByRole("heading", { name: "Form messages (forms) (1)" }).waitFor();
+        await page.getByRole("cell", { name: "cv.png", exact: true }).waitFor();
+        expect(await page.getByText("Ben").count()).toBe(0);
+
+        // The export is a ZIP with her message and her file, and nothing of Ben's.
+        const download = page.waitForEvent("download");
+        await page.getByRole("button", { name: "Download everything as a ZIP file" }).click();
+        const file = await download;
+        expect(file.suggestedFilename()).toMatch(/^personal-data-[0-9a-f]{10}\.zip$/);
+        const zip = readFileSync((await file.path())!);
+        const names: string[] = [];
+        const bodies: Record<string, Buffer> = {};
+        for (let at = 0; zip.readUInt32LE(at) === 0x04034b50;) {
+          const method = zip.readUInt16LE(at + 8);
+          const packed = zip.readUInt32LE(at + 18);
+          const nameLength = zip.readUInt16LE(at + 26);
+          const extra = zip.readUInt16LE(at + 28);
+          const name = zip.subarray(at + 30, at + 30 + nameLength).toString("utf8");
+          const data = zip.subarray(
+            at + 30 + nameLength + extra,
+            at + 30 + nameLength + extra + packed,
+          );
+          names.push(name);
+          bodies[name] = method === 8 ? inflateRawSync(data) : Buffer.from(data);
+          at += 30 + nameLength + extra + packed;
+        }
+        expect(names.filter((n) => !n.startsWith("plugins/forms/files/")).sort()).toEqual([
+          "README.txt",
+          "plugins/forms/form-messages.json",
+        ]);
+        const kept = names.find((n) => n.startsWith("plugins/forms/files/"))!;
+        expect(kept).toMatch(/-cv\.png$/);
+        expect(bodies[kept]!.equals(png)).toBe(true);
+        expect(
+          JSON.stringify(Object.values(bodies).map((x) => x.toString("latin1"))),
+        ).not.toContain("ben.privacy");
+
+        // Deleting asks first, says what it removed, and the person can no longer be found; Ben's message stays.
+        await page.getByRole("button", { name: "Delete these items" }).click();
+        await page.getByText("Delete 1 item for good?").waitFor();
+        await page.getByRole("button", { name: "Yes, delete" }).click();
+        await page.getByText("Deleted 1 item, 1 file and 0 email records.").waitFor();
+        await page.getByText("Nothing is kept for this address.").waitFor();
+        expect(await files()).toBe(0);
+        const messages = await call(
+          page,
+          "GET",
+          "/api/admin/plugin-pages?plugin=forms&page=messages",
+        );
+        const rows = (messages.json!["view"] as { rows: { cells: { text: string }[] }[] }).rows;
+        expect(rows.map((r) => r.cells[3]!.text)).toEqual([
+          "Name: Ben · Email: ben.privacy@example.com",
+        ]);
+
+        // Every request is written down, with a hash and counts and never the address or the data.
+        const log = await db.runner.all(
+          `select "action", "target_id", "detail" from audit_log where "action" like 'privacy.%' order by "created_at", "id"`,
+        );
+        expect(log.map((l) => l["action"])).toEqual([
+          "privacy.find",
+          "privacy.export",
+          "privacy.delete",
+          "privacy.find",
+        ]);
+        expect(JSON.stringify(log)).not.toMatch(/privacy@example|Anna/i);
       } finally {
         await call(page, "DELETE", "/api/admin/plugins?id=forms");
         await call(page, "DELETE", `/api/admin/entries/${id}`);

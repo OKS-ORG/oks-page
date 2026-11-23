@@ -3,6 +3,7 @@
 // without a network, and the same file can come from a marketplace later. Nothing here runs the code.
 import { createHash } from "node:crypto";
 import { readAdminPages, type AdminPageInfo } from "./admin-pages.js";
+import { readPersonalData, type PersonalDataSource } from "./personal-data.js";
 import { KNOWN_PERMISSIONS } from "./permission-text.js";
 import type {
   BlockPreset,
@@ -37,6 +38,8 @@ export interface PluginFileManifest {
   adminPages?: AdminPageInfo[];
   /** The tasks the plugin runs by itself on a timer, by name. */
   jobs?: Record<string, JobInfo>;
+  /** Where the plugin keeps data about people, for the site's privacy tool (spec 18, section 5). */
+  personalData?: PersonalDataSource[];
 }
 
 export interface PluginFile {
@@ -425,6 +428,12 @@ export function readPluginFile(text: string): PluginFileResult {
     if (typeof read === "string") return bad(read);
     jobs = read;
   }
+  let personalData: PersonalDataSource[] | undefined;
+  if (mm["personalData"] !== undefined) {
+    const read = readPersonalData(mm["personalData"]);
+    if (typeof read === "string") return bad(read);
+    personalData = read;
+  }
   let adminPages: AdminPageInfo[] | undefined;
   if (mm["adminPages"] !== undefined) {
     const read = readAdminPages(mm["adminPages"]);
@@ -524,6 +533,7 @@ export function readPluginFile(text: string): PluginFileResult {
         ...(routes && Object.keys(routes).length > 0 ? { routes } : {}),
         ...(adminPages && adminPages.length > 0 ? { adminPages } : {}),
         ...(jobs && Object.keys(jobs).length > 0 ? { jobs } : {}),
+        ...(personalData && personalData.length > 0 ? { personalData } : {}),
       },
       code: f["code"],
       integrity: f["integrity"],
