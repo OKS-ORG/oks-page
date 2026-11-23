@@ -6,6 +6,7 @@
     "app/maintenance-handler",
     "app/search",
     "app/preview",
+    "app/privacy-request",
     "app/sitemap.xml",
     "app/robots.txt",
     "app/feed.xml",

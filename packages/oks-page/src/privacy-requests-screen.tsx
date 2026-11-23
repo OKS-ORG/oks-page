@@ -3,8 +3,9 @@
 // download it as a ZIP, or delete it. Deleting asks first and says how many items it will remove. The address is sent in the
 // body of a request, never in a web address.
 import { Alert, Button } from "oks-ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PrivacyFindResult } from "./privacy-requests";
+import type { OpenRequest } from "./privacy-visitor";
 
 async function post(action: string, email: string): Promise<Response> {
   return fetch("/api/admin/privacy-requests", {
@@ -26,6 +27,38 @@ export function PrivacyRequestsScreen() {
   const [note, setNote] = useState("");
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [asked, setAsked] = useState<{
+    waiting: number;
+    open: OpenRequest[];
+    answered: number;
+  } | null>(null);
+  const [origin, setOrigin] = useState("");
+
+  async function loadRequests() {
+    const response = await post("requests", "");
+    if (!response.ok) return;
+    setAsked((await response.json()) as { waiting: number; open: OpenRequest[]; answered: number });
+  }
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    void loadRequests();
+  }, []);
+
+  async function answer(id: string) {
+    setProblem(null);
+    const response = await fetch("/api/admin/privacy-requests", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "answer", id }),
+    });
+    if (!response.ok) {
+      setProblem(await problemOf(response, "That did not work."));
+      return;
+    }
+    setNote("Marked as answered. The address is no longer kept for this request.");
+    await loadRequests();
+  }
 
   async function find(address = email) {
     setProblem(null);
@@ -94,6 +127,69 @@ export function PrivacyRequestsScreen() {
         it. Check that the person is who they say they are before you send or delete anything. The
         answer is due within 30 days. Every request is written in the audit log, without the data.
       </p>
+      <section aria-labelledby="visitor-requests-heading">
+        <h3 id="visitor-requests-heading">Requests from visitors</h3>
+        <p>
+          Visitors can ask for a copy of their data, or for it to be deleted, at{" "}
+          <strong>{origin ? `${origin}/privacy-request` : "/privacy-request"}</strong>. They get an
+          email with a link and confirm there; only confirmed requests appear here. You have 30 days
+          to answer.
+        </p>
+        {asked && asked.waiting > 0 ? (
+          <p>
+            {asked.waiting} request{asked.waiting === 1 ? " is" : "s are"} waiting for the person to
+            confirm.
+          </p>
+        ) : null}
+        {asked && asked.open.length === 0 ? <p>No confirmed request is waiting for you.</p> : null}
+        {asked && asked.open.length > 0 ? (
+          <ul aria-label="Confirmed requests">
+            {asked.open.map((r) => (
+              <li key={r.id}>
+                <p>
+                  <strong>
+                    {r.kind === "export"
+                      ? "Wants a copy of their data"
+                      : "Wants their data deleted"}
+                  </strong>
+                  : {r.email ?? "(the address can no longer be read)"}.
+                  <br />
+                  Confirmed {new Date(r.confirmedAt).toISOString().slice(0, 10)}. Answer by{" "}
+                  <strong>{new Date(r.dueAt).toISOString().slice(0, 10)}</strong>.
+                </p>
+                <p>
+                  {r.email ? (
+                    <>
+                      <Button
+                        aria-label={`Look up ${r.email}`}
+                        onPress={() => {
+                          setEmail(r.email!);
+                          setNote("");
+                          void find(r.email!);
+                        }}
+                      >
+                        Look up this address
+                      </Button>{" "}
+                    </>
+                  ) : null}
+                  <Button
+                    aria-label={`Mark the request of ${r.email ?? "this person"} as answered`}
+                    onPress={() => void answer(r.id)}
+                  >
+                    Mark as answered
+                  </Button>
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {asked && asked.answered > 0 ? (
+          <p>
+            {asked.answered} answered request{asked.answered === 1 ? "" : "s"} kept as a record.
+          </p>
+        ) : null}
+      </section>
+      <h3>Look up an address</h3>
       <form
         aria-label="Find a person's data"
         onSubmit={(event) => {

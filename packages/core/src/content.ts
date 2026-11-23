@@ -46,6 +46,7 @@ const RESERVED = new Set([
   "not-found-handler",
   "maintenance-handler",
   "search",
+  "privacy-request",
   "preview",
   "feed.xml",
   "atom.xml",

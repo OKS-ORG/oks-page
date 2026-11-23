@@ -7,8 +7,10 @@ import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
 import { deletePersonalData, exportPersonalData, findPersonalData } from "./privacy-requests";
+import { answerPrivacyRequest, listPrivacyRequests } from "./privacy-visitor";
+import { siteSecrets } from "./mail";
 
-const STATUS = { forbidden: 403, invalid: 400 } as const;
+const STATUS = { forbidden: 403, invalid: 400, not_found: 404 } as const;
 
 export async function POST(request: Request) {
   if (!isSameOrigin(request))
@@ -23,6 +25,24 @@ export async function POST(request: Request) {
   }
   const actor = await actorOf(member);
   const email = String(input.email ?? "");
+  if (input.action === "requests") {
+    const r = await listPrivacyRequests(getRunner(), actor, member.siteId, siteSecrets());
+    if (!r.ok) return reply(r, STATUS[r.code]);
+    return NextResponse.json(
+      { waiting: r.waiting, open: r.open, answered: r.answered },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }
+  if (input.action === "answer") {
+    const r = await answerPrivacyRequest(
+      getRunner(),
+      actor,
+      member.siteId,
+      String((input as { id?: unknown }).id ?? ""),
+    );
+    if (!r.ok) return reply(r, STATUS[r.code]);
+    return NextResponse.json({ ok: true });
+  }
   if (input.action === "find") {
     const r = await findPersonalData(getRunner(), actor, member.siteId, email);
     if (!r.ok) return reply(r, STATUS[r.code]);

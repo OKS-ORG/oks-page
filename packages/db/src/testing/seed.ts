@@ -379,6 +379,19 @@ export async function seedEverything(db: TestDb): Promise<void> {
     data: Buffer.from([0, 255, 128, 10, 13, 65, 0, 200]),
     created_at: T,
   });
+  await ins(db, "privacy_requests", {
+    id: id(901),
+    site_id: site,
+    email_hash: "h".repeat(64),
+    email_sealed: "v1:sealed-address-🌸",
+    kind: "export",
+    status: "confirmed",
+    token_hash: "t".repeat(64),
+    created_at: T,
+    expires_at: T2,
+    confirmed_at: T2,
+    done_at: null,
+  });
   await ins(db, "extension_settings", {
     extension_id: ext,
     key: "units",

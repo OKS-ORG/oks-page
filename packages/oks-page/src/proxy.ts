@@ -120,6 +120,14 @@ export async function proxy(request: NextRequest) {
   // engines are told not to index them (spec 08, section 9).
   if (slug === "search")
     return apply(NextResponse.next(), { "x-robots-tag": "noindex", "cache-control": PRIVATE });
+  // A visitor's request about their personal data (spec 18, section 5) and the link in its confirmation email are routes of their
+  // own. They are never cached or indexed, and the link is not passed on to other sites in a Referer header.
+  if (slug === "privacy-request" || /^privacy-request\/confirm\/[^/]+$/.test(slug))
+    return apply(NextResponse.next(), {
+      "x-robots-tag": "noindex, nofollow",
+      "cache-control": PRIVATE,
+      "referrer-policy": "no-referrer",
+    });
   // The feed of a category ("category/news/feed.xml" and ".../atom.xml") is a route of its own; only a category that exists
   // gets through, anything else is the plain 404 below.
   const categoryFeed = /^category\/([^/]+)\/(?:feed|atom)\.xml$/.exec(slug);

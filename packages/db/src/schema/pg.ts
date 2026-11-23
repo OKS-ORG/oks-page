@@ -1275,6 +1275,46 @@ export const cacheTags = pgTable(
   ],
 );
 
+// A request from a visitor to see or delete the personal data the site keeps about them (spec 18, section 5). The address
+// is kept as a hash for matching, and sealed (with the site's secret) only until the request is answered so the owner can
+// reach the person; the link in the confirmation email is kept as a hash. A request is `pending` until the person opens the
+// link, `confirmed` until the owner answers it, then `answered`.
+export const privacyRequests = pgTable(
+  "privacy_requests",
+  {
+    id: text("id").primaryKey().notNull(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    emailHash: text("email_hash").notNull(),
+    emailSealed: text("email_sealed"),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true, precision: 3, mode: "date" }),
+    doneAt: timestamp("done_at", { withTimezone: true, precision: 3, mode: "date" }),
+  },
+  (t) => [
+    check("ck_privacy_requests_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_privacy_requests_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    check("ck_privacy_requests_kind", sql`${t.kind} in ('export', 'delete')`),
+    check("ck_privacy_requests_status", sql`${t.status} in ('pending', 'confirmed', 'answered')`),
+    uniqueIndex("uq_privacy_requests_token").on(t.tokenHash),
+    index("ix_privacy_requests_site").on(t.siteId, t.status, t.createdAt),
+    index("ix_privacy_requests_address").on(t.siteId, t.emailHash, t.createdAt),
+  ],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -1324,4 +1364,5 @@ export const tableNames = [
   "search_terms",
   "api_keys",
   "cache_tags",
+  "privacy_requests",
 ] as const;

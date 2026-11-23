@@ -20,6 +20,7 @@ export const EXPORT_REMOVED = {
     "app/maintenance-handler",
     "app/search",
     "app/preview",
+    "app/privacy-request",
     "app/sitemap.xml",
     "app/robots.txt",
     "app/feed.xml",
@@ -444,6 +445,22 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/plugin-files/[id]/route.ts",
       content: `export { GET } from ${from("api-plugin-files")};\n`,
+    },
+    {
+      path: "app/privacy-request/page.tsx",
+      content: `export { default, metadata } from ${from("privacy-request-page")};\n`,
+    },
+    {
+      path: "app/privacy-request/confirm/[token]/page.tsx",
+      content: `export { default, metadata } from ${from("privacy-confirm-page")};\n`,
+    },
+    {
+      path: "app/api/privacy/request/route.ts",
+      content: `export { POST } from ${from("api-privacy-request")};\n`,
+    },
+    {
+      path: "app/api/privacy/confirm/route.ts",
+      content: `export { POST } from ${from("api-privacy-confirm")};\n`,
     },
     {
       path: "app/api/admin/privacy-requests/route.ts",

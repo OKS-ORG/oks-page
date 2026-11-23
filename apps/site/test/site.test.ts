@@ -1580,7 +1580,8 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByLabel("Add", { exact: true }).selectOption("term");
     await page.getByLabel("Category or tag").selectOption({ label: "Category: Uncategorised" });
     await page.getByRole("button", { name: "Add to menu" }).click();
-    expect(await page.getByLabel("Label", { exact: true }).count()).toBe(3);
+    // The screen draws the third item a moment after the click.
+    await expect.poll(() => page.getByLabel("Label", { exact: true }).count()).toBe(3);
 
     // A bad address is refused in words.
     await page.getByLabel("Add", { exact: true }).selectOption("url");
@@ -11714,6 +11715,138 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     await arrived(caraNow, subject, 1);
     await new Promise((r) => setTimeout(r, 1500));
     expect(withSubject(owner.email, subject)).toHaveLength(1);
+  });
+
+  test("PR-06: a visitor asks to see or delete their data, confirms by the link in an email, the owner is told and answers, and nothing happens before the link is opened", async () => {
+    const page = await signedIn(owner);
+    const on = await page.request.put(site.base + "/api/admin/settings/email", {
+      headers: { origin: site.base },
+      data: {
+        provider: "other",
+        host: "localhost",
+        port: smtpPort,
+        security: "starttls",
+        username: "anna",
+        password: "smtp-password",
+        fromName: "Anna's Garden",
+        fromAddress: "hello@annas-garden.example",
+        testTo: "anna@example.com",
+      },
+    });
+    expect(on.status()).toBe(200);
+    const mia = "mia.visitor@example.com";
+    const confirmSubject = "Please confirm your request: Anna's Garden";
+    const withSubject = (to: string, subject: string) =>
+      received.filter((m) => m.to.includes(to) && m.data.includes(`Subject: ${subject}`));
+    const arrived = async (to: string, subject: string, count: number) => {
+      await expect.poll(() => withSubject(to, subject).length, { timeout: 15_000 }).toBe(count);
+      return withSubject(to, subject).at(-1)!.data;
+    };
+    const requests = async () =>
+      (await db.run("select status, email_sealed from privacy_requests")) as Record<
+        string,
+        unknown
+      >[];
+    const api = (path: string, body: unknown) =>
+      fetch(site.base + path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // The same plain answer to a program, a bad address and a made-up link; nothing is made or sent.
+    expect(
+      (await api("/api/privacy/request", { email: "bot@example.com", kind: "delete", _hp: "x" }))
+        .status,
+    ).toBe(200);
+    const bad = await api("/api/privacy/request", { email: "nope", kind: "delete" });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { message: string }).message).toBe(
+      "Enter a valid email address.",
+    );
+    expect((await api("/api/privacy/confirm", { token: "x".repeat(40) })).status).toBe(400);
+    expect(await requests()).toEqual([]);
+    expect(withSubject("bot@example.com", confirmSubject)).toEqual([]);
+
+    // The visitor's page: a form with a real label, and an email with a link is on its way.
+    const visitor = await browser.newPage();
+    await visitor.goto(site.base + "/privacy-request");
+    await visitor.getByRole("heading", { name: "Your personal data", level: 1 }).waitFor();
+    expect(await axeViolations(visitor)).toEqual([]);
+    await visitor.getByLabel("Your email address").fill(mia);
+    await visitor.getByLabel("Delete my personal data").check();
+    await visitor.getByRole("button", { name: "Send me the confirmation link" }).click();
+    await visitor.getByRole("heading", { name: "Check your email" }).waitFor();
+    const mail = await arrived(mia, confirmSubject, 1);
+    const plain = mail.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
+    expect(plain).toContain("delete the personal data");
+    const link = /https?:\/\/[^\s"<>]*\/privacy-request\/confirm\/[A-Za-z0-9_-]+/.exec(plain)?.[0];
+    expect(link, plain).toBeTruthy();
+    const local = link!.replace(/^https?:\/\/[^/]+/, site.base);
+    // The site keeps neither the address nor the link in plain form.
+    const stored = JSON.stringify(await db.run("select * from privacy_requests"));
+    expect(stored).not.toContain(mia);
+    expect(stored).not.toContain(local.split("/").pop()!);
+
+    // A program that only fetches the link (an email scanner) confirms nothing.
+    const scanned = await fetch(local);
+    expect(scanned.status).toBe(200);
+    expect(await scanned.text()).toContain("Yes, this request is mine");
+    expect((await requests()).map((r) => r["status"])).toEqual(["pending"]);
+    const before = await page.request.post(site.base + "/api/admin/privacy-requests", {
+      headers: { origin: site.base },
+      data: { action: "requests" },
+    });
+    expect(await before.json()).toMatchObject({ waiting: 1, open: [], answered: 0 });
+
+    // Asking again within the hour gets the same answer and no second email.
+    await visitor.goto(site.base + "/privacy-request");
+    await visitor.getByLabel("Your email address").fill(mia.toUpperCase());
+    await visitor.getByRole("button", { name: "Send me the confirmation link" }).click();
+    await visitor.getByRole("heading", { name: "Check your email" }).waitFor();
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(withSubject(mia, confirmSubject)).toHaveLength(1);
+    expect(await requests()).toHaveLength(1);
+
+    // The button confirms it, and the administrator is told.
+    await visitor.goto(local);
+    await visitor.getByRole("heading", { name: "Confirm your request", level: 1 }).waitFor();
+    await visitor.getByRole("button", { name: "Yes, this request is mine" }).click();
+    await visitor.getByText("Thank you. Your request is confirmed.", { exact: false }).waitFor();
+    const told = await arrived(owner.email, "A privacy request was confirmed", 1);
+    expect(told.replace(/=\r?\n/g, "")).toContain("30 days");
+    expect(told).not.toContain(mia);
+    await visitor.goto(local);
+    await visitor.getByRole("button", { name: "Yes, this request is mine" }).click();
+    await visitor.getByText("Your request was confirmed already.", { exact: false }).waitFor();
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(withSubject(owner.email, "A privacy request was confirmed")).toHaveLength(1);
+
+    // The owner sees it with the address and the day the answer is due, looks it up, and marks it answered.
+    await page.goto(site.base + "/admin/tools/privacy");
+    await page.getByRole("heading", { name: "Requests from visitors" }).waitFor();
+    await page.getByText(`Wants their data deleted: ${mia}`, { exact: false }).waitFor();
+    await page.getByText(/Answer by \d{4}-\d{2}-\d{2}/).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.getByRole("button", { name: `Look up ${mia}` }).click();
+    await page.getByRole("heading", { name: `Found for ${mia}` }).waitFor();
+    await page.getByRole("button", { name: `Mark the request of ${mia} as answered` }).click();
+    await page.getByText("No confirmed request is waiting for you.").waitFor();
+    const after = await requests();
+    expect(after.map((r) => [r["status"], r["email_sealed"]])).toEqual([["answered", null]]);
+
+    // Every step is in the audit log, without the address.
+    const log = (await db.run(
+      "select action from audit_log where action like 'privacy.%' order by created_at, id",
+    )) as Record<string, unknown>[];
+    expect(log.map((l) => l["action"])).toEqual([
+      "privacy.request",
+      "privacy.request_confirmed",
+      "privacy.find",
+      "privacy.request_answered",
+    ]);
+    expect(JSON.stringify(await db.run("select * from audit_log"))).not.toContain(mia);
+    await visitor.close();
   });
 });
 
