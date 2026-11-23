@@ -1571,17 +1571,21 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByText("This menu is empty.").waitFor();
 
     // A page, a link and a category (the starter site has these pages and the Uncategorised category).
+    // Each item is waited for before the next one is filled in, because the form clears itself after an add.
+    const items = (n: number) =>
+      expect.poll(() => page.getByLabel("Label", { exact: true }).count()).toBe(n);
     await page.getByLabel("Page or post").selectOption({ label: "Page: About" });
     await page.getByRole("button", { name: "Add to menu" }).click();
+    await items(1);
     await page.getByLabel("Add", { exact: true }).selectOption("url");
     await page.getByLabel("Label of the link").fill("Our shop");
     await page.getByLabel("Address of the link").fill("https://shop.example.com");
     await page.getByRole("button", { name: "Add to menu" }).click();
+    await items(2);
     await page.getByLabel("Add", { exact: true }).selectOption("term");
     await page.getByLabel("Category or tag").selectOption({ label: "Category: Uncategorised" });
     await page.getByRole("button", { name: "Add to menu" }).click();
-    // The screen draws the third item a moment after the click.
-    await expect.poll(() => page.getByLabel("Label", { exact: true }).count()).toBe(3);
+    await items(3);
 
     // A bad address is refused in words.
     await page.getByLabel("Add", { exact: true }).selectOption("url");
@@ -11067,6 +11071,9 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     site = await startSite("sqlite", db, {
       OKS_SECRET: "e".repeat(40),
       NODE_EXTRA_CA_CERTS: join(dir, "cert.pem"),
+      // The daily jobs (clean-up of old data, reminders) run every 2 seconds here.
+      OKS_SCHEDULER_SECONDS: "1",
+      OKS_KEEPING_SECONDS: "2",
     });
     const made = await fetch(site.base + "/api/setup", {
       method: "POST",
@@ -11847,6 +11854,78 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     ]);
     expect(JSON.stringify(await db.run("select * from audit_log"))).not.toContain(mia);
     await visitor.close();
+  });
+
+  test("PR-06: the administrator is reminded once when a confirmed request has 7 days left and once when it is overdue, without who asked", async () => {
+    const page = await signedIn(owner);
+    const on = await page.request.put(site.base + "/api/admin/settings/email", {
+      headers: { origin: site.base },
+      data: {
+        provider: "other",
+        host: "localhost",
+        port: smtpPort,
+        security: "starttls",
+        username: "anna",
+        password: "smtp-password",
+        fromName: "Anna's Garden",
+        fromAddress: "hello@annas-garden.example",
+        testTo: "anna@example.com",
+      },
+    });
+    expect(on.status()).toBe(200);
+    const withSubject = (subject: string) =>
+      received.filter((m) => m.to.includes(owner.email) && m.data.includes(`Subject: ${subject}`));
+    const arrived = async (subject: string, count: number) => {
+      await expect.poll(() => withSubject(subject).length, { timeout: 20_000 }).toBe(count);
+      return withSubject(subject).at(-1)!.data;
+    };
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const DAY = 24 * 60 * 60 * 1000;
+    const id = "PRIV00000000000000000000R1";
+    // A request that was confirmed 24 days ago: 6 days are left.
+    await db.run(
+      `insert into privacy_requests (id, site_id, email_hash, email_sealed, kind, status, token_hash, created_at, expires_at, confirmed_at, reminder_stage)
+       values (?, ?, ?, NULL, 'export', 'confirmed', ?, ?, ?, ?, 0)`,
+      [
+        id,
+        siteId,
+        "h".repeat(64),
+        "t".repeat(64),
+        new Date(Date.now() - 25 * DAY),
+        new Date(Date.now() + 7 * DAY),
+        new Date(Date.now() - 24 * DAY),
+      ],
+    );
+    const soon = await arrived("A privacy request is due soon", 1);
+    expect(soon.replace(/=\r?\n/g, "")).toContain("within 7 days");
+    expect(soon).not.toContain("hhhhhhhh");
+    const stage = async () =>
+      Number(
+        (await db.run("select reminder_stage as s from privacy_requests where id = ?", [id]))[0]![
+          "s"
+        ],
+      );
+    await expect.poll(stage, { timeout: 10_000 }).toBe(1);
+    // It is not sent again.
+    await new Promise((r) => setTimeout(r, 5000));
+    expect(withSubject("A privacy request is due soon")).toHaveLength(1);
+    // A week later it is overdue: one more email, and the owner's screen says so.
+    await db.run("update privacy_requests set confirmed_at = ? where id = ?", [
+      new Date(Date.now() - 31 * DAY),
+      id,
+    ]);
+    const late = await arrived("A privacy request is overdue", 1);
+    expect(late.replace(/=\r?\n/g, "")).toContain("past the 30 days");
+    await expect.poll(stage, { timeout: 10_000 }).toBe(2);
+    await page.goto(site.base + "/admin/tools/privacy");
+    await page.getByText(/Overdue since \d{4}-\d{2}-\d{2}/).waitFor();
+    await new Promise((r) => setTimeout(r, 5000));
+    expect(withSubject("A privacy request is overdue")).toHaveLength(1);
+    const log = (await db.run(
+      "select action from audit_log where action = 'privacy.request_reminder'",
+    )) as Record<string, unknown>[];
+    expect(log).toHaveLength(2);
+    await db.run("delete from privacy_requests where id = ?", [id]);
   });
 });
 

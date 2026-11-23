@@ -18,7 +18,7 @@ import { getRunner, getSiteId } from "./db";
 import { expireTags } from "./expire-tags";
 import { kickEmailJobs, runEmailJobs, siteSecrets } from "./mail";
 import { purgePendingFiles } from "./plugin-files";
-import { purgePrivacyRequests } from "./privacy-visitor";
+import { purgePrivacyRequests, sendPrivacyReminders } from "./privacy-visitor";
 import { runPluginJobs } from "./plugin-jobs";
 import { pluginHost } from "./plugin-runtime";
 
@@ -94,6 +94,23 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
     lastKeeping = now();
     await runKeeping(getRunner(), now).catch((error: unknown) =>
       console.error("[oks] The keeping times could not be applied:", error),
+    );
+    // The administrators are reminded of privacy requests that are nearly due or overdue.
+    await sendPrivacyReminders(getRunner(), {
+      origin: process.env["OKS_SITE_URL"],
+      now,
+      queue: async (siteId, to, subject, text) => {
+        const queued = await queueEmail(getRunner(), siteId, siteSecrets(), {
+          key: "privacy-request-reminder",
+          to,
+          subject,
+          text,
+        });
+        if (queued.queued) kickEmailJobs();
+        return queued.queued;
+      },
+    }).catch((error: unknown) =>
+      console.error("[oks] The privacy request reminders could not be sent:", error),
     );
   }
   // Privacy requests whose link ran out are forgotten, and answered ones after a year.

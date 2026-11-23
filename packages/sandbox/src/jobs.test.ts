@@ -97,7 +97,7 @@ for (const { kind, open, skip } of openers) {
         siteId: SITE,
         content: { get: async () => null, update: async () => null },
         workDir,
-        wallMs: 3000,
+        wallMs: 10_000,
         publishWallMs: 3000,
         jobWallMs: 1500,
         maxFailures: 3,
@@ -119,6 +119,8 @@ for (const { kind, open, skip } of openers) {
         CODE,
         EXT,
       );
+      // Start the plugin's process now, so the 1.5 second limit of a job measures the job and not a cold start.
+      await host.describe("jobber");
     });
 
     afterAll(async () => {

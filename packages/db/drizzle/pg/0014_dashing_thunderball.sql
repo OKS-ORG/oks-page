@@ -1,0 +1,1 @@
+ALTER TABLE "privacy_requests" ADD COLUMN "reminder_stage" integer DEFAULT 0 NOT NULL;

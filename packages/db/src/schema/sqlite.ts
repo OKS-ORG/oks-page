@@ -1128,6 +1128,8 @@ export const privacyRequests = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     confirmedAt: integer("confirmed_at", { mode: "timestamp_ms" }),
     doneAt: integer("done_at", { mode: "timestamp_ms" }),
+    // Which reminder the administrators got: 0 none, 1 "due within 7 days", 2 "overdue".
+    reminderStage: integer("reminder_stage").notNull().default(0),
   },
   (t) => [
     check("ck_privacy_requests_id_ulid", sql`length(${t.id}) = 26`),

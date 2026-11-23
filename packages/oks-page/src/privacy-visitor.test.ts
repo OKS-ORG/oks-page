@@ -14,6 +14,8 @@ import {
   LINK_DAYS,
   listPrivacyRequests,
   purgePrivacyRequests,
+  REMIND_DAYS,
+  sendPrivacyReminders,
 } from "./privacy-visitor";
 
 const T = new Date(1_700_000_000_000);
@@ -258,6 +260,127 @@ for (const { kind, open, skip } of openers) {
       clock += ANSWERED_KEEP_DAYS * DAY;
       expect(await purgePrivacyRequests(db.runner, () => clock)).toBe(1);
       expect((await rows()).map((r) => r["status"])).toEqual(["confirmed"]);
+    });
+
+    // ---- reminders: the administrators are told when the 30 days are nearly up, and when they are
+    const remind = (options: { origin?: string; send?: boolean } = {}) =>
+      sendPrivacyReminders(db.runner, {
+        origin: options.origin,
+        now: () => clock,
+        queue: async (_site, to, subject, text) => {
+          if (options.send === false) return false;
+          mails.push({ to, subject, text });
+          return true;
+        },
+      });
+    const confirmed = async (email: string) => {
+      const before = mails.length;
+      await create(email, "export");
+      await confirm(tokenOf(before));
+    };
+    const stages = async () =>
+      (
+        await db.runner.all(
+          `select "reminder_stage" as "s" from "privacy_requests" order by "created_at", "id"`,
+        )
+      ).map((r) => Number(r["s"]));
+
+    test("a confirmed request gets one reminder when 7 days are left and one when it is overdue, and no more", async () => {
+      await confirmed("mia@example.com");
+      const start = clock;
+      const at = (days: number) => {
+        clock = start + days * DAY;
+      };
+      const before = mails.length;
+      at(ANSWER_DAYS - REMIND_DAYS - 1);
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      expect(mails.length).toBe(before);
+      // Seven days before it is due: one email to the administrator, naming how many and never who.
+      at(ANSWER_DAYS - REMIND_DAYS);
+      expect(await remind({ origin: "https://garden.example/" })).toEqual({ soon: 1, overdue: 0 });
+      expect(mails.slice(before).map((m) => [m.to, m.subject])).toEqual([
+        ["anna@garden.example", "A privacy request is due soon"],
+      ]);
+      expect(mails[before]!.text).toContain("within 7 days");
+      expect(mails[before]!.text).toContain("https://garden.example/admin/tools/privacy");
+      expect(mails[before]!.text).not.toContain("mia@");
+      expect(await stages()).toEqual([1]);
+      // Again, and a day later: nothing more.
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      at(ANSWER_DAYS - 1);
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      expect(mails.length).toBe(before + 1);
+      // When the day has come: one email that it is overdue, and the owner's list says so.
+      at(ANSWER_DAYS);
+      expect(await remind()).toEqual({ soon: 0, overdue: 1 });
+      expect(mails[before + 1]).toMatchObject({
+        to: "anna@garden.example",
+        subject: "A privacy request is overdue",
+      });
+      expect(mails[before + 1]!.text).toContain("past the 30 days");
+      expect(mails[before + 1]!.text).toContain("Open Tools > Privacy requests in your admin.");
+      expect(await stages()).toEqual([2]);
+      at(ANSWER_DAYS + 20);
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      expect(mails.length).toBe(before + 2);
+      const list = await listPrivacyRequests(db.runner, admin, SITE, secrets, () => clock);
+      expect(list.ok && list.open.map((r) => r.overdue)).toEqual([true]);
+      const log = await db.runner.all(
+        `select "action", "detail", "target_id" from audit_log where "action" = 'privacy.request_reminder' order by created_at, id`,
+      );
+      expect(log.length).toBe(2);
+      expect(JSON.stringify(log)).not.toContain("mia@");
+    });
+
+    test("several requests are in one email, and a request that is already overdue gets only the overdue email", async () => {
+      await confirmed("a@example.com");
+      clock += HOUR * 2;
+      await confirmed("b@example.com");
+      const start = clock;
+      const before = mails.length;
+      clock = start + (ANSWER_DAYS - REMIND_DAYS + 1) * DAY;
+      expect(await remind()).toEqual({ soon: 2, overdue: 0 });
+      expect(mails.slice(before).map((m) => m.subject)).toEqual(["A privacy request is due soon"]);
+      expect(mails[before]!.text).toContain("2 confirmed privacy requests");
+      // A third one that nobody looked at for a long time (the server was off): only the overdue email.
+      await confirmed("c@example.com");
+      clock += (ANSWER_DAYS + 3) * DAY;
+      const second = mails.length;
+      expect(await remind()).toEqual({ soon: 0, overdue: 3 });
+      expect(mails.slice(second).map((m) => m.subject)).toEqual(["A privacy request is overdue"]);
+      expect(mails[second]!.text).toContain("3 confirmed privacy requests");
+      expect(await stages()).toEqual([2, 2, 2]);
+    });
+
+    test("a site that cannot send email is tried again at the next run, and nothing is lost", async () => {
+      await confirmed("mia@example.com");
+      clock += (ANSWER_DAYS - REMIND_DAYS) * DAY;
+      const before = mails.length;
+      expect(await remind({ send: false })).toEqual({ soon: 0, overdue: 0 });
+      expect(await stages()).toEqual([0]);
+      expect(mails.length).toBe(before);
+      clock += DAY;
+      expect(await remind()).toEqual({ soon: 1, overdue: 0 });
+      expect(await stages()).toEqual([1]);
+    });
+
+    test("a request nobody confirmed, one that was answered, and a site without administrators get no reminder", async () => {
+      await create("pending@example.com");
+      await confirmed("done@example.com");
+      const list = await listPrivacyRequests(db.runner, admin, SITE, secrets, () => clock);
+      if (!list.ok) throw new Error("no list");
+      await answerPrivacyRequest(db.runner, admin, SITE, list.open[0]!.id, () => clock);
+      clock += (ANSWER_DAYS + 1) * DAY;
+      const before = mails.length;
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      expect(mails.length).toBe(before);
+      // A confirmed request on a site where nobody is an administrator: nothing can be sent, and it is not counted as sent.
+      await db.run(`delete from site_members where site_id = ?`, [SITE]);
+      clock += DAY;
+      await confirmed("late@example.com");
+      clock += (ANSWER_DAYS + 1) * DAY;
+      expect(await remind()).toEqual({ soon: 0, overdue: 0 });
+      expect(await stages()).toEqual([0, 0, 0]);
     });
   });
 }

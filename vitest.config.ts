@@ -44,5 +44,7 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/*.perf.test.ts"],
     // The browser tests of the admin open many pages while several test files run at once.
     testTimeout: 30_000,
+    // Each PostgreSQL test file builds its own schema by running every migration, and several files do it at once.
+    hookTimeout: 30_000,
   },
 });

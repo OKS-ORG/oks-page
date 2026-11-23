@@ -111,7 +111,9 @@ for (const { kind, open, skip } of openers) {
           },
         },
         workDir,
-        wallMs: 1000,
+        // Plenty for any call on a busy machine (a plugin process starts with its first call); the endless loop below is
+        // given its own 1 second limit.
+        wallMs: 5000,
         maxFailures: 3,
         storageLimitBytes: 50_000,
         memoryMb: 128,
@@ -129,6 +131,11 @@ for (const { kind, open, skip } of openers) {
     });
 
     const hook = (id: string, name: string, event: unknown) => host.call(id, "hook", name, event);
+    /** The endless loop, with a 1 second limit of its own. */
+    const loop = () =>
+      host.call("looper", "hook", "content:beforeSave", entry({ title: "LOOP" }), {
+        timeoutMs: 1000,
+      });
     const blockCall = (id: string, name: string, props: unknown) =>
       host.call(id, "block", name, props);
 
@@ -167,20 +174,22 @@ for (const { kind, open, skip } of openers) {
     });
 
     test("PL-06 an endless loop is stopped at the time limit and the process is killed", async () => {
-      const r = await hook("looper", "content:beforeSave", entry({ title: "LOOP" }));
+      const r = await loop();
       expect(r.ok).toBe(false);
       expect(!r.ok && r.killed).toBe(true);
       expect(!r.ok && r.error).toBe("timeout");
-      expect(r.ms).toBeLessThan(1800);
+      // The limit is 1 second; stopping it and killing the process takes a little more on a busy machine, never 4 seconds.
+      expect(r.ms).toBeLessThan(4000);
       expect(host.isRunning("looper")).toBe(false);
     });
 
     test("PL-07 another plugin keeps working while a bad one loops", async () => {
-      const bad = hook("looper", "content:beforeSave", entry({ title: "LOOP" }));
+      const bad = loop();
       const good = await hook("reading-time", "content:beforeSave", entry());
       await bad;
       expect(good.ok).toBe(true);
-      expect(good.ms).toBeLessThan(100);
+      // It answers long before the bad plugin's 1 second limit: it was not held up by the loop.
+      expect(good.ms).toBeLessThan(900);
     });
 
     test("PL-08 the killed plugin restarts on the next call", async () => {
@@ -435,7 +444,14 @@ for (const { kind, open, skip } of openers) {
       beforeAll(async () => {
         const other = host.pid("reading-time");
         expect(other).toBeTruthy();
-        const r = await hook("attacker", "content:afterSave", { otherPort: externalPort });
+        // One call that tries many things (the internet, the metadata address, other ports): it needs time on a busy machine.
+        const r = await host.call(
+          "attacker",
+          "hook",
+          "content:afterSave",
+          { otherPort: externalPort },
+          { timeoutMs: 20_000 },
+        );
         R = r.ok ? (r.result as Record<string, string>) : {};
       });
 

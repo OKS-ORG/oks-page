@@ -154,7 +154,8 @@ export function PrivacyRequestsScreen() {
                   </strong>
                   : {r.email ?? "(the address can no longer be read)"}.
                   <br />
-                  Confirmed {new Date(r.confirmedAt).toISOString().slice(0, 10)}. Answer by{" "}
+                  Confirmed {new Date(r.confirmedAt).toISOString().slice(0, 10)}.{" "}
+                  {r.overdue ? "Overdue since" : "Answer by"}{" "}
                   <strong>{new Date(r.dueAt).toISOString().slice(0, 10)}</strong>.
                 </p>
                 <p>

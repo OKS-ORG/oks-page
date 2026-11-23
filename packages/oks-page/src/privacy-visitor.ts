@@ -194,6 +194,8 @@ export interface OpenRequest {
   confirmedAt: number;
   /** The day the answer is due: 30 days after the person confirmed. */
   dueAt: number;
+  /** True when that day has passed. */
+  overdue: boolean;
   /** The address, or null when it can no longer be read (the site's secret was changed). */
   email: string | null;
 }
@@ -242,6 +244,7 @@ export async function listPrivacyRequests(
       kind: String(r["kind"]) as RequestKind,
       confirmedAt,
       dueAt: confirmedAt + ANSWER_DAYS * DAY,
+      overdue: now() >= confirmedAt + ANSWER_DAYS * DAY,
       email,
     };
   });
@@ -297,4 +300,88 @@ export async function purgePrivacyRequests(
     [new Date(now() - ANSWERED_KEEP_DAYS * DAY)],
   );
   return a.length + b.length;
+}
+
+/** The administrators are reminded this many days before the answer is due. */
+export const REMIND_DAYS = 7;
+
+export interface ReminderDeps {
+  /** Puts an email to an administrator in the queue; false when email cannot be sent. */
+  queue: (siteId: string, to: string, subject: string, text: string) => Promise<boolean>;
+  /** The address of the site, for the link in the email; without it the email names the place to look. */
+  origin?: string | undefined;
+  now?: () => number;
+}
+
+/**
+ * Reminds the administrators of a site about confirmed requests that are nearly due or overdue, so the 30 days do not run out
+ * unseen (spec 18, section 5). Each request gets at most two emails: one when 7 days are left and one when it is overdue. The
+ * email names how many requests, never who they are. A reminder is counted as sent only when it was queued for at least one
+ * administrator, so a site that cannot send email is tried again at the next run. Returns how many requests it reminded about.
+ */
+export async function sendPrivacyReminders(
+  runner: SqlRunner,
+  deps: ReminderDeps,
+): Promise<{ soon: number; overdue: number }> {
+  const now = (deps.now ?? Date.now)();
+  const rows = await runner.all(
+    `select "id", "site_id", "email_hash", "confirmed_at", "reminder_stage" from "privacy_requests" where "status" = 'confirmed' and "reminder_stage" < 2`,
+  );
+  const bySite = new Map<string, { id: string; hash: string; stage: 1 | 2 }[]>();
+  for (const r of rows) {
+    const due = new Date(r["confirmed_at"] as string | number | Date).getTime() + ANSWER_DAYS * DAY;
+    const stage: 0 | 1 | 2 = now >= due ? 2 : now >= due - REMIND_DAYS * DAY ? 1 : 0;
+    if (stage === 0 || stage <= Number(r["reminder_stage"])) continue;
+    const list = bySite.get(String(r["site_id"])) ?? [];
+    list.push({ id: String(r["id"]), hash: String(r["email_hash"]), stage });
+    bySite.set(String(r["site_id"]), list);
+  }
+  const done = { soon: 0, overdue: 0 };
+  const where = deps.origin
+    ? `Open Tools > Privacy requests: ${deps.origin.replace(/\/$/, "")}/admin/tools/privacy`
+    : "Open Tools > Privacy requests in your admin.";
+  for (const [siteId, due] of bySite) {
+    const admins = await runner.all(
+      `select u."email" from "site_members" m join "users" u on u."id" = m."user_id"
+        join "roles" r on r."id" = m."role_id" where m."site_id" = ? and r."key" = 'administrator'`,
+      [siteId],
+    );
+    for (const stage of [2, 1] as const) {
+      const these = due.filter((d) => d.stage === stage);
+      if (these.length === 0) continue;
+      const many =
+        these.length === 1
+          ? "A confirmed privacy request"
+          : `${these.length} confirmed privacy requests`;
+      const subject =
+        stage === 2 ? "A privacy request is overdue" : "A privacy request is due soon";
+      const text =
+        stage === 2
+          ? `${many} ${these.length === 1 ? "is" : "are"} past the ${ANSWER_DAYS} days you have to answer. Please answer ${these.length === 1 ? "it" : "them"} now.\n${where}`
+          : `${many} must be answered within ${REMIND_DAYS} days (${ANSWER_DAYS} days after the person confirmed it).\n${where}`;
+      let sent = false;
+      for (const a of admins)
+        if (await deps.queue(siteId, String(a["email"]), subject, text)) sent = true;
+      if (!sent) continue;
+      for (const d of these) {
+        await runner.all(
+          `update "privacy_requests" set "reminder_stage" = ? where "id" = ? and "status" = 'confirmed' and "reminder_stage" < ?`,
+          [stage, d.id, stage],
+        );
+        await audit(
+          runner,
+          siteId,
+          "system",
+          "reminder",
+          "privacy.request_reminder",
+          d.hash,
+          { stage },
+          now,
+        );
+      }
+      if (stage === 2) done.overdue += these.length;
+      else done.soon += these.length;
+    }
+  }
+  return done;
 }

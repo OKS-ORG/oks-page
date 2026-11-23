@@ -1303,6 +1303,8 @@ export const privacyRequests = pgTable(
     }).notNull(),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true, precision: 3, mode: "date" }),
     doneAt: timestamp("done_at", { withTimezone: true, precision: 3, mode: "date" }),
+    // Which reminder the administrators got: 0 none, 1 "due within 7 days", 2 "overdue".
+    reminderStage: integer("reminder_stage").notNull().default(0),
   },
   (t) => [
     check("ck_privacy_requests_id_ulid", sql`length(${t.id}) = 26`),
