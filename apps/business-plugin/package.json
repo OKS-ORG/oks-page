@@ -1,0 +1,134 @@
+{
+  "name": "@oks-page/business-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The first-party Business plugin: business details, opening hours with an \"open now\" line, a contact details block, a payment link, and structured data for search engines",
+  "type": "module",
+  "author": "oks-page",
+  "license": "MIT",
+  "oksPage": {
+    "type": "plugin",
+    "id": "business",
+    "displayName": "Business",
+    "description": "Your business on your site: details, opening hours, contact details and a payment link, and the structured data search engines read. Write opening hours like 09:00-12:00, 13:00-17:00 (empty means closed). Special days like: 2026-12-25 closed Christmas Day; 2026-12-24 09:00-12:00 Christmas Eve.",
+    "permissions": [],
+    "hooks": [],
+    "blocks": [
+      "opening-hours",
+      "contact-details",
+      "payment-link"
+    ],
+    "blockInfo": {
+      "opening-hours": {
+        "label": "Opening hours",
+        "settings": {
+          "title": {
+            "type": "text",
+            "label": "Title above the hours (empty: \"Opening hours\")"
+          }
+        }
+      },
+      "contact-details": {
+        "label": "Contact details",
+        "settings": {
+          "title": {
+            "type": "text",
+            "label": "Title above the details (optional)"
+          }
+        }
+      },
+      "payment-link": {
+        "label": "Payment link",
+        "settings": {
+          "label": {
+            "type": "text",
+            "label": "Button text",
+            "default": "Pay now"
+          },
+          "url": {
+            "type": "text",
+            "label": "Address of your payment page (https://...)"
+          },
+          "note": {
+            "type": "text",
+            "label": "A line under the button (optional)"
+          }
+        }
+      }
+    },
+    "settings": {
+      "name": {
+        "type": "text",
+        "label": "Business name"
+      },
+      "type": {
+        "type": "text",
+        "label": "Kind of business (Restaurant, Dentist, Hair salon, Shop...)"
+      },
+      "street": {
+        "type": "text",
+        "label": "Street and number"
+      },
+      "postal": {
+        "type": "text",
+        "label": "Postal code"
+      },
+      "city": {
+        "type": "text",
+        "label": "Town or city"
+      },
+      "country": {
+        "type": "text",
+        "label": "Country (two letters, for example DE)"
+      },
+      "phone": {
+        "type": "text",
+        "label": "Phone number"
+      },
+      "email": {
+        "type": "text",
+        "label": "Email address"
+      },
+      "social": {
+        "type": "text",
+        "label": "Your pages elsewhere (https:// addresses, separated by commas)"
+      },
+      "time_zone": {
+        "type": "text",
+        "label": "Time zone of the business (for example Europe/Berlin)"
+      },
+      "hours_mon": {
+        "type": "text",
+        "label": "Monday (09:00-12:00, 13:00-17:00; empty means closed)"
+      },
+      "hours_tue": {
+        "type": "text",
+        "label": "Tuesday"
+      },
+      "hours_wed": {
+        "type": "text",
+        "label": "Wednesday"
+      },
+      "hours_thu": {
+        "type": "text",
+        "label": "Thursday"
+      },
+      "hours_fri": {
+        "type": "text",
+        "label": "Friday"
+      },
+      "hours_sat": {
+        "type": "text",
+        "label": "Saturday"
+      },
+      "hours_sun": {
+        "type": "text",
+        "label": "Sunday"
+      },
+      "special_days": {
+        "type": "text",
+        "label": "Special days, separated by semicolons (see the description)"
+      }
+    }
+  }
+}

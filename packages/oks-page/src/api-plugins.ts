@@ -2,11 +2,12 @@
 // plugin file and to add it; PATCH {id, enabled} to switch one on or off; DELETE ?id=... to remove one. Only people who
 // manage plugins.
 import { fetchPluginFromNpm } from "@oks-page/sandbox";
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
-import { FORMS_PLUGIN_TEXT } from "./first-party-plugins";
+import { BUNDLED_PLUGINS } from "./first-party-plugins";
 import { getRunner } from "./db";
 import { refreshPlugins } from "./refresh-cache";
 import {
@@ -104,9 +105,18 @@ export async function POST(request: Request) {
   }
   if (input.action === "bundled") {
     // The plugins that ship with the product: the owner sees the same approval screen as for any plugin file.
-    const result = await previewPlugin(getRunner(), actor, member.siteId, FORMS_PLUGIN_TEXT);
+    const name = String((input as { name?: unknown }).name ?? "forms");
+    const file = Object.prototype.hasOwnProperty.call(BUNDLED_PLUGINS, name)
+      ? BUNDLED_PLUGINS[name]
+      : undefined;
+    if (!file)
+      return reply(
+        { code: "invalid", message: "This plugin does not ship with the product." },
+        400,
+      );
+    const result = await previewPlugin(getRunner(), actor, member.siteId, file);
     if (!result.ok) return reply(result, STATUS[result.code]);
-    return NextResponse.json({ plugin: result.plugin, file: FORMS_PLUGIN_TEXT, source: "file" });
+    return NextResponse.json({ plugin: result.plugin, file, source: "file" });
   }
   if (input.action === "saveSettings") {
     const body = input as { id?: unknown; values?: unknown };
@@ -124,6 +134,8 @@ export async function POST(request: Request) {
       pluginSettingsService(),
     );
     if (!result.ok) return reply(result, STATUS[result.code]);
+    // A plugin's details may be in the structured data of every page (the Business plugin).
+    revalidateTag("settings", { expire: 0 });
     return NextResponse.json({ ok: true });
   }
   if (input.action === "preview") {
@@ -142,6 +154,7 @@ export async function POST(request: Request) {
     const host = await hostOrNull();
     if (host) await syncPlugin(getRunner(), host, member.siteId, result.extensionId);
     refreshPlugins();
+    revalidateTag("settings", { expire: 0 });
     return NextResponse.json({ ok: true, id: result.file.manifest.id, running: host !== null });
   }
   return reply({ code: "invalid", message: "The request was not understood." }, 400);
@@ -169,6 +182,7 @@ export async function PATCH(request: Request) {
   const host = await hostOrNull();
   if (host) await syncPlugin(getRunner(), host, member.siteId, result.extensionId);
   refreshPlugins();
+  revalidateTag("settings", { expire: 0 });
   return NextResponse.json({ ok: true });
 }
 
@@ -183,5 +197,6 @@ export async function DELETE(request: Request) {
   if (!result.ok) return reply(result, STATUS[result.code]);
   host?.disable(id);
   refreshPlugins();
+  revalidateTag("settings", { expire: 0 });
   return NextResponse.json({ ok: true });
 }

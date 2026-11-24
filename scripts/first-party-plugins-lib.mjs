@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 /** The plugins shipped with the product: the folder of the source, and where the plugin file is kept. */
 export const FIRST_PARTY = [
   { dir: "apps/forms-plugin", out: "packages/oks-page/src/forms-plugin-file.json" },
+  { dir: "apps/business-plugin", out: "packages/oks-page/src/business-plugin-file.json" },
 ];
 
 /** True when the packages this needs have been built (`tsc -b`). */

@@ -2,7 +2,13 @@
 // description, the canonical address, Open Graph and Twitter tags, `noindex` when the page asks for it, and JSON-LD. The
 // server build and the export build use the same functions, so both write the same page. Feed links are only for the
 // server build: a static export has no feeds.
-import { excerptOf, jsonLd, postStructuredData, websiteStructuredData } from "@oks-page/core";
+import {
+  excerptOf,
+  jsonLd,
+  localBusinessStructuredData,
+  postStructuredData,
+  websiteStructuredData,
+} from "@oks-page/core";
 import type { Metadata } from "next";
 import type { EntryView, SiteInfo, TermArchive } from "./data/types";
 import { pagePath } from "./paging";
@@ -150,23 +156,29 @@ export function archiveMetadata(
 
 /** The structured data a page carries, if any: the site on the front page, a blog posting (and its breadcrumb) on a post. */
 function structuredDataOf(entry: EntryView, site: SiteInfo): unknown[] {
+  // A business (the Business plugin) says so on every page (spec 19, section 3).
+  const business = site.business ? [localBusinessStructuredData(site.business, origin())] : [];
   if (entry.slug === "home")
     return [
       websiteStructuredData({ origin: origin(), name: site.siteName, description: site.tagline }),
+      ...business,
     ];
   if (entry.type === "post")
-    return postStructuredData({
-      origin: origin(),
-      path: `/${entry.slug}`,
-      title: entry.title,
-      description: entry.description,
-      image: entry.image,
-      publishedAt: entry.publishedAt,
-      modifiedAt: entry.updatedAt,
-      authorName: entry.authorName,
-      siteName: site.siteName,
-    });
-  return [];
+    return [
+      ...postStructuredData({
+        origin: origin(),
+        path: `/${entry.slug}`,
+        title: entry.title,
+        description: entry.description,
+        image: entry.image,
+        publishedAt: entry.publishedAt,
+        modifiedAt: entry.updatedAt,
+        authorName: entry.authorName,
+        siteName: site.siteName,
+      }),
+      ...business,
+    ];
+  return business;
 }
 
 /** The JSON-LD script of a page (nothing when it has none). The text is escaped so it cannot end the tag (SEO-28, SEO-29). */

@@ -329,8 +329,13 @@ for (const { kind, skip } of openers) {
       await retitle(ids["contact"]!, "Contact v2");
       await refresh(a, { tag: `entry:${ids["contact"]}`, mode: "max" });
       expect(await text(b, "/contact")).toContain("Contact"); // the first visit: old page, renewed in the background
-      await new Promise((r) => setTimeout(r, 400));
-      expect(await text(b, "/contact")).toContain("Contact v2");
+      // The renewal runs in the background: wait for it, however busy the machine is.
+      await expect
+        .poll(async () => (await text(b, "/contact")).includes("Contact v2"), {
+          timeout: 10_000,
+          interval: 100,
+        })
+        .toBe(true);
     });
 
     test("a refresh of one entry does not touch the other entry in process B", async () => {
@@ -8153,6 +8158,130 @@ describe.skipIf(!findBrowser())(
         await call(page, "DELETE", `/api/admin/entries/${id}`);
       }
     }, 60_000);
+
+    test("BZ-01, BZ-02, BZ-06: the Business plugin draws the hours, the contact details and a payment link, says whether the business is open now in its own time zone, writes LocalBusiness data into the page, and goes with the plugin", async () => {
+      const page = await signedIn(owner);
+      const bundled = await call(page, "POST", "/api/admin/plugins", {
+        action: "bundled",
+        name: "business",
+      });
+      expect(bundled.status, JSON.stringify(bundled.json)).toBe(200);
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: bundled.json!["file"],
+        approved: [],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const saved = await call(page, "POST", "/api/admin/plugins", {
+        action: "saveSettings",
+        id: "business",
+        values: {
+          name: "Weber Garden Cafe",
+          type: "Cafe",
+          street: "Lindenstrasse 4",
+          postal: "10115",
+          city: "Berlin",
+          country: "DE",
+          phone: "+49 30 1234567",
+          email: "hello@weber.example",
+          time_zone: "Europe/Berlin",
+          hours_mon: "09:00-17:00",
+          hours_tue: "09:00-12:00, 13:00-17:00",
+          special_days: "2026-12-25 closed Christmas Day",
+        },
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Visit us",
+      });
+      const id = String(made.json!["id"]);
+      try {
+        const block = (type: string, props: Record<string, unknown>) => ({
+          id: type.replace(/\W/g, ""),
+          type,
+          props,
+          content: null,
+          children: [],
+        });
+        const put = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Visit us",
+          slugPart: "business-visit",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Come and see us.")),
+            block("business-opening-hours", { title: "When we are open" }),
+            block("business-contact-details", { title: "Find us" }),
+            block("business-payment-link", {
+              label: "Pay your bill",
+              url: "https://pay.example.com/weber",
+            }),
+          ],
+          revision: 1,
+        });
+        expect(put.status, JSON.stringify(put.json)).toBe(200);
+        const shown = await fetch(site.base + "/business-visit").then((r) => r.text());
+        expect(shown).not.toContain("data-oks-plugin-block");
+        expect(shown).toContain('class="opening-hours"');
+        expect(shown).toContain("<caption>When we are open</caption>");
+        expect(shown).toContain('href="mailto:hello@weber.example"');
+        expect(shown).toContain('href="https://pay.example.com/weber"');
+        // No card field anywhere (BZ-06).
+        expect(shown).not.toMatch(/name="(card|cc|cvv|cvc|number)[^"]*"/i);
+        // LocalBusiness data on the page, and on the front page too (BZ-01).
+        const businessData = (html: string) =>
+          [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+            .map((m) => m[1]!)
+            .find((t) => t.includes("LocalBusiness") || t.includes("CafeOrCoffeeShop"));
+        const ld = businessData(shown);
+        expect(ld).toBeDefined();
+        // The page's structured data is a list; the business is one of its items.
+        const items = ([] as unknown[]).concat(JSON.parse(ld!));
+        expect(items).toContainEqual(
+          expect.objectContaining({
+            "@type": "CafeOrCoffeeShop",
+            name: "Weber Garden Cafe",
+            address: expect.objectContaining({ addressLocality: "Berlin", addressCountry: "DE" }),
+          }),
+        );
+        expect(businessData(await fetch(site.base + "/").then((r) => r.text()))).toBeDefined();
+
+        // "Open now" is worked out in the browser, in the business's own time zone, so a cached page stays right (BZ-02).
+        const reader = await browser.newContext({ timezoneId: "America/Los_Angeles" });
+        try {
+          const say = async (iso: string) => {
+            const p = await reader.newPage();
+            await p.clock.install({ time: new Date(iso) });
+            await p.goto(site.base + "/business-visit");
+            const line = p.locator(".opening-hours .open-now");
+            await line.waitFor();
+            const text = (await line.textContent()) ?? "";
+            await p.close();
+            return text;
+          };
+          // Monday 10:00 in Berlin is 01:00 in Los Angeles, where the visitor is.
+          expect(await say("2026-11-23T09:00:00Z")).toBe("Open now, until 17:00");
+          expect(await say("2026-11-23T17:00:00Z")).toBe("Closed now, opens tomorrow at 09:00");
+          // A special day replaces the week: Friday 25 December is closed all day.
+          expect(await say("2026-12-25T10:00:00Z")).toBe(
+            "Closed now (Christmas Day), opens Monday at 09:00",
+          );
+        } finally {
+          await reader.close();
+        }
+        const check = await browser.newPage();
+        await check.goto(site.base + "/business-visit");
+        await check.locator(".opening-hours .open-now").waitFor();
+        expect(await axeViolations(check)).toEqual([]);
+        await check.close();
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=business");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+      // With the plugin gone, the page says nothing about a business and draws none of its blocks.
+      const gone = await fetch(site.base + "/").then((r) => r.text());
+      expect(gone).not.toContain("CafeOrCoffeeShop");
+    }, 120_000);
 
     test("PG-12: the Forms plugin's Messages page lists what visitors sent, filters it, marks and deletes it, and downloads it", async () => {
       const page = await signedIn(owner);

@@ -55,6 +55,7 @@ export * from "./screen-sizes.js";
 export * from "./video-covers.js";
 export * from "./site-settings.js";
 export * from "./consent-texts.js";
+export * from "./business.js";
 export * from "./keeping.js";
 export * from "./legal-drafts.js";
 export * from "./statistics.js";

@@ -104,7 +104,7 @@ for (const { kind, open, skip } of openers) {
         siteId: SITE,
         content: { get: async () => null, update: async () => null },
         workDir,
-        wallMs: 2000,
+        wallMs: 10_000,
         publishWallMs: 1500,
         maxFailures: 50,
         allowPrivateForTests: true,
@@ -184,7 +184,8 @@ for (const { kind, open, skip } of openers) {
         message: "The plugin could not answer this request.",
       });
       expect(JSON.stringify(crashed)).not.toContain("secret detail");
-      const slow = await host.runRoute("routey", "slow", request());
+      // The route sleeps 4 seconds; this call is given 1 (the host default is long, so a busy machine cannot make other calls time out).
+      const slow = await host.runRoute("routey", "slow", request(), { timeoutMs: 1000 });
       expect(slow).toMatchObject({ ok: false, status: 504 });
     });
 
@@ -241,7 +242,7 @@ for (const { kind, open, skip } of openers) {
         siteId: SITE,
         content: { get: async () => null, update: async () => null },
         workDir,
-        wallMs: 2000,
+        wallMs: 10_000,
         allowPrivateForTests: true,
       });
       await fresh.listen();

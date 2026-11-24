@@ -4,6 +4,7 @@
 // pictures in a grid); the script only adds to it, so a visitor without script loses nothing. It adds no other script to
 // the page and sends nothing anywhere.
 import { useEffect } from "react";
+import { openNow, type OpenHours } from "./open-now";
 
 const READY = "data-ready";
 
@@ -235,12 +236,51 @@ export function loadConsentedVideos(root: ParentNode = document): void {
   });
 }
 
+/** Says whether the business is open now in the opening hours block (spec 19, section 4), and marks today's row. */
+function updateOpeningHours(el: HTMLElement): void {
+  let hours: OpenHours;
+  try {
+    hours = JSON.parse(el.dataset["hours"] ?? "") as OpenHours;
+    const now = openNow(hours, Date.now());
+    const line = el.querySelector<HTMLElement>(".open-now");
+    if (line) {
+      line.textContent = now.text;
+      line.hidden = false;
+    }
+    el.querySelectorAll<HTMLElement>("tr[data-day]").forEach((row) => {
+      const today = Number(row.dataset["day"]) === now.day;
+      row.classList.toggle("today", today);
+      if (today) row.setAttribute("aria-current", "date");
+      else row.removeAttribute("aria-current");
+    });
+    // Special days that are over are not shown.
+    el.querySelectorAll<HTMLElement>("li[data-date]").forEach((li) => {
+      li.hidden = (li.dataset["date"] ?? "") < now.date;
+    });
+  } catch {
+    // Not understood (or a time zone this browser does not know): the table says everything it can.
+  }
+}
+
+/** The opening hours blocks say whether the business is open now, and keep saying so while the page stays open. */
+export function enhanceOpeningHours(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>(".opening-hours:not([data-ready])").forEach((el) => {
+    el.setAttribute(READY, "");
+    updateOpeningHours(el);
+  });
+}
+
+function refreshOpeningHours(): void {
+  document.querySelectorAll<HTMLElement>(".opening-hours[data-ready]").forEach(updateOpeningHours);
+}
+
 export function enhanceBlocks(root: ParentNode = document): void {
   // The click that loads a video is handled for the whole page; the mark only says the page has started.
   root
     .querySelectorAll(".video-load:not([data-ready])")
     .forEach((el) => el.setAttribute(READY, ""));
   loadConsentedVideos(root);
+  enhanceOpeningHours(root);
   enhanceTabs(root);
   enhanceSliders(root);
   enhanceGalleries(root);
@@ -261,7 +301,9 @@ export function BlockBehaviour() {
     });
     watch.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("click", openVideo);
+    const clock = window.setInterval(refreshOpeningHours, 60_000);
     return () => {
+      window.clearInterval(clock);
       watch.disconnect();
       document.removeEventListener("click", openVideo);
     };

@@ -106,12 +106,12 @@ export function PluginsScreen({
     setAdding({ text: body.file, preview: body.plugin, source: body.source ?? "file" });
   }
 
-  async function addBundled() {
+  async function addBundled(name: string, title: string) {
     setProblem(null);
     const response = await fetch("/api/admin/plugins", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "bundled" }),
+      body: JSON.stringify({ action: "bundled", name }),
     });
     const body = (await response.json().catch(() => null)) as {
       plugin?: PluginPreview;
@@ -121,7 +121,7 @@ export function PluginsScreen({
     } | null;
     if (!response.ok || !body?.plugin || !body.file) {
       setAdding(null);
-      setProblem(body?.error?.message ?? "Forms could not be read.");
+      setProblem(body?.error?.message ?? `${title} could not be read.`);
       return;
     }
     setApproved(body.plugin.permissions.map((p) => p.permission));
@@ -203,7 +203,13 @@ export function PluginsScreen({
       {plugins.some((p) => p.id === "forms") ? null : (
         <p>
           Ready-made: <strong>Forms</strong>, contact forms for your pages.{" "}
-          <Button onPress={() => void addBundled()}>Add Forms</Button>
+          <Button onPress={() => void addBundled("forms", "Forms")}>Add Forms</Button>
+        </p>
+      )}
+      {plugins.some((p) => p.id === "business") ? null : (
+        <p>
+          Ready-made: <strong>Business</strong>, your details, opening hours and a payment link.{" "}
+          <Button onPress={() => void addBundled("business", "Business")}>Add Business</Button>
         </p>
       )}
       <p>

@@ -1,3 +1,4 @@
+import type { BusinessInfo } from "@oks-page/core";
 export interface EntryView {
   id: string;
   title: string;
@@ -44,6 +45,8 @@ export interface SiteInfo {
   dir: "ltr" | "rtl";
   /** The site icon (Settings > General), or null. */
   icon: { url: string; type: string } | null;
+  /** The business the Business plugin describes, for the structured data of every page (spec 19, section 3). */
+  business?: BusinessInfo | null;
 }
 
 /** A post in a list of the newest posts. */

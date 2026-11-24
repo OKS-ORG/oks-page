@@ -20,6 +20,18 @@ export {
   type FormFieldType,
   type FormProps,
 } from "./form.js";
+export {
+  DAY_NAMES,
+  HOURS_KEYS,
+  isRealDate,
+  isTimeZone,
+  minutesOf,
+  readHours,
+  type HoursDay,
+  type HoursProps,
+  type HoursSpan,
+  type HoursSpecial,
+} from "./hours.js";
 export { effectiveStyle, positionWarnings } from "./position.js";
 export {
   BREAKPOINTS,

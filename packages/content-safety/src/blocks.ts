@@ -4,6 +4,7 @@ import { sanitizeProps } from "./props.js";
 import { checkStyle, convertPhysicalStyle } from "./styles.js";
 import { isSafeUrl, isSafeVideoUrl, isSafeColor, looksLikeScriptUrl } from "./schemes.js";
 import { FORM_KEYS, readForm } from "./form.js";
+import { HOURS_KEYS, readHours } from "./hours.js";
 
 export interface Block {
   id: string;
@@ -50,6 +51,7 @@ const BUILT_IN_TYPES = new Set([
   "map",
   "socialLinks",
   "form",
+  "openingHours",
   "accordion",
   "tabs",
   "tab",
@@ -153,6 +155,13 @@ function checkKnownTypeProps(type: string, props: Record<string, unknown>, repai
     const form = readForm(props);
     for (const key of FORM_KEYS) delete props[key];
     if (form) Object.assign(props, form);
+    else repairs.add("removed_link");
+  }
+  if (type === "openingHours") {
+    // Only real times, real days and a real time zone are kept; nothing safe to draw removes the block's settings.
+    const hours = readHours(props);
+    for (const key of HOURS_KEYS) delete props[key];
+    if (hours) Object.assign(props, hours);
     else repairs.add("removed_link");
   }
   if (type === "video") {

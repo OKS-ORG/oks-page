@@ -13,7 +13,9 @@ import {
   isSafeColor,
   isSafeUrl,
   isSafeVideoUrl,
+  DAY_NAMES,
   readForm,
+  readHours,
   styleClass,
   type Block,
   type Style,
@@ -100,6 +102,40 @@ const inlineText = (content: unknown): string =>
         .map((item) => (item && typeof item === "object" ? str((item as Run).text) : ""))
         .join("")
     : "";
+
+// ---- opening hours: the week as a table, special days, and a line the page script fills in (spec 19, section 4) ----
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `2026-12-25` as `25 Dec 2026`. */
+const dateWords = (d: string): string =>
+  `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+
+const spanWords = (times: [string, string][]): string =>
+  times.map(([a, b]) => `${a}\u2013${b === "24:00" ? "00:00" : b}`).join(", ");
+
+function hoursHtml(block: Block): string {
+  const hours = readHours(props(block));
+  if (!hours) return "";
+  const rows = DAY_NAMES.map((name, day) => {
+    const found = hours.week.find((w) => w.day === day);
+    return `<tr data-day="${day}"><th scope="row">${name}</th><td>${found ? escapeHtml(spanWords(found.times)) : "Closed"}</td></tr>`;
+  }).join("");
+  const special = hours.special.length
+    ? `<ul class="special-days">${hours.special
+        .map(
+          (s) =>
+            `<li data-date="${s.date}">${dateWords(s.date)}: ${s.times.length ? escapeHtml(spanWords(s.times)) : "Closed"}${s.note ? ` (${escapeHtml(s.note)})` : ""}</li>`,
+        )
+        .join("")}</ul>`
+    : "";
+  // The page script reads the same hours from the attribute to say whether the business is open now, in the business's own
+  // time zone, so a cached page stays right. Without script the table and the special days are all there is.
+  const data = escapeHtml(
+    JSON.stringify({ tz: hours.tz, week: hours.week, special: hours.special }),
+  );
+  return `<div class="opening-hours" data-hours="${data}"><table><caption>${escapeHtml(hours.title || "Opening hours")}</caption><tbody>${rows}</tbody></table><p class="open-now" hidden></p>${special}</div>`;
+}
 
 // ---- form: fields with real labels, sent to one of a plugin's own addresses (spec 16) ----
 
@@ -432,6 +468,8 @@ function blockHtml(block: Block, ctx: Context): string {
     }
     case "form":
       return formHtml(block);
+    case "openingHours":
+      return hoursHtml(block);
     case "map": {
       // Nothing is sent to a map company until the visitor follows the link (spec 06, 14.3).
       const query = str(p["query"]).trim().slice(0, 200);
@@ -607,6 +645,11 @@ function blockText(block: Block, depth: number, lines: string[]): void {
       break;
     case "socialLinks":
       break;
+    case "openingHours": {
+      const hours = readHours(props(block));
+      if (hours) push(hours.title || "Opening hours");
+      break;
+    }
     default:
       push(inlineText(block.content));
   }

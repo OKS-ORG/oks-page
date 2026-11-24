@@ -26,6 +26,7 @@ import {
   readEntrySeo,
   type PublicMenuItem,
 } from "@oks-page/core";
+import { loadBusinessInfo } from "../business-info";
 import { getRunner, getSiteId } from "../db";
 import { drawPluginBlocks } from "../plugin-blocks";
 import { mediaContext } from "../uploads";
@@ -105,6 +106,7 @@ export async function loadSiteInfo(): Promise<SiteInfo> {
     lang: language.tag,
     dir: directionOf(language),
     icon: icon ? { url: mediaContext().storage.publicUrl(icon.key), type: icon.mime } : null,
+    business: await loadBusinessInfo(getRunner(), siteId),
   };
 }
 

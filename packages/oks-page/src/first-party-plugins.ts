@@ -5,11 +5,21 @@
 import type { Actor } from "@oks-page/core";
 import type { SqlRunner } from "@oks-page/db";
 import type { PluginSettings } from "@oks-page/sandbox";
+import businessFile from "./business-plugin-file.json";
 import formsFile from "./forms-plugin-file.json";
 import { installPlugin, savePluginSettings } from "./plugin-admin";
 
 /** The text of the Forms plugin file, as `oks pack` writes it. */
 export const FORMS_PLUGIN_TEXT: string = JSON.stringify(formsFile);
+
+/** The text of the Business plugin file (spec 19). It is offered in Tools > Plugins; a site adds it when it is for a business. */
+export const BUSINESS_PLUGIN_TEXT: string = JSON.stringify(businessFile);
+
+/** The plugins that ship with the product, by the name Tools > Plugins asks for. */
+export const BUNDLED_PLUGINS: Record<string, string> = {
+  forms: FORMS_PLUGIN_TEXT,
+  business: BUSINESS_PLUGIN_TEXT,
+};
 
 export type DefaultPluginsResult = { ok: true } | { ok: false; message: string };
 
