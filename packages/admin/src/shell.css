@@ -272,3 +272,10 @@
   inline-size: auto;
   object-fit: contain;
 }
+
+/* Plain links in the admin take the primary color's step 700, which reads on the page in both light and dark mode (the browser's
+   own blue and purple do not read on a dark page). With a brand color (white-label) the links follow it. */
+.oks-shell main a:not([class]),
+.oks-footer a {
+  color: var(--oks-color-primary-700);
+}

@@ -25,6 +25,7 @@ export function BrandingScreen({
     logoId: initial.logoId ?? "",
     helpUrl: initial.helpUrl,
     footer: initial.footer,
+    color: initial.color,
   });
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -80,6 +81,22 @@ export function BrandingScreen({
           description="The logo, the help link and the footer line are the Agency tier's tools. You can add a key in Settings > Licence keys. Handing a site to a client never needs one."
         />
       )}
+      <p>
+        <label>
+          Brand color (like #1a5fb4; the admin makes light and dark colors from it that stay easy to
+          read)
+          <br />
+          <input
+            type="text"
+            value={values.color}
+            disabled={!agency}
+            maxLength={7}
+            placeholder="#1a5fb4"
+            onChange={(e) => setValues({ ...values, color: e.target.value })}
+            style={FIELD}
+          />
+        </label>
+      </p>
       <p>
         <label>
           Logo (a picture from your library)

@@ -312,6 +312,85 @@ export function colorScale(
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// The admin's brand color (spec 11, section 5.1)
+// ---------------------------------------------------------------------------------------------------------------------
+
+type Scale = Record<(typeof COLOR_STEPS)[number], string>;
+
+const buildScale = (C: number, h: number, lightness: number[]): Scale => {
+  const out = {} as Scale;
+  COLOR_STEPS.forEach((step, i) => {
+    out[step] = fromOklch(lightness[i]!, C * CHROMA[i]!, h);
+  });
+  return out;
+};
+
+/**
+ * Whether a scale gives an admin that passes the contrast checks (spec 11, section 5.1): the solid button (step 700) reads
+ * against its text (white in light mode, black in dark mode, 4.5:1), the soft button's text (700 and 800) reads against its
+ * background (step 100, 4.5:1), and step 600 reads against step 50 (3:1).
+ */
+export function brandScaleOk(scale: Scale, mode: "light" | "dark"): boolean {
+  const text = mode === "light" ? "#ffffff" : "#000000";
+  return (
+    contrastRatio(scale[700], text) >= 4.5 &&
+    contrastRatio(scale[700], scale[100]) >= 4.5 &&
+    contrastRatio(scale[800], scale[100]) >= 4.5 &&
+    contrastRatio(scale[600], scale[50]) >= 3
+  );
+}
+
+/**
+ * The two scales (light and dark mode) of one brand color. One scale in both modes fails: the dark mode of oks-ui reads the same
+ * token names but expects a mirrored scale. Each scale starts from the usual one and has the steps that matter moved, a little
+ * at a time, until `brandScaleOk` says yes, so even a neon green, a pure yellow, white or black gives an accessible admin.
+ * Returns null when the color is not "#rrggbb".
+ */
+export function brandScales(hex: string): { light: Scale; dark: Scale } | null {
+  const rgb = parseHex(hex);
+  if (!rgb) return null;
+  const { C, h } = toOklch(rgb);
+  const fix = (mode: "light" | "dark"): Scale => {
+    // Lightness of each step. In dark mode the usual scale runs the other way.
+    const L = mode === "light" ? [...LIGHTNESS] : [...LIGHTNESS].reverse();
+    // Darker steps are lower in light mode and higher in dark mode: the way to more contrast.
+    const toward = mode === "light" ? -0.01 : 0.01;
+    const clamp = (v: number) => Math.min(0.97, Math.max(0.05, v));
+    for (let pass = 0; pass < 120; pass += 1) {
+      const scale = buildScale(C, h, L);
+      if (brandScaleOk(scale, mode)) return scale;
+      const text = mode === "light" ? "#ffffff" : "#000000";
+      if (contrastRatio(scale[700], text) < 4.5 || contrastRatio(scale[700], scale[100]) < 4.5)
+        L[7] = clamp(L[7]! + toward);
+      if (contrastRatio(scale[800], scale[100]) < 4.5) L[8] = clamp(L[8]! + toward);
+      if (contrastRatio(scale[600], scale[50]) < 3) L[6] = clamp(L[6]! + toward);
+      // Keep the steps in order: 800 is further than 700, and 700 further than 600.
+      if (mode === "light") {
+        L[7] = Math.min(L[7]!, L[6]! - 0.02);
+        L[8] = Math.min(L[8]!, L[7]! - 0.02);
+      } else {
+        L[7] = Math.max(L[7]!, L[6]! + 0.02);
+        L[8] = Math.max(L[8]!, L[7]! + 0.02);
+      }
+    }
+    return buildScale(C, h, L);
+  };
+  return { light: fix("light"), dark: fix("dark") };
+}
+
+/**
+ * The style rules that give the admin a brand color: the light scale for the page, the dark one under `data-theme="dark"`.
+ * The names are oks-ui's own palette tokens, so every button, link and tab follows. Empty when the color is not "#rrggbb".
+ */
+export function brandCss(hex: string): string {
+  const scales = brandScales(hex);
+  if (!scales) return "";
+  const rules = (s: Scale) =>
+    COLOR_STEPS.map((step) => `--oks-palette-primary-${step}:${s[step]};`).join("");
+  return `:root{${rules(scales.light)}}\n:root[data-theme="dark"]{${rules(scales.dark)}}`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // The owner's simple controls
 // ---------------------------------------------------------------------------------------------------------------------
 

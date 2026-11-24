@@ -14,7 +14,13 @@ async function loadBrand(): Promise<AdminBrandValue> {
     const runner = getRunner();
     const siteId = await getSiteId();
     const wl = await loadWhiteLabel(runner, siteId);
-    if (wl.name === "" && wl.logoId === null && wl.helpUrl === "" && wl.footer === "")
+    if (
+      wl.name === "" &&
+      wl.logoId === null &&
+      wl.helpUrl === "" &&
+      wl.footer === "" &&
+      wl.color === ""
+    )
       return NO_BRAND;
     const host = ((await headers()).get("host") ?? "").replace(/:\d+$/, "");
     const agency = agencyActive(

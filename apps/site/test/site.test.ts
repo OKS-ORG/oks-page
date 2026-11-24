@@ -6608,7 +6608,17 @@ describe.skipIf(!findBrowser())(
         expect(await axeViolations(page), `at ${width} px`).toEqual([]);
       }
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.getByLabel("Published (everyone sees it)").check({ force: true });
+      // The page's script may still be starting on a busy machine and reset the first click: click until it holds.
+      const published = page.getByLabel("Published (everyone sees it)");
+      await expect
+        .poll(
+          async () => {
+            await published.check({ force: true, timeout: 3000 }).catch(() => undefined);
+            return published.isChecked();
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true);
       await page.getByRole("button", { name: "Save" }).click();
       await expect
         .poll(() => page.locator(".oks-entry-actions [role=status]").textContent())
@@ -8528,7 +8538,10 @@ describe.skipIf(!findBrowser())(
         expect(ics.match(/BEGIN:VEVENT/g)?.length).toBe(1);
         expect(ics).toContain("SUMMARY:Haircut - Mia");
         expect((await feed("/api/oks/plugins/business/calendar")).status).toBe(404);
-        expect((await feed(path.slice(0, -1) + "0")).status).toBe(404);
+        // One letter of the secret changed (to a different one, whatever the last letter is).
+        const changed = path.slice(0, -1) + (path.endsWith("0") ? "1" : "0");
+        expect(changed).not.toBe(path);
+        expect((await feed(changed)).status).toBe(404);
         expect(ics).not.toContain("bo@example.com");
       } finally {
         await call(page, "DELETE", "/api/admin/plugins?id=business");
@@ -14208,13 +14221,22 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       const axe = async () => {
         await page.addScriptTag({ content: (await import("axe-core")).default.source });
-        return page.evaluate(async () =>
-          (
-            await (
-              window as unknown as { axe: { run: () => Promise<{ violations: { id: string }[] }> } }
-            ).axe.run()
-          ).violations.map((v) => v.id),
-        );
+        // Each problem says what it is and where, so a failure can be read at once.
+        return page.evaluate(async () => {
+          type Node = { html: string; any: { message: string }[] };
+          const result = await (
+            window as unknown as {
+              axe: { run: () => Promise<{ violations: { id: string; nodes: Node[] }[] }> };
+            }
+          ).axe.run();
+          return result.violations.map(
+            (v) =>
+              `${v.id}: ${v.nodes
+                .slice(0, 3)
+                .map((n) => `${n.html.slice(0, 120)} (${n.any[0]?.message ?? ""})`)
+                .join(" | ")}`,
+          );
+        });
       };
       const put = (data: Record<string, unknown>) =>
         page.request.put(site.base + "/api/admin/settings/branding", {
@@ -14305,6 +14327,51 @@ describe.skipIf(!findBrowser())(
         "https://weber.example/help",
       );
       expect(await axe()).toEqual([]);
+
+      // The brand color (section 5.1): hard colors in both modes still give an accessible admin, and a bad one is refused.
+      const bad = await put({ name: "Weber Studio", color: "red" });
+      expect(bad.status()).toBe(400);
+      expect(JSON.stringify(await bad.json())).toContain("Brand color: write it like #1a5fb4");
+      for (const color of ["#39ff14", "#ffff00", "#ffffff", "#000000", "#808080", "#3b82f6"]) {
+        const set = await put({ name: "Weber Studio", color });
+        expect(set.status(), color).toBe(200);
+        for (const path of ["/admin", "/admin/settings/branding"]) {
+          await page.goto(site.base + path);
+          await page.getByRole("heading", { level: 1 }).waitFor();
+          // The brand scale is in the page.
+          expect(
+            await page.evaluate(() =>
+              getComputedStyle(document.documentElement)
+                .getPropertyValue("--oks-palette-primary-700")
+                .trim(),
+            ),
+          ).toMatch(/^#[0-9a-f]{6}$/);
+          for (const mode of ["light", "dark"] as const) {
+            await page.evaluate(
+              (m) => document.documentElement.setAttribute("data-theme", m),
+              mode,
+            );
+            expect(await axe(), `${color} ${mode} ${path}`).toEqual([]);
+          }
+        }
+        // The dark scale differs from the light one.
+        const both = await page.evaluate(() => {
+          const read = (mode: string) => {
+            document.documentElement.setAttribute("data-theme", mode);
+            return getComputedStyle(document.documentElement)
+              .getPropertyValue("--oks-palette-primary-700")
+              .trim();
+          };
+          return [read("light"), read("dark")];
+        });
+        expect(both[0], color).not.toBe(both[1]);
+        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+      }
+      // Cleared again, the product's own colors are back (no brand rules in the page).
+      expect((await put({ name: "Weber Studio", color: "" })).status()).toBe(200);
+      await page.goto(site.base + "/admin");
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      expect(await page.locator("style", { hasText: "--oks-palette-primary-700" }).count()).toBe(0);
 
       // The key goes: the name stays, the extras are not shown any more (the site keeps working).
       expect(

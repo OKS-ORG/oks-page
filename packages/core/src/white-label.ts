@@ -5,6 +5,7 @@
 import type { SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
 import { bestLicenceState, type LicencePayload } from "./licence.js";
+import { brandCss } from "./theme.js";
 
 export const WHITE_LABEL_KEY = "white_label";
 /** The licence item the paid white-label features belong to. */
@@ -21,12 +22,21 @@ export interface WhiteLabel {
   helpUrl: string;
   /** A line in the admin's footer instead of "Developed with …" (up to 120 characters), or empty. Agency tier. */
   footer: string;
+  /** The brand color as "#rrggbb", or empty for the product's own. Agency tier. */
+  color: string;
 }
 
-export const NO_WHITE_LABEL: WhiteLabel = { name: "", logoId: null, helpUrl: "", footer: "" };
+export const NO_WHITE_LABEL: WhiteLabel = {
+  name: "",
+  logoId: null,
+  helpUrl: "",
+  footer: "",
+  color: "",
+};
 
 const ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const HTTPS = /^https:\/\/[^\s"'<>\\]{3,300}$/;
+const COLOR = /^#[0-9a-fA-F]{6}$/;
 const MAILTO = /^mailto:[^\s@"'<>\\]{1,64}@[^\s@"'<>\\]{1,190}\.[^\s@"'<>\\]{2,}$/;
 
 /** Text made safe to show: tags and control characters removed, spaces tidied. */
@@ -63,6 +73,7 @@ export function effectiveWhiteLabel(stored: unknown): WhiteLabel {
     logoId: typeof v["logoId"] === "string" && ID.test(v["logoId"]) ? v["logoId"] : null,
     helpUrl: HTTPS.test(help) || MAILTO.test(help) ? help : "",
     footer: footer.length <= FOOTER_MAX ? footer : "",
+    color: typeof v["color"] === "string" && COLOR.test(v["color"]) ? v["color"].toLowerCase() : "",
   };
 }
 
@@ -121,7 +132,7 @@ export async function saveWhiteLabel(
     return { ok: false, code: "invalid", message: "The request was not understood." };
   const given = input as Record<string, unknown>;
   const unknown = Object.keys(given).find(
-    (k) => !["name", "logoId", "helpUrl", "footer"].includes(k),
+    (k) => !["name", "logoId", "helpUrl", "footer", "color"].includes(k),
   );
   if (unknown)
     return {
@@ -158,6 +169,13 @@ export async function saveWhiteLabel(
     return bad("helpUrl", "Help link: use an address that starts with https:// or mailto:.");
   if (helpUrl !== "" && !agency) return need("helpUrl");
 
+  const rawColor = given["color"] ?? "";
+  if (typeof rawColor !== "string") return bad("color", "Brand color: choose a color.");
+  const color = rawColor.trim().toLowerCase();
+  if (color !== "" && !COLOR.test(color))
+    return bad("color", "Brand color: write it like #1a5fb4 (a # and six letters or digits).");
+  if (color !== "" && !agency) return need("color");
+
   const rawLogo = given["logoId"] ?? null;
   let logoId: string | null = null;
   if (rawLogo !== null && rawLogo !== "") {
@@ -172,7 +190,7 @@ export async function saveWhiteLabel(
     logoId = rawLogo;
   }
 
-  const value: WhiteLabel = { name, logoId, helpUrl, footer };
+  const value: WhiteLabel = { name, logoId, helpUrl, footer, color };
   await runner.all(
     `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
      on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,
@@ -187,6 +205,8 @@ export interface AdminBrand {
   logoUrl: string | null;
   helpHref: string | null;
   footerText: string | null;
+  /** The style rules of the brand color (the light and the dark scale), or null. */
+  colorCss: string | null;
 }
 
 export function adminBrand(wl: WhiteLabel, agency: boolean, logoUrl: string | null): AdminBrand {
@@ -195,5 +215,6 @@ export function adminBrand(wl: WhiteLabel, agency: boolean, logoUrl: string | nu
     logoUrl: agency && wl.logoId ? logoUrl : null,
     helpHref: agency && wl.helpUrl !== "" ? wl.helpUrl : null,
     footerText: agency && wl.footer !== "" ? wl.footer : null,
+    colorCss: agency && wl.color !== "" ? brandCss(wl.color) || null : null,
   };
 }

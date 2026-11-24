@@ -66,6 +66,7 @@ describe("what is shown", () => {
         logoId: "not-an-id",
         helpUrl: "javascript:alert(1)",
         footer: "y".repeat(121),
+        color: "red",
       }),
     ).toEqual(NO_WHITE_LABEL);
     expect(
@@ -79,6 +80,9 @@ describe("what is shown", () => {
       helpUrl: "mailto:help@weber.example",
       footer: "Made by Weber",
     });
+    expect(effectiveWhiteLabel({ color: "#1A5FB4" }).color).toBe("#1a5fb4");
+    for (const bad of ["red", "#12345", "#1234567", "1a5fb4", "#gggggg", 5, null])
+      expect(effectiveWhiteLabel({ color: bad }).color, String(bad)).toBe("");
   });
 
   test("the name always shows; the logo, help link and footer only with an Agency key", () => {
@@ -87,24 +91,30 @@ describe("what is shown", () => {
       logoId: "L".repeat(26),
       helpUrl: "https://weber.example/help",
       footer: "Made by Weber",
+      color: "#1a5fb4",
     };
-    expect(adminBrand(wl, true, "/uploads/logo.png")).toEqual({
+    const shown = adminBrand(wl, true, "/uploads/logo.png");
+    expect(shown).toMatchObject({
       name: "Weber Studio",
       logoUrl: "/uploads/logo.png",
       helpHref: "https://weber.example/help",
       footerText: "Made by Weber",
     });
+    expect(shown.colorCss).toContain(":root{--oks-palette-primary-50:");
+    expect(shown.colorCss).toContain(':root[data-theme="dark"]{--oks-palette-primary-50:');
     expect(adminBrand(wl, false, "/uploads/logo.png")).toEqual({
       name: "Weber Studio",
       logoUrl: null,
       helpHref: null,
       footerText: null,
+      colorCss: null,
     });
     expect(adminBrand(NO_WHITE_LABEL, true, null)).toEqual({
       name: "",
       logoUrl: null,
       helpHref: null,
       footerText: null,
+      colorCss: null,
     });
   });
 });
@@ -172,6 +182,7 @@ for (const { kind, open, skip } of openers) {
         ["logoId", logo],
         ["helpUrl", "https://weber.example/help"],
         ["footer", "Made by Weber"],
+        ["color", "#1a5fb4"],
       ] as const) {
         const r = await saveWhiteLabel(
           db.runner,
@@ -193,6 +204,7 @@ for (const { kind, open, skip } of openers) {
           logoId: logo,
           helpUrl: "https://weber.example/help",
           footer: "Made by Weber",
+          color: "#1A5FB4",
         },
         true,
       );
@@ -202,13 +214,14 @@ for (const { kind, open, skip } of openers) {
         logoId: logo,
         helpUrl: "https://weber.example/help",
         footer: "Made by Weber",
+        color: "#1a5fb4",
       });
       // The key ends: the owner may clear the extras (the name stays) without a key.
       const cleared = await saveWhiteLabel(
         db.runner,
         admin,
         siteId,
-        { name: "Weber Studio", logoId: null, helpUrl: "", footer: "" },
+        { name: "Weber Studio", logoId: null, helpUrl: "", footer: "", color: "" },
         false,
       );
       expect(cleared.ok).toBe(true);
@@ -225,6 +238,9 @@ for (const { kind, open, skip } of openers) {
         "Admin name: use at most 40 characters.",
       ],
       ["a name that is not words", { name: 5 }, "Admin name: write some words."],
+      ["a color that is a word", { color: "red" }, "Brand color: write it like #1a5fb4"],
+      ["a color that is too short", { color: "#12345" }, "Brand color: write it like #1a5fb4"],
+      ["a color that is not a color", { color: "#gggggg" }, "Brand color: write it like #1a5fb4"],
       [
         "a footer that is too long",
         { footer: "y".repeat(121) },
