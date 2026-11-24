@@ -1317,6 +1317,32 @@ export const privacyRequests = pgTable(
   ],
 );
 
+// What a visitor chose in the consent notice (spec 18, section 2): when, which purposes, and the notice version, as proof
+// that consent was asked for. Nothing in a line points to a person: no address, no cookie, no visitor number.
+export const consentRecords = pgTable(
+  "consent_records",
+  {
+    id: text("id").primaryKey().notNull(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    // The purposes that were accepted, for example "media,statistics"; empty when the visitor refused all.
+    choice: text("choice").notNull(),
+    // Which purposes the notice asked about at that time, so a record can be read later.
+    version: text("version").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_consent_records_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_consent_records_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    index("ix_consent_records_site").on(t.siteId, t.createdAt),
+  ],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -1367,4 +1393,5 @@ export const tableNames = [
   "api_keys",
   "cache_tags",
   "privacy_requests",
+  "consent_records",
 ] as const;

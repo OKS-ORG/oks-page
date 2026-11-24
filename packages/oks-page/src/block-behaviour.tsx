@@ -207,17 +207,32 @@ function openVideo(event: MouseEvent): void {
   if (!link || event.defaultPrevented || event.button !== 0) return;
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const holder = link.closest<HTMLElement>(".video-load");
-  const player = holder?.dataset["player"] ?? "";
-  if (!holder || !PLAYER.test(player)) return;
+  if (!holder || !loadPlayer(holder, true)) return;
   event.preventDefault();
+}
+
+/** Puts the player in the place of a video's picture. Returns false (and changes nothing) for an address that is not allowed. */
+function loadPlayer(holder: HTMLElement, clicked: boolean): boolean {
+  const player = holder.dataset["player"] ?? "";
+  if (!PLAYER.test(player)) return false;
   const frame = document.createElement("iframe");
-  frame.src = `${player}?autoplay=1`;
+  frame.src = clicked ? `${player}?autoplay=1` : player;
   frame.title = holder.dataset["title"] || "Video";
   frame.allow = "autoplay; fullscreen; picture-in-picture";
   frame.allowFullscreen = true;
   frame.referrerPolicy = "strict-origin-when-cross-origin";
   holder.replaceChildren(frame);
-  frame.focus();
+  if (clicked) frame.focus();
+  return true;
+}
+
+/** Videos the owner set to load at once load as soon as the visitor has accepted "videos and maps" (spec 18, section 2). */
+export function loadConsentedVideos(root: ParentNode = document): void {
+  if (document.documentElement.dataset["consentMedia"] !== "1") return;
+  root.querySelectorAll<HTMLElement>('.video-load[data-consent="media"]').forEach((holder) => {
+    if (holder.querySelector("iframe")) return;
+    loadPlayer(holder, false);
+  });
 }
 
 export function enhanceBlocks(root: ParentNode = document): void {
@@ -225,6 +240,7 @@ export function enhanceBlocks(root: ParentNode = document): void {
   root
     .querySelectorAll(".video-load:not([data-ready])")
     .forEach((el) => el.setAttribute(READY, ""));
+  loadConsentedVideos(root);
   enhanceTabs(root);
   enhanceSliders(root);
   enhanceGalleries(root);

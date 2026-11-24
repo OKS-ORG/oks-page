@@ -312,17 +312,18 @@ function blockHtml(block: Block, ctx: Context): string {
       const video = videoOf(str(p["src"]));
       if (!video) return "";
       const title = str(p["caption"]) || "Video";
-      // The owner may choose to load the player at once; then the page asks the company the moment it opens.
-      if (p["loadNow"] === true)
-        return `<iframe src="${escapeHtml(video.player)}" title="${escapeHtml(title)}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
-      // Otherwise nothing is asked of the company before a click (spec 06, 14.3, D126): a picture stored on this site (when
-      // the server could fetch one) and a link that works without script; the page script swaps in the player on a click.
+      // Nothing is asked of the company before a click (spec 06, 14.3, D126): a picture stored on this site (when the
+      // server could fetch one) and a link that works without script; the page script swaps in the player on a click.
+      // The owner may choose to load the player at once (`loadNow`); that needs the visitor's consent first (spec 18,
+      // section 2), so the page only marks the video and the consent notice's script loads it once the visitor accepts
+      // "videos and maps". Without script or consent it stays a click-to-load video.
+      const consent = p["loadNow"] === true ? ' data-consent="media"' : "";
       const cover = str(p["cover"]);
       const picture =
         /^\/uploads\/[\w./-]{1,200}$/.test(cover) && !cover.includes("..")
           ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy">`
           : "";
-      return `<div class="video-load" data-player="${escapeHtml(video.player)}" data-title="${escapeHtml(title)}"><a class="video-open" href="${escapeHtml(video.watch)}" rel="noopener noreferrer">${picture}<span class="video-title">${escapeHtml(title)}</span><span class="video-note">Play the video. It loads from ${video.company}.</span></a></div>`;
+      return `<div class="video-load" data-player="${escapeHtml(video.player)}" data-title="${escapeHtml(title)}"${consent}><a class="video-open" href="${escapeHtml(video.watch)}" rel="noopener noreferrer">${picture}<span class="video-title">${escapeHtml(title)}</span><span class="video-note">Play the video. It loads from ${video.company}.</span></a></div>`;
     }
     case "embed": {
       const url = str(p["url"]).trim();

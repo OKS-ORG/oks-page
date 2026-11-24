@@ -459,6 +459,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { POST } from ${from("api-privacy-request")};\n`,
     },
     {
+      path: "app/api/privacy/consent/route.ts",
+      content: `export { GET, POST } from ${from("api-consent")};\n`,
+    },
+    {
       path: "app/api/privacy/confirm/route.ts",
       content: `export { POST } from ${from("api-privacy-confirm")};\n`,
     },

@@ -392,6 +392,13 @@ export async function seedEverything(db: TestDb): Promise<void> {
     confirmed_at: T2,
     done_at: null,
   });
+  await ins(db, "consent_records", {
+    id: id(902),
+    site_id: site,
+    choice: "media",
+    version: "media,statistics",
+    created_at: T,
+  });
   await ins(db, "extension_settings", {
     extension_id: ext,
     key: "units",

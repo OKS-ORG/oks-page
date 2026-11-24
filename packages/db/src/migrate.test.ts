@@ -221,6 +221,7 @@ describe("sqlite migrations", () => {
       "0012_yellow_quasimodo",
       "0013_bizarre_james_howlett",
       "0014_icy_dark_beast",
+      "0015_soft_random",
     ]);
   });
 });
@@ -366,6 +367,7 @@ describe.skipIf(!pgAvailable)("postgres migrations", () => {
       "0012_chilly_sabra",
       "0013_graceful_bushwacker",
       "0014_dashing_thunderball",
+      "0015_dusty_nico_minoru",
     ]);
   });
 });

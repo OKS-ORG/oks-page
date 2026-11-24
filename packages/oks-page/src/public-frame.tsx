@@ -5,6 +5,7 @@ import type { PublicMenuItem } from "@oks-page/core";
 import { COLOR_MODE_SCRIPT, needsColorMode } from "@oks-page/core/theme";
 import { BlockBehaviour } from "./block-behaviour";
 import { ColorModeSwitch } from "./color-mode-switch";
+import { ConsentNotice } from "./consent-notice";
 import type { Look } from "./data/types";
 import type { ReactNode } from "react";
 
@@ -101,6 +102,7 @@ export async function PublicFrame({
           </nav>
         </footer>
       ) : null}
+      <ConsentNotice />
     </div>
   );
 }

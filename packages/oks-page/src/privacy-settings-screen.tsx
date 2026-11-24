@@ -305,7 +305,7 @@ function KeepingSection({ initial, rules }: { initial: KeepingView; rules: Keepi
           </tr>
           <tr>
             <th scope="row">
-              Visitor counts, consent records and commenters&apos; addresses
+              Visitor counts and commenters&apos; addresses
               <br />
               <small style={{ fontWeight: "normal" }}>Not kept by this site.</small>
             </th>

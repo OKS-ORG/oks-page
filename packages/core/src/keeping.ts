@@ -9,7 +9,7 @@ export const KEEPING_KEY = "keeping";
 export const KEEPING_LAST_KEY = "keeping_last_run";
 const DAY = 24 * 60 * 60 * 1000;
 
-export type KeepingId = "email_log" | "audit_log" | "search_terms";
+export type KeepingId = "email_log" | "audit_log" | "search_terms" | "consent_records";
 
 export interface KeepingRule {
   id: KeepingId;
@@ -43,6 +43,13 @@ export const KEEPING_RULES: KeepingRule[] = [
     what: "What visitors searched for, counted by day. Nothing in it points to a person.",
     defaultDays: 90,
     leastDays: 7,
+  },
+  {
+    id: "consent_records",
+    label: "Consent records",
+    what: "What visitors chose in the consent notice, and when, as proof that they were asked. Nothing in it points to a person.",
+    defaultDays: 365,
+    leastDays: 30,
   },
 ];
 
@@ -193,6 +200,20 @@ export async function purgeAuditLog(
   return gone.length;
 }
 
+/** Deletes the consent records that are older than `days`. */
+export async function purgeConsentRecords(
+  runner: SqlRunner,
+  siteId: string,
+  days: number,
+  now: () => number,
+): Promise<number> {
+  const gone = await runner.all(
+    `delete from "consent_records" where "site_id" = ? and "created_at" < ? returning "id"`,
+    [siteId, new Date(now() - days * DAY)],
+  );
+  return gone.length;
+}
+
 /** The day (`YYYY-MM-DD`, UTC) a count must be from to be kept: counts older than `days` days go. */
 const dayText = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
@@ -221,7 +242,12 @@ export async function runKeeping(
   runner: SqlRunner,
   now: () => number = Date.now,
 ): Promise<KeepingRun> {
-  const total: Record<KeepingId, number> = { email_log: 0, audit_log: 0, search_terms: 0 };
+  const total: Record<KeepingId, number> = {
+    email_log: 0,
+    audit_log: 0,
+    search_terms: 0,
+    consent_records: 0,
+  };
   const sites = await runner.all(`select "id" from "sites"`);
   for (const s of sites) {
     const siteId = String(s["id"]);
@@ -230,6 +256,7 @@ export async function runKeeping(
       email_log: await purgeEmailLog(runner, siteId, days.email_log, now),
       audit_log: await purgeAuditLog(runner, siteId, days.audit_log, now),
       search_terms: await purgeSearchCounts(runner, siteId, days.search_terms, now),
+      consent_records: await purgeConsentRecords(runner, siteId, days.consent_records, now),
     };
     for (const r of KEEPING_RULES) total[r.id] += deleted[r.id];
     await write(runner, siteId, KEEPING_LAST_KEY, { at: now(), deleted }, now());

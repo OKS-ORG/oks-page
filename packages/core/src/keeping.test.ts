@@ -8,6 +8,7 @@ import {
   KEEPING_RULES,
   loadKeeping,
   purgeAuditLog,
+  purgeConsentRecords,
   purgeEmailLog,
   purgeSearchCounts,
   runKeeping,
@@ -31,6 +32,7 @@ describe("the rules", () => {
       email_log: [1, 30],
       audit_log: [30, 365],
       search_terms: [7, 90],
+      consent_records: [30, 365],
     });
   });
 });
@@ -75,19 +77,31 @@ for (const { kind, open, skip } of openers) {
 
     test("with nothing chosen the defaults are in force; an owner may shorten a time, and the choice is kept", async () => {
       const fresh = await loadKeeping(db.runner, SITE);
-      expect(fresh.days).toEqual({ email_log: 30, audit_log: 365, search_terms: 90 });
-      expect(fresh.shortened).toEqual({ email_log: false, audit_log: false, search_terms: false });
+      expect(fresh.days).toEqual({
+        email_log: 30,
+        audit_log: 365,
+        search_terms: 90,
+        consent_records: 365,
+      });
+      expect(fresh.shortened).toEqual({
+        email_log: false,
+        audit_log: false,
+        search_terms: false,
+        consent_records: false,
+      });
       expect(fresh.lastRun).toBeNull();
       const saved = await saveKeeping(db.runner, admin, SITE, { email_log: 7, audit_log: "180" });
       expect(saved.ok && saved.keeping.days).toEqual({
         email_log: 7,
         audit_log: 180,
         search_terms: 90,
+        consent_records: 365,
       });
       expect(saved.ok && saved.keeping.shortened).toEqual({
         email_log: true,
         audit_log: true,
         search_terms: false,
+        consent_records: false,
       });
       // Another site is not touched.
       expect((await loadKeeping(db.runner, SITE2)).days.email_log).toBe(30);
@@ -97,6 +111,7 @@ for (const { kind, open, skip } of openers) {
         email_log: 30,
         audit_log: 365,
         search_terms: 90,
+        consent_records: 365,
       });
     });
 
@@ -132,6 +147,7 @@ for (const { kind, open, skip } of openers) {
         email_log: false,
         audit_log: false,
         search_terms: false,
+        consent_records: false,
       });
     });
 
@@ -153,6 +169,7 @@ for (const { kind, open, skip } of openers) {
         email_log: 30,
         audit_log: 365,
         search_terms: 90,
+        consent_records: 365,
       });
     });
 
@@ -166,7 +183,10 @@ for (const { kind, open, skip } of openers) {
       await search(SITE, 90);
       await search(SITE, 0);
       const r = await runKeeping(db.runner, () => NOW);
-      expect(r).toEqual({ sites: 2, deleted: { email_log: 1, audit_log: 1, search_terms: 1 } });
+      expect(r).toEqual({
+        sites: 2,
+        deleted: { email_log: 1, audit_log: 1, search_terms: 1, consent_records: 0 },
+      });
       expect([
         await left("email_log", SITE),
         await left("audit_log", SITE),
@@ -206,13 +226,14 @@ for (const { kind, open, skip } of openers) {
       const view = await loadKeeping(db.runner, SITE);
       expect(view.lastRun).toEqual({
         at: NOW + 1000,
-        deleted: { email_log: 1, audit_log: 1, search_terms: 0 },
+        deleted: { email_log: 1, audit_log: 1, search_terms: 0, consent_records: 0 },
       });
       // Running it again deletes nothing more.
       expect((await runKeeping(db.runner, () => NOW + 2000)).deleted).toEqual({
         email_log: 0,
         audit_log: 0,
         search_terms: 0,
+        consent_records: 0,
       });
     });
 
@@ -226,11 +247,18 @@ for (const { kind, open, skip } of openers) {
       expect(await purgeEmailLog(db.runner, SITE, 5, () => NOW)).toBe(1);
       expect(await purgeAuditLog(db.runner, SITE, 5, () => NOW)).toBe(1);
       expect(await purgeSearchCounts(db.runner, SITE, 5, () => NOW)).toBe(1);
+      for (const age of [364, 366])
+        await db.run(
+          `insert into consent_records (id, site_id, choice, version, created_at) values (?, ?, 'media', 'media', ?)`,
+          [`CONS${String(++n).padStart(22, "0")}`, SITE, new Date(NOW - age * DAY)],
+        );
+      expect(await purgeConsentRecords(db.runner, SITE, 365, () => NOW)).toBe(1);
       expect([
         await left("email_log", SITE),
         await left("audit_log", SITE),
         await left("search_terms", SITE),
-      ]).toEqual([1, 1, 1]);
+        await left("consent_records", SITE),
+      ]).toEqual([1, 1, 1, 1]);
     });
   });
 }

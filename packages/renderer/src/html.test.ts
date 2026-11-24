@@ -140,10 +140,16 @@ describe("media and other blocks", () => {
     expect(html(block("video", { props: { src: "https://vimeo.com/123456789" } }))).toContain(
       player("https://player.vimeo.com/video/123456789"),
     );
-    expect(
-      html(block("video", { props: { src: "https://vimeo.com/123456789", loadNow: true } })),
-    ).toBe(
-      '<iframe src="https://player.vimeo.com/video/123456789" title="Video" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>',
+    // "Load at once" needs the visitor's consent first (spec 18): the page draws no frame, only a mark that the consent
+    // notice's script reads once the visitor accepts "videos and maps".
+    const now = html(
+      block("video", { props: { src: "https://vimeo.com/123456789", loadNow: true } }),
+    );
+    expect(now).not.toContain("<iframe");
+    expect(now).toContain(player("https://player.vimeo.com/video/123456789"));
+    expect(now).toContain('data-consent="media"');
+    expect(html(block("video", { props: { src: "https://vimeo.com/123456789" } }))).not.toContain(
+      "data-consent",
     );
     expect(html(block("video", { props: { src: "https://evil.test/v.mp4" } }))).toBe("");
     expect(

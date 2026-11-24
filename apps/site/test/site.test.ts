@@ -12538,6 +12538,162 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(body).toContain("youtube.com: a video that loads when the page opens.");
     await page.close();
   });
+
+  test("PR-03: the consent notice asks first, nothing loads before a choice, Accept all and Refuse all weigh the same, the choice is remembered and recorded, and a video set to load at once loads only after consent", async () => {
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
+    await db.run(
+      "insert into extensions (id, site_id, key, kind, version, tier, status, manifest, installed_at) values (?, ?, 'stats-two', 'plugin', '1.0.0', 'runtime', 'enabled', ?, ?)",
+      [
+        "EXT000000000000000000000C2",
+        siteId,
+        JSON.stringify({
+          cookies: [{ name: "st_seen", purpose: "statistics", why: "Counts visits." }],
+        }),
+        new Date(),
+      ],
+    );
+    await db.run(
+      `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+       values (?, ?, 'page', 'published', 'Consent film', 'consent-film', ?, '{}', ?, '', ?, '{}', '{}', ?, ?, ?)`,
+      [
+        "ENT000000000000000000000C2",
+        siteId,
+        userId,
+        JSON.stringify({
+          version: 1,
+          blocks: [
+            {
+              id: "v2",
+              type: "video",
+              props: {
+                src: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                loadNow: true,
+                caption: "Our film",
+              },
+            },
+          ],
+        }),
+        // What the renderer writes for that block (the renderer's own test checks it): a click-to-load shell with the mark.
+        '<div class="video-load" data-player="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" data-title="Our film" data-consent="media"><a class="video-open" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" rel="noopener noreferrer"><span class="video-title">Our film</span><span class="video-note">Play the video. It loads from YouTube.</span></a></div>',
+        new Date(),
+        new Date(),
+        new Date(),
+      ],
+    );
+    const info = await (await fetch(site.base + "/api/privacy/consent")).json();
+    expect(info).toEqual({
+      needed: true,
+      purposes: ["statistics", "media"],
+      version: "statistics,media",
+    });
+    // The page as the server sends it draws no player, only the mark the notice's script reads.
+    await expect.poll(async () => (await fetch(site.base + "/consent-film")).status).toBe(200);
+    const sent = await (await fetch(site.base + "/consent-film")).text();
+    expect(sent).not.toContain("<iframe");
+    expect(sent).toContain('data-consent="media"');
+
+    const context = await browser.newContext();
+    const asked: string[] = [];
+    await context.route(/youtube|ytimg|ggpht/, (route) => {
+      asked.push(route.request().url());
+      return route.abort();
+    });
+    const page = await context.newPage();
+    await page.goto(site.base + "/consent-film");
+    const notice = page.getByRole("region", { name: "Your privacy choices" });
+    await notice.waitFor();
+    await page.waitForLoadState("networkidle");
+    // Nothing is asked of the other company, and nothing is remembered, before the visitor chooses.
+    expect(asked).toEqual([]);
+    expect(await page.locator("iframe").count()).toBe(0);
+    expect(await page.evaluate(() => window.localStorage.getItem("oks-consent"))).toBeNull();
+    expect((await db.run("select id from consent_records")).length).toBe(0);
+    await notice.getByText("Statistics", { exact: true }).waitFor();
+    await notice.getByText("Videos and maps", { exact: true }).waitFor();
+    // Accept all and Refuse all look and weigh the same.
+    const look = (name: string) =>
+      notice.getByRole("button", { name, exact: true }).evaluate((el) => {
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return [
+          s.color,
+          s.backgroundColor,
+          s.borderTopWidth,
+          s.fontSize,
+          s.fontWeight,
+          Math.round(r.height),
+        ];
+      });
+    expect(await look("Accept all")).toEqual(await look("Refuse all"));
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Refuse all: nothing loads, the notice goes, the choice is recorded as "nothing accepted" and remembered.
+    await notice.getByRole("button", { name: "Refuse all", exact: true }).click();
+    await notice.waitFor({ state: "detached" });
+    await expect
+      .poll(async () =>
+        (await db.run("select choice, version from consent_records")).map(
+          (r) => `${String(r["choice"])}|${String(r["version"])}`,
+        ),
+      )
+      .toEqual(["|statistics,media"]);
+    expect(await page.evaluate(() => window.localStorage.getItem("oks-consent"))).toContain(
+      '"accepted":[]',
+    );
+    expect(await page.locator("iframe").count()).toBe(0);
+    await page.reload();
+    await page.getByRole("button", { name: "Privacy choices" }).waitFor();
+    expect(await page.getByRole("region", { name: "Your privacy choices" }).count()).toBe(0);
+    expect(await page.locator("iframe").count()).toBe(0);
+    expect(asked).toEqual([]);
+
+    // Change it from the footer button: accept only "Videos and maps". The video loads (without autoplay) and the choice
+    // is recorded.
+    await page.getByRole("button", { name: "Privacy choices" }).click();
+    await notice.waitFor();
+    await notice.getByLabel(/Videos and maps/).check();
+    await notice.getByRole("button", { name: "Save my choices", exact: true }).click();
+    await page.locator(".video-load iframe").waitFor();
+    expect(await page.locator(".video-load iframe").getAttribute("src")).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    );
+    expect(asked.length).toBeGreaterThan(0);
+    await expect
+      .poll(async () =>
+        (await db.run("select choice from consent_records order by created_at, id")).map((r) =>
+          String(r["choice"]),
+        ),
+      )
+      .toEqual(["", "media"]);
+
+    // Remembered: a new visit loads the video with no notice.
+    await page.reload();
+    await page.locator(".video-load iframe").waitFor();
+    expect(await page.getByRole("region", { name: "Your privacy choices" }).count()).toBe(0);
+
+    // Taking it back reloads the page without the player.
+    await page.getByRole("button", { name: "Privacy choices" }).click();
+    await notice.getByRole("button", { name: "Refuse all", exact: true }).click();
+    await page.waitForLoadState("load");
+    await page.getByRole("button", { name: "Privacy choices" }).waitFor();
+    expect(await page.locator(".video-load iframe").count()).toBe(0);
+    await expect.poll(async () => (await db.run("select id from consent_records")).length).toBe(3);
+    await context.close();
+
+    // What was sent holds nothing that points to a person.
+    expect(JSON.stringify(await db.run("select * from consent_records"))).not.toMatch(
+      /@|cookie|127\.0\.0\.1/i,
+    );
+    // A choice that is not what the notice offers is refused.
+    const refused = await fetch(site.base + "/api/privacy/consent", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ accepted: ["tracking"], version: "media" }),
+    });
+    expect(refused.status).toBe(400);
+    expect((await db.run("select id from consent_records")).length).toBe(3);
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {
