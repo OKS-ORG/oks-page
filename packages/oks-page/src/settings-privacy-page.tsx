@@ -3,6 +3,7 @@ import {
   SITE_COOKIES,
   consentNeeded,
   CONSENT_TEXT_FIELDS,
+  IMPRINT_FIELD_LIST,
   KEEPING_RULES,
   isSetupDone,
   listPrivacyPageChoices,
@@ -56,6 +57,8 @@ export default async function PrivacySettingsPage() {
         keepingRules={KEEPING_RULES}
         consentTexts={await loadConsentTexts(getRunner(), member.siteId)}
         consentFields={CONSENT_TEXT_FIELDS}
+        imprintFields={IMPRINT_FIELD_LIST}
+        defaultEmail={member.user.email}
         statisticsOn={await statisticsEnabled(getRunner(), member.siteId)}
       />
     </AdminFrame>

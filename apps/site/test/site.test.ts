@@ -28,7 +28,7 @@ import { openSqlite } from "@oks-page/db/testing";
 import axe from "axe-core";
 import { generateSync } from "otplib";
 import sharp from "sharp";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import { SMTPServer } from "smtp-server";
 import {
   TEST_HOST_KEY,
@@ -12276,6 +12276,22 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
   let browser: Browser;
   const owner = { email: "anna@example.com", password: "a-long-password" };
 
+  // The site allows 5 sign-ins from one address in 5 minutes, so the tests here sign in once and share the session.
+  let ownerCookies: Awaited<ReturnType<BrowserContext["cookies"]>> | null = null;
+  const signInOwner = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    if (ownerCookies) {
+      await page.context().addCookies(ownerCookies);
+      await page.goto(site.base + "/admin");
+    } else {
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+    }
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    ownerCookies ??= await page.context().cookies();
+  };
+
   beforeAll(async () => {
     db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-privacy-")), "site.sqlite"));
     // The clean-up of old data runs every 2 seconds here (it runs once a day on a real site).
@@ -12324,11 +12340,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
   test("privacy: the cookies, no consent notice, and a draft privacy page; domains: the main address", async () => {
     const page = await browser.newPage();
-    await page.goto(site.base + "/admin/login");
-    await page.getByLabel("Email").fill(owner.email);
-    await page.getByLabel(/^Password/).fill(owner.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await signInOwner(page);
 
     await page.goto(site.base + "/admin/settings/general");
     await page
@@ -12375,11 +12387,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
   test("PR-08: the keeping times are shown with their limits, shortened and saved, a longer time is refused, and the clean-up deletes old data on its own", async () => {
     const page = await browser.newPage();
-    await page.goto(site.base + "/admin/login");
-    await page.getByLabel("Email").fill(owner.email);
-    await page.getByLabel(/^Password/).fill(owner.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await signInOwner(page);
     const siteId = String((await db.run("select id from sites"))[0]!["id"]);
     const DAY = 24 * 60 * 60 * 1000;
     const ago = (days: number) => new Date(Date.now() - days * DAY);
@@ -12466,11 +12474,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
   test("PR-02: a plugin's cookie and outside address and a video that loads at once are listed as needing consent, and the draft privacy page names them", async () => {
     const page = await browser.newPage();
-    await page.goto(site.base + "/admin/login");
-    await page.getByLabel("Email").fill(owner.email);
-    await page.getByLabel(/^Password/).fill(owner.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await signInOwner(page);
     const siteId = String((await db.run("select id from sites"))[0]!["id"]);
     const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
 
@@ -12697,11 +12701,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
   test("PR-09: the owner changes the words of the consent notice in Settings > Privacy, a text that is too long is refused, and the visitor sees the new words", async () => {
     const page = await browser.newPage();
-    await page.goto(site.base + "/admin/login");
-    await page.getByLabel("Email").fill(owner.email);
-    await page.getByLabel(/^Password/).fill(owner.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await signInOwner(page);
     await page.goto(site.base + "/admin/settings/privacy");
     await page.getByRole("heading", { name: "Words of the consent notice", level: 2 }).waitFor();
     const heading = page.getByLabel("Heading", { exact: true });
@@ -12836,11 +12836,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
 
     // The totals are in Tools > Statistics and on the dashboard, and the screens pass the accessibility check.
     const page = await browser.newPage();
-    await page.goto(site.base + "/admin/login");
-    await page.getByLabel("Email").fill(owner.email);
-    await page.getByLabel(/^Password/).fill(owner.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await signInOwner(page);
     await page.getByText("Visitors, last 7 days").waitFor();
     await page.getByRole("link", { name: "Statistics" }).first().click();
     await page.getByRole("heading", { name: "Statistics", level: 1 }).waitFor();
@@ -12874,6 +12870,87 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await expect
       .poll(async () => n(await totals(), "views:"), { timeout: 20_000 })
       .toBe(viewsNow + 1);
+    await page.close();
+  });
+
+  test("PR-10: the owner gets an imprint draft from what they enter, and an accessibility statement draft from what the checker finds; neither is published and neither claims more than it knows", async () => {
+    const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    // A published page with a picture that has no description, for the checker to find.
+    await db.run(
+      `insert into entries (id, site_id, type_key, status, title, slug, author_id, fields, body, plain_text, html, seo, meta, published_at, created_at, updated_at)
+       values (?, ?, 'page', 'published', 'Gate photos', 'gate-photos', ?, '{}', ?, '', '', '{}', '{}', ?, ?, ?)`,
+      [
+        "ENT000000000000000000000C3",
+        siteId,
+        userId,
+        JSON.stringify({
+          version: 1,
+          blocks: [{ id: "p1", type: "image", props: { src: "/uploads/gate.png", alt: "" } }],
+        }),
+        new Date(),
+        new Date(),
+        new Date(),
+      ],
+    );
+    const page = await browser.newPage();
+    await signInOwner(page);
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByRole("heading", { name: "Imprint", level: 2 }).waitFor();
+    await page.getByRole("heading", { name: "Accessibility statement", level: 2 }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+
+    // The imprint: the three needed things are asked for, and a bad address is refused in words.
+    const refused = await page.request.post(site.base + "/api/admin/settings/privacy", {
+      headers: { origin: site.base },
+      data: {
+        draft: "imprint",
+        imprint: { name: "Anna Weber", address: "Lindenstrasse 4", email: "nope" },
+      },
+    });
+    expect(refused.status()).toBe(400);
+    expect(JSON.stringify(await refused.json())).toContain("Email address: write an address");
+    expect((await db.run("select id from entries where title = 'Imprint'")).length).toBe(0);
+    await page.getByLabel(/^Who runs the site/).fill("Anna Weber, Weber Garden");
+    await page.getByLabel(/^Address/).fill("Lindenstrasse 4\n10115 Berlin");
+    await page.getByLabel(/^Email address \(needed\)/).fill("anna@garden.example");
+    await page.getByLabel(/^VAT number/).fill("DE123456789");
+    await page.getByRole("button", { name: "Write an imprint draft" }).click();
+    await page.waitForURL(/\/admin\/pages\//);
+    const imprint = (await db.run("select status, body from entries where title = 'Imprint'"))[0]!;
+    expect(imprint["status"]).toBe("draft");
+    const text = JSON.stringify(imprint["body"]);
+    for (const part of [
+      "Weber Garden",
+      "Lindenstrasse 4",
+      "10115 Berlin",
+      "anna@garden.example",
+      "DE123456789",
+    ])
+      expect(text).toContain(part);
+    expect(text).not.toContain("Phone");
+
+    // The accessibility statement: built from what the checker finds, and it claims nothing more.
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByLabel(/^Where visitors can report a problem/).fill("access@garden.example");
+    await page.getByRole("button", { name: "Write an accessibility statement draft" }).click();
+    await page.waitForURL(/\/admin\/pages\//);
+    const statement = (
+      await db.run("select status, body from entries where title = 'Accessibility statement'")
+    )[0]!;
+    expect(statement["status"]).toBe("draft");
+    const said = JSON.stringify(statement["body"]);
+    expect(said).toContain("Pictures without a description: 1 time, for example on Gate photos.");
+    expect(said).toContain("access@garden.example");
+    expect(said).toContain("we do not claim that the site fully meets WCAG 2.1 AA");
+    // Nothing is published by either button.
+    expect(
+      (
+        await db.run(
+          "select id from entries where status = 'published' and title in ('Imprint', 'Accessibility statement')",
+        )
+      ).length,
+    ).toBe(0);
     await page.close();
   });
 });

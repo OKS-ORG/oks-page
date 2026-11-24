@@ -5,6 +5,8 @@ import {
   loadEmailSettings,
   loadGeneralSettings,
   saveConsentTexts,
+  writeAccessibilityStatementDraft,
+  writeImprintDraft,
   saveStatisticsEnabled,
   statisticsEnabled,
   saveKeeping,
@@ -15,6 +17,7 @@ import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
+import { statementDate, summariseAccessibility } from "./accessibility-summary";
 import { loadConsentNeeds } from "./consent-needs";
 import { forgetStatisticsSetting } from "./stats-collect";
 import { getRunner } from "./db";
@@ -80,6 +83,36 @@ export async function POST(request: Request) {
   const member = await signedInMember();
   if (!member) return reply({ code: "forbidden", message: "Sign in first." }, 401);
   const actor = await actorOf(member);
+  // A body asks for another kind of draft: the imprint, or the accessibility statement (spec 18, section 4).
+  const sent = (await request.text()).trim();
+  if (sent !== "") {
+    let body: { draft?: unknown; imprint?: unknown; contactEmail?: unknown };
+    try {
+      body = JSON.parse(sent) as typeof body;
+    } catch {
+      return reply({ code: "invalid", message: "The request was not understood." }, 400);
+    }
+    const created = (r: { ok: true; id: string }) =>
+      NextResponse.json({ ok: true, id: r.id, editUrl: `/admin/pages/${r.id}` }, { status: 201 });
+    if (body.draft === "imprint") {
+      const made = await writeImprintDraft(getRunner(), actor, member.siteId, body.imprint);
+      if (!made.ok) return reply(made, made.code === "forbidden" ? 403 : 400);
+      return created(made);
+    }
+    if (body.draft === "accessibility") {
+      const general = await loadGeneralSettings(getRunner(), member.siteId);
+      const summary = await summariseAccessibility(getRunner(), member.siteId);
+      const made = await writeAccessibilityStatementDraft(getRunner(), actor, member.siteId, {
+        siteName: general.siteName,
+        contactEmail: typeof body.contactEmail === "string" ? body.contactEmail.trim() : "",
+        date: statementDate(Date.now()),
+        ...summary,
+      });
+      if (!made.ok) return reply(made, made.code === "forbidden" ? 403 : 400);
+      return created(made);
+    }
+    return reply({ code: "invalid", message: "The request was not understood." }, 400);
+  }
   const email = await loadEmailSettings(getRunner(), actor, member.siteId);
   if (!email.ok) return reply(email, 403);
   const general = await loadGeneralSettings(getRunner(), member.siteId);

@@ -4,6 +4,7 @@
 import type {
   ConsentTextField,
   ConsentTexts,
+  ImprintInput,
   KeepingRule,
   KeepingView,
   PrivacySettings,
@@ -30,6 +31,8 @@ export function PrivacySettingsScreen({
   keepingRules,
   consentTexts,
   consentFields,
+  imprintFields,
+  defaultEmail,
   statisticsOn,
 }: {
   cookies: SiteCookie[];
@@ -42,6 +45,8 @@ export function PrivacySettingsScreen({
   keepingRules: KeepingRule[];
   consentTexts: ConsentTexts;
   consentFields: ConsentTextField[];
+  imprintFields: { id: keyof ImprintInput; label: string; max: number; required: boolean }[];
+  defaultEmail: string;
   statisticsOn: boolean;
 }) {
   const [counting, setCounting] = useState(statisticsOn);
@@ -253,8 +258,145 @@ export function PrivacySettingsScreen({
         <p role="status">{note}</p>
       </form>
       <ConsentTextsSection initial={consentTexts} fields={consentFields} />
+      <ImprintSection fields={imprintFields} />
+      <AccessibilitySection defaultEmail={defaultEmail} />
       <KeepingSection initial={keeping} rules={keepingRules} />
     </>
+  );
+}
+
+/** Asks the site to write a draft page and opens it in the editor. */
+async function writeLegalDraft(
+  body: unknown,
+  set: { note: (t: string) => void; problem: (t: string | null) => void },
+) {
+  set.problem(null);
+  set.note("Writing a draft…");
+  const response = await fetch("/api/admin/settings/privacy", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const answer = (await response.json().catch(() => null)) as {
+    editUrl?: string;
+    error?: { message?: string };
+  } | null;
+  if (!response.ok || !answer?.editUrl) {
+    set.note("");
+    set.problem(answer?.error?.message ?? "The draft could not be written.");
+    return;
+  }
+  set.note("Draft written. Opening it…");
+  window.location.assign(answer.editUrl);
+}
+
+/** The imprint (spec 18, section 4): a draft page from what the owner enters. */
+function ImprintSection({
+  fields,
+}: {
+  fields: { id: keyof ImprintInput; label: string; max: number; required: boolean }[];
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <form
+      aria-labelledby="privacy-imprint"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void writeLegalDraft(
+          { draft: "imprint", imprint: values },
+          { note: setNote, problem: setProblem },
+        );
+      }}
+    >
+      <h2 id="privacy-imprint">Imprint</h2>
+      <p>
+        Some countries (for example Germany and Austria) ask a website to say who runs it. Enter the
+        details and the site writes a draft page. It is not published: read it, check it against the
+        law of your country, then publish it.
+      </p>
+      {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
+      {fields.map((f) => (
+        <p key={f.id}>
+          <label>
+            {f.label}
+            {f.required ? " (needed)" : ""}
+            <br />
+            {f.id === "address" ? (
+              <textarea
+                value={values[f.id] ?? ""}
+                maxLength={f.max}
+                rows={3}
+                onChange={(e) => setValues({ ...values, [f.id]: e.target.value })}
+                style={{ ...FIELD, minBlockSize: "5rem" }}
+              />
+            ) : (
+              <input
+                type={f.id === "email" ? "email" : "text"}
+                value={values[f.id] ?? ""}
+                maxLength={f.max}
+                onChange={(e) => setValues({ ...values, [f.id]: e.target.value })}
+                style={FIELD}
+              />
+            )}
+          </label>
+        </p>
+      ))}
+      <p>
+        <Button type="submit" color="primary">
+          Write an imprint draft
+        </Button>
+      </p>
+      <p role="status">{note}</p>
+    </form>
+  );
+}
+
+/** The accessibility statement (spec 18, section 4): a draft built from what the site's checker finds. */
+function AccessibilitySection({ defaultEmail }: { defaultEmail: string }) {
+  const [email, setEmail] = useState(defaultEmail);
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <form
+      aria-labelledby="privacy-a11y"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void writeLegalDraft(
+          { draft: "accessibility", contactEmail: email },
+          { note: setNote, problem: setProblem },
+        );
+      }}
+    >
+      <h2 id="privacy-a11y">Accessibility statement</h2>
+      <p>
+        The European Accessibility Act asks many websites for an accessibility statement. The site
+        reads all your published pages and posts with its accessibility checker and writes a draft
+        that says what it found. The draft claims nothing more than that: an automatic check cannot
+        prove that a site is accessible. It is not published.
+      </p>
+      {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
+      <p>
+        <label>
+          Where visitors can report a problem (email address)
+          <br />
+          <input
+            type="email"
+            value={email}
+            maxLength={120}
+            onChange={(e) => setEmail(e.target.value)}
+            style={FIELD}
+          />
+        </label>
+      </p>
+      <p>
+        <Button type="submit" color="primary">
+          Write an accessibility statement draft
+        </Button>
+      </p>
+      <p role="status">{note}</p>
+    </form>
   );
 }
 
