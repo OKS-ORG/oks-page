@@ -14168,3 +14168,158 @@ describe("the setup wizard for a business (spec 19, section 2)", { timeout: 150_
     expect(html).toContain("LocalBusiness");
   });
 });
+
+describe.skipIf(!findBrowser())(
+  "white-label admin (spec 11, section 5)",
+  { timeout: 150_000 },
+  () => {
+    let db: TestDb;
+    let site: Awaited<ReturnType<typeof startSite>>;
+    let browser: Browser;
+    const owner = { email: "anna@example.com", password: "a-long-password" };
+
+    beforeAll(async () => {
+      db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-brand-")), "site.sqlite"));
+      site = await startSite("sqlite", db, {
+        OKS_SECRET: "w".repeat(40),
+        OKS_LICENCE_PUBLIC_KEYS: licencePublic,
+      });
+      const made = await fetch(site.base + "/api/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ siteName: "Weber Garden", admin: { name: "Anna", ...owner } }),
+      });
+      expect(made.status).toBe(200);
+      browser = await chromium.launch({ executablePath: findBrowser()! });
+    }, 300_000);
+
+    afterAll(async () => {
+      await browser?.close();
+      site?.server.kill();
+      await db?.close();
+    });
+
+    test("AG-54, AG-55, AG-56: the admin name is free; the logo, help link and footer need an Agency key and show only with one; bad input is refused", async () => {
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const axe = async () => {
+        await page.addScriptTag({ content: (await import("axe-core")).default.source });
+        return page.evaluate(async () =>
+          (
+            await (
+              window as unknown as { axe: { run: () => Promise<{ violations: { id: string }[] }> } }
+            ).axe.run()
+          ).violations.map((v) => v.id),
+        );
+      };
+      const put = (data: Record<string, unknown>) =>
+        page.request.put(site.base + "/api/admin/settings/branding", {
+          headers: { origin: site.base },
+          data,
+        });
+
+      // No name yet: the admin has no brand line, and the footer is the product's own.
+      await page.goto(site.base + "/admin");
+      await page.getByText(/Developed with/).waitFor();
+      expect(await page.locator("a.oks-brand").count()).toBe(0);
+
+      // The name is free, in the screen and in the admin.
+      await page.goto(site.base + "/admin/settings/branding");
+      await page.getByRole("heading", { name: "Branding", level: 1 }).waitFor();
+      await page.getByText("These need an Agency licence key").waitFor();
+      expect(await page.getByLabel(/^Footer line/).isDisabled()).toBe(true);
+      await page.getByLabel(/^Admin name/).fill("Weber <b>Studio</b>");
+      await page.getByRole("button", { name: "Save branding" }).click();
+      await page.getByText(/Saved/).waitFor();
+      await page.goto(site.base + "/admin");
+      await page.locator("a.oks-brand", { hasText: "Weber Studio" }).waitFor();
+      await page.getByText("Developed with Weber Studio").waitFor();
+      expect(await page.locator("a.oks-brand b").count()).toBe(0);
+
+      // Without a key the extras are refused in words, whatever the screen allows.
+      for (const [field, value] of [
+        ["footer", "Made by Weber Studio"],
+        ["helpUrl", "https://weber.example/help"],
+      ] as const) {
+        const r = await put({ name: "Weber Studio", [field]: value });
+        expect(r.status()).toBe(400);
+        expect(JSON.stringify(await r.json())).toContain("Agency licence key");
+      }
+
+      // An Agency key: signed by the key the site trusts, for "agency".
+      const key = signedLicence({
+        id: "agency-1",
+        kind: "normal",
+        covers: ["agency"],
+        sites: 5,
+        updatesUntil: "2099-12-31",
+        maxMajor: null,
+        issued: "2026-11-25",
+      });
+      const added = await page.request.post(site.base + "/api/admin/licences", {
+        headers: { origin: site.base },
+        data: { key },
+      });
+      expect(added.status(), await added.text()).toBeLessThan(300);
+      // A picture of the library for the logo (a ready PNG).
+      const userId = String((await db.run("select id from users limit 1"))[0]!["id"]);
+      const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+      const logoId = "0123456789ABCDEFGHJKMNPQRS";
+      await db.run(
+        `insert into media (id, site_id, storage_key, filename, mime_type, size_bytes, width, height, alt, caption, title, description, content_hash, status, uploaded_by, created_at)
+       values (?, ?, 'logos/weber.png', 'weber-logo.png', 'image/png', 100, 200, 100, '', '', '', '', 'hlogo', 'ready', ?, ?)`,
+        [logoId, siteId, userId, new Date()],
+      );
+      // Bad input is refused in plain words.
+      for (const [data, words] of [
+        [{ name: "x".repeat(41) }, "Admin name: use at most 40 characters."],
+        [
+          { name: "W", helpUrl: "javascript:alert(1)" },
+          "Help link: use an address that starts with",
+        ],
+        [{ name: "W", footer: "y".repeat(121) }, "Footer line: use at most 120 characters."],
+        [{ name: "W", logoId: "/uploads/x.png" }, "Logo: choose a picture from the library."],
+      ] as const) {
+        const r = await put(data);
+        expect(r.status(), JSON.stringify(data)).toBe(400);
+        expect(JSON.stringify(await r.json())).toContain(words);
+      }
+      const saved = await put({
+        name: "Weber Studio",
+        logoId,
+        helpUrl: "https://weber.example/help",
+        footer: "Made for you by Weber Studio",
+      });
+      expect(saved.status(), await saved.text()).toBe(200);
+      await page.goto(site.base + "/admin");
+      await page.getByText("Made for you by Weber Studio").waitFor();
+      expect(await page.getByText(/Developed with/).count()).toBe(0);
+      expect(await page.locator("a.oks-brand img").getAttribute("src")).toContain(
+        "logos/weber.png",
+      );
+      expect(await page.getByRole("link", { name: "Help" }).getAttribute("href")).toBe(
+        "https://weber.example/help",
+      );
+      expect(await axe()).toEqual([]);
+
+      // The key goes: the name stays, the extras are not shown any more (the site keeps working).
+      expect(
+        (
+          await page.request.delete(site.base + "/api/admin/licences?id=agency-1", {
+            headers: { origin: site.base },
+          })
+        ).status(),
+      ).toBe(200);
+      await page.goto(site.base + "/admin");
+      await page.locator("a.oks-brand", { hasText: "Weber Studio" }).waitFor();
+      await page.getByText("Developed with Weber Studio").waitFor();
+      expect(await page.locator("a.oks-brand img").count()).toBe(0);
+      expect(await page.getByRole("link", { name: "Help" }).count()).toBe(0);
+      await page.close();
+    });
+  },
+);

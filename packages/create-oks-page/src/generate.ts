@@ -278,6 +278,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
 `,
     },
     {
+      path: "app/admin/layout.tsx",
+      content: `export { default } from ${from("admin-layout")};\n`,
+    },
+    {
+      path: "app/admin/settings/branding/page.tsx",
+      content: `export { default, metadata } from ${from("settings-branding-page")};\n`,
+    },
+    {
+      path: "app/api/admin/settings/branding/route.ts",
+      content: `export { PUT } from ${from("api-settings-branding")};\n`,
+    },
+    {
       path: "app/admin/tools/handoff/page.tsx",
       content: `export { default, metadata } from ${from("tools-handoff-page")};\n`,
     },

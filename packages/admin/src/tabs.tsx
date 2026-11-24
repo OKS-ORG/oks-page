@@ -171,6 +171,8 @@ export interface FooterInfo {
   version: string;
   helpHref?: string;
   docsHref?: string;
+  /** A line of the owner's own instead of "Developed with …" (white-label, spec 11, section 5). */
+  text?: string;
 }
 
 /** The slim line at the bottom (D112). The owner can hide it: the caller then passes nothing. */
@@ -178,7 +180,11 @@ export function ShellFooter({ info }: { info: FooterInfo }) {
   return (
     <footer className="oks-footer">
       <span>
-        Developed with {info.product} · Version {info.version}
+        {info.text ?? (
+          <>
+            Developed with {info.product} · Version {info.version}
+          </>
+        )}
       </span>
       {info.helpHref ? <a href={info.helpHref}>Help</a> : null}
       {info.docsHref ? <a href={info.docsHref}>Docs</a> : null}

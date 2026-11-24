@@ -38,6 +38,8 @@ export interface ShellProps {
   tabs?: TabStripProps;
   /** The slim footer. The owner can hide it (D112): then pass nothing. */
   footer?: FooterInfo;
+  /** The name (and logo) of the admin, white-label (spec 11, section 5). Leave it out for the product's own look. */
+  brand?: { name: string; logoUrl?: string };
   children: ReactNode;
 }
 
@@ -57,6 +59,7 @@ export function Shell({
   dir = "ltr",
   tabs,
   footer,
+  brand,
   children,
 }: ShellProps) {
   const wide = useMediaQuery(SIDEBAR_QUERY);
@@ -117,6 +120,12 @@ export function Shell({
               Menu
             </Button>
           )}
+          {brand && (brand.name || brand.logoUrl) ? (
+            <a className="oks-brand" href="/admin">
+              {brand.logoUrl ? <img src={brand.logoUrl} alt="" className="oks-brand-logo" /> : null}
+              {brand.name ? <span>{brand.name}</span> : <span className="oks-sr-only">Home</span>}
+            </a>
+          ) : null}
           <Breadcrumbs>
             {breadcrumbs.map((b) => (
               <BreadcrumbItem key={b.label} {...(b.href ? { href: b.href } : {})}>

@@ -14,6 +14,7 @@ const GROUPS = [
   { key: "site-editor", label: "Site editor", href: "/admin/settings/site-editor" },
   { key: "media", label: "Media", href: "/admin/settings/media" },
   { key: "security", label: "Security", href: "/admin/settings/security" },
+  { key: "branding", label: "Branding", href: "/admin/settings/branding" },
   { key: "licences", label: "Licence keys", href: "/admin/settings/licences" },
   { key: "advanced", label: "Advanced", href: "/admin/settings/advanced" },
   { key: "redirects", label: "Redirects", href: "/admin/settings/redirects" },

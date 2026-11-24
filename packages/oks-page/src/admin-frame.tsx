@@ -4,6 +4,7 @@ import { Shell } from "@oks-page/admin";
 import "@oks-page/admin/shell.css";
 import { Button, type CommandPaletteItem } from "oks-ui";
 import { useCallback, useMemo, type ReactNode } from "react";
+import { useAdminBrand } from "./admin-brand-context";
 import type { NavItem } from "./admin-nav";
 
 async function signOut() {
@@ -92,6 +93,7 @@ export function AdminFrame({
   breadcrumbs,
   children,
 }: AdminFrameProps) {
+  const brand = useAdminBrand();
   const items = useMemo(() => paletteItems(nav), [nav]);
   const canSearch = nav.some((n) => n.key === "pages" || n.key === "posts");
   const onSearch = useCallback(searchEntries, []);
@@ -101,7 +103,15 @@ export function AdminFrame({
       selectedKey={selectedKey}
       title={title}
       {...(breadcrumbs ? { breadcrumbs } : {})}
-      footer={{ product, version }}
+      footer={{
+        product: brand.name || product,
+        version,
+        ...(brand.footerText ? { text: brand.footerText } : {}),
+        ...(brand.helpHref ? { helpHref: brand.helpHref } : {}),
+      }}
+      {...(brand.name || brand.logoUrl
+        ? { brand: { name: brand.name, ...(brand.logoUrl ? { logoUrl: brand.logoUrl } : {}) } }
+        : {})}
       searchItems={items}
       {...(canSearch ? { onSearch } : {})}
       onNavigate={(href) => window.location.assign(href)}

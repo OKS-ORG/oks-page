@@ -58,6 +58,7 @@ export * from "./consent-texts.js";
 export * from "./business.js";
 export * from "./handoff.js";
 export * from "./keeping.js";
+export * from "./white-label.js";
 export * from "./legal-drafts.js";
 export * from "./statistics.js";
 export * from "./privacy-settings.js";
