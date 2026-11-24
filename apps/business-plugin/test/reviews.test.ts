@@ -81,11 +81,15 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("the plugin file", () => {
-  test("asks only for the two permissions reviews need, and declares what a privacy request may find", () => {
+  test("asks only for the permissions reviews and bookings need, and declares what a privacy request may find", () => {
     const read = readPluginFile(JSON.stringify(file));
     expect(read.ok ? "" : read.message).toBe("");
     if (!read.ok) return;
-    expect([...read.file.manifest.permissions].sort()).toEqual(["admin:pages", "routes:public"]);
+    expect([...read.file.manifest.permissions].sort()).toEqual([
+      "admin:pages",
+      "email:send",
+      "routes:public",
+    ]);
     expect(read.file.manifest.blocks).toContain("reviews");
     expect(read.file.manifest.routes).toHaveProperty("review");
     expect(read.file.manifest.adminPages?.[0]?.id).toBe("reviews");

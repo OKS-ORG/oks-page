@@ -425,7 +425,14 @@ export class SandboxHost {
     if (kinds[0] === "text") {
       if (typeof a["text"] !== "string" || a["text"].length > 200_000)
         return { ok: false, status: 502, message: "The plugin could not answer this request." };
-      return { ok: true, reply: { status, text: a["text"] } };
+      return {
+        ok: true,
+        reply: {
+          status,
+          text: a["text"],
+          ...(a["textType"] === "calendar" ? { textType: "calendar" as const } : {}),
+        },
+      };
     }
     let size: number;
     try {

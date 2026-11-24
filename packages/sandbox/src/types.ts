@@ -75,6 +75,8 @@ export interface RouteReply {
   /** Exactly one of these is set: `json`, `text`, `redirect` or `page`. */
   json?: unknown;
   text?: string;
+  /** With `text`: `"calendar"` sends it as a calendar file (`text/calendar`), for a plugin's private calendar feed. */
+  textType?: "calendar";
   /** A path on this site (starts with one slash): answered with a 303 so a form sent by a browser lands there. */
   redirect?: string;
   /** A small page the site draws itself, for example "Thank you": a title and a short text, both shown as plain text. */

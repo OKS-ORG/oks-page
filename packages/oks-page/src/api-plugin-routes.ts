@@ -233,7 +233,13 @@ async function handle(
   if (reply.text !== undefined)
     return new NextResponse(reply.text, {
       status: reply.status,
-      headers: { ...HEADERS, "content-type": "text/plain; charset=utf-8" },
+      headers: {
+        ...HEADERS,
+        "content-type":
+          reply.textType === "calendar"
+            ? "text/calendar; charset=utf-8"
+            : "text/plain; charset=utf-8",
+      },
     });
   return NextResponse.json(reply.json ?? null, { status: reply.status, headers: HEADERS });
 }

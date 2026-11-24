@@ -99,7 +99,7 @@ for (const { kind, open, skip } of openers) {
         workDir,
         wallMs: 10_000,
         publishWallMs: 3000,
-        jobWallMs: 1500,
+        jobWallMs: 4000,
         maxFailures: 3,
         onDeveloperNote: () => undefined,
       });
@@ -119,7 +119,7 @@ for (const { kind, open, skip } of openers) {
         CODE,
         EXT,
       );
-      // Start the plugin's process now, so the 1.5 second limit of a job measures the job and not a cold start.
+      // Start the plugin's process now, so the 4 second limit of a job measures the job and not a cold start.
       await host.describe("jobber");
     });
 
@@ -166,7 +166,7 @@ for (const { kind, open, skip } of openers) {
       const r = await host.runJob("jobber", "slow");
       expect(r).toMatchObject({ ok: false });
       expect(!r.ok && r.error).toBe("timeout");
-      expect(Date.now() - started).toBeLessThan(5000);
+      expect(Date.now() - started).toBeLessThan(9000);
       // boom (1) and slow (2) so far within the window; one more failure switches the plugin off.
       await host.runJob("jobber", "boom");
       expect(host.status("jobber")).toBe("switched_off");

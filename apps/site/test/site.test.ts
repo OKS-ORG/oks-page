@@ -8411,6 +8411,131 @@ describe.skipIf(!findBrowser())(
       }
     }, 120_000);
 
+    test("BZ-04, BZ-05: a visitor asks for a free time, the same time cannot be asked for twice, the owner confirms it, and only the private calendar address shows it", async () => {
+      const page = await signedIn(owner);
+      const bundled = await call(page, "POST", "/api/admin/plugins", {
+        action: "bundled",
+        name: "business",
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: bundled.json!["file"],
+        approved: ["admin:pages", "email:send", "routes:public"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const every = "00:00-24:00";
+      const saved = await call(page, "POST", "/api/admin/plugins", {
+        action: "saveSettings",
+        id: "business",
+        values: {
+          name: "Weber Salon",
+          time_zone: "Europe/Berlin",
+          hours_mon: every,
+          hours_tue: every,
+          hours_wed: every,
+          hours_thu: every,
+          hours_fri: every,
+          hours_sat: every,
+          hours_sun: every,
+          services: "Haircut | 30 | 25 EUR",
+          booking_notice_hours: 1,
+        },
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", { type: "page", title: "Book" });
+      const id = String(made.json!["id"]);
+      try {
+        const put = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Book",
+          slugPart: "book-a-time",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("Book your visit.")),
+            {
+              id: "bk1",
+              type: "business-booking",
+              props: { service: "Haircut" },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(put.status, JSON.stringify(put.json)).toBe(200);
+        const shown = await fetch(site.base + "/book-a-time").then((r) => r.text());
+        expect(shown).toContain("Haircut, 30 minutes, 25 EUR");
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        const slots = [
+          ...shown.matchAll(/<option value="(\d{4}-\d{2}-\d{2} \d{2}:\d{2} \([A-Za-z]+\))"/g),
+        ].map((m) => m[1]!);
+        expect(slots.length).toBeGreaterThan(10);
+        // Every offered time is at least an hour ahead, in the business's own time zone.
+        const first = slots[0]!;
+        const send = (slot: string, email: string) =>
+          fetch(`${site.base}/api/oks/plugins/business/book`, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              _form: hidden("_form"),
+              _t: hidden("_t"),
+              _hp: "",
+              service: "Haircut",
+              slot,
+              name: "Mia",
+              email,
+              phone: "",
+              note: "",
+            }).toString(),
+          });
+        await new Promise((r) => setTimeout(r, 3500));
+        const sent = await send(first, "mia@example.com");
+        expect(sent.status).toBe(200);
+        expect(await sent.text()).toContain("We will confirm it by email");
+        // The same time again is refused, and the answer lists free times.
+        const twice = await send(first, "bo@example.com");
+        expect(twice.status).toBe(409);
+        expect(await twice.text()).toContain("Free times:");
+        // A time that was never offered is refused too.
+        expect((await send("2026-11-23 03:17 (Monday)", "bo@example.com")).status).toBe(409);
+        const list = async (pageId: string) =>
+          (await call(page, "GET", `/api/admin/plugin-pages?plugin=business&page=${pageId}`))
+            .json as {
+            view: { rows: { key: string; cells: unknown[] }[] };
+          };
+        const bookings = (await list("bookings")).view.rows;
+        expect(bookings.length).toBe(1);
+        expect(JSON.stringify(bookings[0]!.cells)).toContain("pending");
+        // The private address exists now; before the owner confirms, the calendar has nothing in it.
+        const address = (await list("calendar")).view.rows[0]!;
+        const path = /(\/api\/oks\/plugins\/business\/calendar\?key=[0-9a-f]{48})/.exec(
+          JSON.stringify(address.cells),
+        )![1]!;
+        const feed = async (p: string) => fetch(site.base + p);
+        const empty = await feed(path);
+        expect(empty.status).toBe(200);
+        expect(empty.headers.get("content-type")).toContain("text/calendar");
+        expect(await empty.text()).not.toContain("BEGIN:VEVENT");
+        // Confirmed: it is in the calendar. Without the secret, or with a wrong one, there is nothing.
+        const confirmed = await call(page, "POST", "/api/admin/plugin-pages", {
+          plugin: "business",
+          page: "bookings",
+          action: "confirm",
+          key: bookings[0]!.key,
+        });
+        expect(confirmed.status).toBe(200);
+        const ics = await (await feed(path)).text();
+        expect(ics.match(/BEGIN:VEVENT/g)?.length).toBe(1);
+        expect(ics).toContain("SUMMARY:Haircut - Mia");
+        expect((await feed("/api/oks/plugins/business/calendar")).status).toBe(404);
+        expect((await feed(path.slice(0, -1) + "0")).status).toBe(404);
+        expect(ics).not.toContain("bo@example.com");
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=business");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
+    }, 120_000);
+
     test("PG-12: the Forms plugin's Messages page lists what visitors sent, filters it, marks and deletes it, and downloads it", async () => {
       const page = await signedIn(owner);
       const dir = new URL("../../forms-plugin/", import.meta.url);

@@ -140,8 +140,361 @@ const paragraph = (id, content) => ({
   children: [],
 });
 
+// ---- booking (spec 19, section 7) -----------------------------------------------------------------------------------
+
+const MINUTE = 60_000;
+
+/** The parts of a moment in a time zone: `y`, `m` (1 to 12), `d`, minutes after midnight, and the date as text. */
+export function partsIn(ms, tz) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(ms));
+  const get = (t) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const y = get("year");
+  const m = get("month");
+  const d = get("day");
+  const date = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return { y, m, d, minutes: get("hour") * 60 + get("minute"), date };
+}
+
+/** The moment (in milliseconds) of a local date and minutes after midnight in a time zone, or null when that time does not exist there. */
+export function zonedToMs(date, minutes, tz) {
+  const [y, m, d] = date.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, 0, minutes);
+  const offset = (t) => {
+    const p = partsIn(t, tz);
+    return Date.UTC(p.y, p.m - 1, p.d, 0, p.minutes) - Math.floor(t / MINUTE) * MINUTE;
+  };
+  const ms = guess - offset(guess - offset(guess));
+  const back = partsIn(ms, tz);
+  return back.date === date && back.minutes === minutes ? ms : null;
+}
+
+const addDays = (date, n) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const weekdayOf = (date) => (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+const clockOf = (minutes) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** The services written in the setting ("Haircut | 30 | 25 EUR; Colour | 90 | from 60 EUR"). */
+export function parseServices(text) {
+  const out = [];
+  for (const item of clean(text, 2000).split(";")) {
+    const [name, length, price] = item.split("|").map((x) => x.trim());
+    const minutes = Number(length);
+    if (!name || !Number.isInteger(minutes) || minutes < 5 || minutes > 480) continue;
+    if (out.some((x) => x.name.toLowerCase() === name.toLowerCase())) continue;
+    out.push({ name: name.slice(0, 60), minutes, price: clean(price ?? "", 40) });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/** The times when the business is open on one date: its special day if it has one, else the week's times. */
+function openOn(b, date) {
+  const special = b.special.find((x) => x.date === date);
+  if (special) return special.times;
+  return b.week.find((w) => w.day === weekdayOf(date))?.times ?? [];
+}
+
+/**
+ * The times a service can be booked, in time order: inside the opening hours, on the step of the day, not too soon, not too far
+ * ahead, and not on top of a booking that is waiting or confirmed (BZ-04).
+ */
+export function freeSlots(b, service, booked, now, options) {
+  const out = [];
+  if (!b.tz) return out;
+  const today = partsIn(now, b.tz).date;
+  const busy = booked
+    .filter((x) => (x.status === "pending" || x.status === "confirmed") && x.end > now)
+    .map((x) => [x.start, x.end]);
+  for (let ahead = 0; ahead <= options.days; ahead += 1) {
+    const date = addDays(today, ahead);
+    for (const [from, to] of openOn(b, date)) {
+      const open = Number(from.slice(0, 2)) * 60 + Number(from.slice(3, 5));
+      const close = Number(to.slice(0, 2)) * 60 + Number(to.slice(3, 5));
+      for (
+        let at = Math.ceil(open / options.step) * options.step;
+        at + service.minutes <= close;
+        at += options.step
+      ) {
+        const start = zonedToMs(date, at, b.tz);
+        if (start === null || start < now + options.noticeHours * 3_600_000) continue;
+        const end = start + service.minutes * MINUTE;
+        if (busy.some(([s, e]) => start < e && end > s)) continue;
+        out.push({ date, time: clockOf(at), start, end });
+      }
+    }
+  }
+  return out;
+}
+
+const slotText = (slot) => `${slot.date} ${slot.time} (${WEEKDAYS[weekdayOf(slot.date)]})`;
+
+/** What the booking needs from the settings. */
+async function readBooking(ctx) {
+  const get = async (key) => clean(await ctx.settings.get(key), 2000);
+  const number = async (key, fallback, least, most) => {
+    // A setting that was never filled in is the default, not zero.
+    const raw = await ctx.settings.get(key);
+    if (raw === null || raw === undefined || raw === "") return fallback;
+    const v = Math.trunc(Number(raw));
+    return Number.isFinite(v) && v >= least && v <= most ? v : fallback;
+  };
+  return {
+    services: parseServices(await get("services")),
+    step: await number("booking_step", 30, 5, 120),
+    noticeHours: await number("booking_notice_hours", 2, 0, 168),
+    days: await number("booking_days", 14, 1, 60),
+    instant: (await ctx.settings.get("booking_instant")) === true,
+    notify: clean((await get("booking_email")) || (await get("email")), 200),
+  };
+}
+
+/** The bookings (the latest 500) with their time as numbers. */
+async function bookings(ctx) {
+  const rows = await ctx.storage.list("bookings", { limit: 500, order: "desc" });
+  return rows
+    .filter((r) => r.value && Number.isFinite(r.value.start) && Number.isFinite(r.value.end))
+    .map((r) => ({ ...r.value, key: r.key }));
+}
+
+const icsEscape = (v) =>
+  String(v)
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+const icsTime = (ms) =>
+  new Date(ms)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
+
+/** The calendar of the confirmed bookings, as a calendar file. */
+function calendar(name, list) {
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Business//Bookings//EN",
+    `X-WR-CALNAME:${icsEscape(name || "Bookings")}`,
+  ];
+  for (const x of list) {
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${x.key}@bookings.invalid`,
+      `DTSTAMP:${icsTime(x.at ?? x.start)}`,
+      `DTSTART:${icsTime(x.start)}`,
+      `DTEND:${icsTime(x.end)}`,
+      `SUMMARY:${icsEscape(`${x.service} - ${x.name}`)}`,
+      `DESCRIPTION:${icsEscape([x.phone && `Phone: ${x.phone}`, x.email && `Email: ${x.email}`, x.note].filter(Boolean).join("\n"))}`,
+      "END:VEVENT",
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n") + "\r\n";
+}
+
+const stripKey = (x) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "key"));
+
+/** Keeps the private calendar's secret and writes its address where the owner can read it (Tools > Plugins > Calendar). */
+async function feedAddress(ctx) {
+  let secret = await ctx.storage.get("secrets", "calendar");
+  if (typeof secret !== "string" || secret.length < 32) {
+    secret = hex(crypto.getRandomValues(new Uint8Array(24)));
+    await ctx.storage.set("secrets", "calendar", secret);
+  }
+  await ctx.storage.set("feed", "address", {
+    title: "Calendar of confirmed bookings",
+    path: `/api/oks/plugins/business/calendar?key=${secret}`,
+    at: Date.now(),
+  });
+}
+
+async function trySend(ctx, to, subject, text) {
+  try {
+    await ctx.email.send({ to, subject, text });
+  } catch (error) {
+    await ctx.log(
+      `email to ${to.replace(/^.*@/, "...@")} was not sent: ${String(error && error.message).slice(0, 100)}`,
+    );
+  }
+}
+
 export default {
+  jobs: {
+    // Every few minutes: tell a visitor whose booking was confirmed or declined (the owner decides in the admin), and keep the
+    // address of the private calendar where the owner can find it.
+    async notify(_info, ctx) {
+      const b = await read(ctx);
+      const list = await bookings(ctx);
+      for (const x of list) {
+        if (
+          (x.status !== "confirmed" && x.status !== "declined") ||
+          x.notified === x.status ||
+          !x.email
+        )
+          continue;
+        const when = `${x.startText}`;
+        const subject =
+          x.status === "confirmed"
+            ? `Your booking is confirmed: ${when}`
+            : `About your booking request: ${when}`;
+        const text =
+          x.status === "confirmed"
+            ? `Hello ${x.name},\n\nyour booking is confirmed.\n\n${x.service}\n${when}\n\n${b.name || ""}`.trim()
+            : `Hello ${x.name},\n\nsorry, we cannot take your booking request for ${x.service} on ${when}. Please choose another time on our website, or write to us.\n\n${b.name || ""}`.trim();
+        await trySend(ctx, x.email, subject.slice(0, 150), text);
+        await ctx.storage.set("bookings", x.key, { ...stripKey(x), notified: x.status });
+      }
+      await feedAddress(ctx);
+    },
+    // Once a day: bookings older than a year (counted from the booked day) are deleted (spec 19, section 7).
+    async tidy(_info, ctx) {
+      const cutoff = Date.now() - 365 * DAY;
+      for (const x of await bookings(ctx))
+        if (x.end < cutoff) await ctx.storage.delete("bookings", x.key);
+    },
+  },
   routes: {
+    // A visitor asks for a time (spec 19, section 7). The time must be free and inside the opening hours, checked again here;
+    // the request waits for the owner unless instant booking is on.
+    async book(req, ctx) {
+      const params = new URLSearchParams(req.body);
+      const b = { ...(await read(ctx)), ...(await readBooking(ctx)) };
+      const timing = await readToken(ctx, params.get("_t") ?? "");
+      const service = b.services.find((x) => x.name === params.get("service"));
+      const slotMatch = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/.exec(params.get("slot") ?? "");
+      const name = clean(params.get("name"), 80);
+      const email = clean(params.get("email"), 200).toLowerCase();
+      const phone = clean(params.get("phone"), 40);
+      const note = clean(params.get("note"), 300);
+      const lower = `${name} ${note}`.toLowerCase();
+      const spam =
+        (params.get("_hp") ?? "") !== "" ||
+        timing === "invalid" ||
+        timing === "fast" ||
+        (lower.match(/https?:\/\/|www\./g) ?? []).length > 0 ||
+        BAD_WORDS.some((w) => lower.includes(w));
+      const thanks = problem(200, "Thank you", "Thank you. We got your request.");
+      if (spam) return thanks;
+      if (timing === "old")
+        return problem(
+          400,
+          "This page is out of date",
+          "Go back, reload the page and send your request again.",
+        );
+      const errors = [];
+      if (!service) errors.push("The service: choose one from the list.");
+      if (!slotMatch) errors.push("The time: choose one from the list.");
+      if (name === "") errors.push("Your name: this is required.");
+      if (!EMAIL.test(email)) errors.push("Your email: write an address we can answer.");
+      if (phone !== "" && !/^[0-9+().\-\s]{5,30}$/.test(phone))
+        errors.push("Your phone number: this is not a phone number.");
+      if (errors.length > 0) return problem(400, "Please check your answers", errors.join("\n\n"));
+      const hour = Math.floor(Date.now() / 3_600_000);
+      const row = await ctx.storage.get("rate", "bookings");
+      const n = row && row.hour === hour ? row.n : 0;
+      await ctx.storage.set("rate", "bookings", { hour, n: n + 1 });
+      if (n >= MOST_REVIEWS_PER_HOUR) return thanks;
+      const now = Date.now();
+      const free = freeSlots(b, service, await bookings(ctx), now, b);
+      const chosen = free.find((x) => x.date === slotMatch[1] && x.time === slotMatch[2]);
+      if (!chosen) {
+        const next = free.slice(0, 5).map(slotText).join("\n");
+        return problem(
+          409,
+          "That time is not free",
+          `Sorry, that time cannot be booked (it was taken, or it is outside our opening hours).${next ? `\n\nFree times:\n${next}` : ""}\n\nGo back, reload the page and choose another time.`,
+        );
+      }
+      const at = now;
+      const key = `${String(at).padStart(15, "0")}-${hex(crypto.getRandomValues(new Uint8Array(3)))}`;
+      const status = b.instant ? "confirmed" : "pending";
+      await ctx.storage.set("bookings", key, {
+        status,
+        at,
+        service: service.name,
+        minutes: service.minutes,
+        price: service.price,
+        start: chosen.start,
+        end: chosen.end,
+        startText: slotText(chosen),
+        name,
+        email,
+        phone,
+        note,
+        emails: [email],
+        notified: status === "confirmed" ? "confirmed" : "",
+      });
+      await feedAddress(ctx);
+      const when = slotText(chosen);
+      if (status === "confirmed")
+        await trySend(
+          ctx,
+          email,
+          `Your booking is confirmed: ${when}`,
+          `Hello ${name},\n\nyour booking is confirmed.\n\n${service.name}\n${when}\n\n${b.name || ""}`.trim(),
+        );
+      else
+        await trySend(
+          ctx,
+          email,
+          "We got your booking request",
+          `Hello ${name},\n\nwe got your request for ${service.name} on ${when}. We will confirm it by email.\n\n${b.name || ""}`.trim(),
+        );
+      if (b.notify && EMAIL.test(b.notify))
+        await trySend(
+          ctx,
+          b.notify,
+          `New booking ${status === "confirmed" ? "" : "request: "}${when}`.slice(0, 150),
+          [
+            `${name} (${email}${phone ? `, ${phone}` : ""})`,
+            `${service.name}, ${service.minutes} minutes`,
+            when,
+            note && `Note: ${note}`,
+            "",
+            status === "confirmed"
+              ? "It was confirmed at once."
+              : "Open Tools > Plugins > Bookings to confirm or decline it.",
+          ]
+            .filter((x) => x !== false && x !== "")
+            .join("\n"),
+        );
+      return status === "confirmed"
+        ? problem(
+            200,
+            "Booked",
+            `Your booking is confirmed: ${service.name}, ${when}. We sent you an email.`,
+          )
+        : problem(
+            200,
+            "Thank you",
+            `We got your request for ${service.name}, ${when}. We will confirm it by email.`,
+          );
+    },
+    // The private calendar: only the confirmed bookings, and only with the secret address (spec 19, section 7).
+    async calendar(req, ctx) {
+      const feed = await ctx.storage.get("secrets", "calendar");
+      const given = String(req.query?.key ?? "");
+      if (
+        typeof feed !== "string" ||
+        feed.length < 32 ||
+        given.length !== feed.length ||
+        given !== feed
+      )
+        return problem(404, "Not found", "There is nothing at this address.");
+      const b = await read(ctx);
+      const confirmed = (await bookings(ctx)).filter((x) => x.status === "confirmed").reverse();
+      return { status: 200, text: calendar(b.name, confirmed), textType: "calendar" };
+    },
     // A visitor sends a review. It is kept apart until the owner has read it (spec 19, section 6): nothing is shown, and no
     // rating counts, before it is approved.
     async review(req, ctx) {
@@ -200,6 +553,115 @@ export default {
     },
   },
   blocks: {
+    booking: {
+      async render(props, ctx) {
+        const b = { ...(await read(ctx)), ...(await readBooking(ctx)) };
+        const wanted = clean(props?.service, 60).toLowerCase();
+        const service = b.services.find((x) => x.name.toLowerCase() === wanted) ?? b.services[0];
+        if (!service || !b.tz) return null;
+        const free = freeSlots(b, service, await bookings(ctx), Date.now(), b).slice(0, 60);
+        const children = [
+          {
+            id: "bk-title",
+            type: "heading",
+            props: { level: 2 },
+            content: [text(clean(props?.title, 80) || "Book a time")],
+            children: [],
+          },
+          paragraph("bk-what", [
+            text(
+              `${service.name}, ${service.minutes} minutes${service.price ? `, ${service.price}` : ""}`,
+              { bold: true },
+            ),
+          ]),
+        ];
+        if (free.length === 0)
+          children.push(
+            paragraph("bk-none", [
+              text("There are no free times at the moment. Please contact us."),
+            ]),
+          );
+        else
+          children.push({
+            id: "bk-form",
+            type: "form",
+            props: {
+              action: "/api/oks/plugins/business/book",
+              title: "",
+              submit: b.instant ? "Book now" : "Send booking request",
+              note: b.instant ? "" : "We will confirm your booking by email.",
+              noteHref: "",
+              token: await makeToken(ctx),
+              formId: "bookings",
+              fields: [
+                {
+                  name: "service",
+                  label: "Service",
+                  type: "hidden",
+                  required: false,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: service.name,
+                },
+                {
+                  name: "slot",
+                  label: "Time",
+                  type: "select",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: free.map(slotText),
+                  value: "",
+                },
+                {
+                  name: "name",
+                  label: "Your name",
+                  type: "text",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+                {
+                  name: "email",
+                  label: "Your email",
+                  type: "email",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+                {
+                  name: "phone",
+                  label: "Your phone number (optional)",
+                  type: "tel",
+                  required: false,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+                {
+                  name: "note",
+                  label: "A note (optional)",
+                  type: "textarea",
+                  required: false,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+              ],
+            },
+            content: null,
+            children: [],
+          });
+        return { id: "bk", type: "container", props: {}, content: null, children };
+      },
+    },
     reviews: {
       async render(props, ctx) {
         const reviews = await approvedReviews(ctx);
