@@ -8169,7 +8169,7 @@ describe.skipIf(!findBrowser())(
       const installed = await call(page, "POST", "/api/admin/plugins", {
         action: "install",
         file: bundled.json!["file"],
-        approved: [],
+        approved: ["admin:pages", "routes:public"],
       });
       expect(installed.status, JSON.stringify(installed.json)).toBe(200);
       const saved = await call(page, "POST", "/api/admin/plugins", {
@@ -8281,6 +8281,134 @@ describe.skipIf(!findBrowser())(
       // With the plugin gone, the page says nothing about a business and draws none of its blocks.
       const gone = await fetch(site.base + "/").then((r) => r.text());
       expect(gone).not.toContain("CafeOrCoffeeShop");
+    }, 120_000);
+
+    test("BZ-03: a visitor's review waits for the owner, only an approved review is shown and counted in the structured data, and a rejected one goes again", async () => {
+      const page = await signedIn(owner);
+      const bundled = await call(page, "POST", "/api/admin/plugins", {
+        action: "bundled",
+        name: "business",
+      });
+      const installed = await call(page, "POST", "/api/admin/plugins", {
+        action: "install",
+        file: bundled.json!["file"],
+        approved: ["admin:pages", "routes:public"],
+      });
+      expect(installed.status, JSON.stringify(installed.json)).toBe(200);
+      const saved = await call(page, "POST", "/api/admin/plugins", {
+        action: "saveSettings",
+        id: "business",
+        values: { name: "Weber Garden Cafe", type: "Cafe", city: "Berlin" },
+      });
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const made = await call(page, "POST", "/api/admin/entries", {
+        type: "page",
+        title: "Reviews",
+      });
+      const id = String(made.json!["id"]);
+      const ratingOf = (html: string) =>
+        [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+          .flatMap((m) => ([] as Record<string, unknown>[]).concat(JSON.parse(m[1]!)))
+          .find((d) => d["@type"] === "CafeOrCoffeeShop")?.["aggregateRating"];
+      try {
+        const put = await call(page, "PUT", `/api/admin/entries/${id}`, {
+          title: "Reviews",
+          slugPart: "guest-reviews",
+          status: "published",
+          blocks: [
+            b("paragraph", {}, [], words("What our guests say.")),
+            {
+              id: "rv1",
+              type: "business-reviews",
+              props: { title: "Guest reviews" },
+              content: null,
+              children: [],
+            },
+          ],
+          revision: 1,
+        });
+        expect(put.status, JSON.stringify(put.json)).toBe(200);
+        const shown = await fetch(site.base + "/guest-reviews").then((r) => r.text());
+        expect(shown).toContain("There are no reviews yet.");
+        expect(shown).toContain('action="/api/oks/plugins/business/review"');
+        expect(ratingOf(shown)).toBeUndefined();
+        const hidden = (name: string) =>
+          new RegExp(`<input type="hidden" name="${name}" value="([^"]*)">`).exec(shown)?.[1] ?? "";
+        // A person needs a few seconds to write a review.
+        await new Promise((r) => setTimeout(r, 3500));
+        const sent = await fetch(`${site.base}/api/oks/plugins/business/review`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            _form: hidden("_form"),
+            _t: hidden("_t"),
+            _hp: "",
+            stars: "5",
+            name: "Mia",
+            text: "A lovely garden and the best cake in town.",
+            email: "mia@example.com",
+          }).toString(),
+        });
+        expect(sent.status).toBe(200);
+        expect(await sent.text()).toContain("shown after the owner has read it");
+        // Waiting: not on the page, not in the data, but in the owner's list.
+        const rows = async () =>
+          (await call(page, "GET", "/api/admin/plugin-pages?plugin=business&page=reviews"))
+            .json as {
+            view: { rows: { key: string; cells: unknown[] }[] };
+          };
+        const waiting = (await rows()).view.rows;
+        expect(waiting.length).toBe(1);
+        expect(JSON.stringify(waiting[0]!.cells)).toContain("pending");
+        expect(JSON.stringify(waiting[0]!.cells)).toContain("best cake in town");
+        const still = await fetch(site.base + "/guest-reviews").then((r) => r.text());
+        expect(still).not.toContain("best cake in town");
+        expect(ratingOf(still)).toBeUndefined();
+        // Approved: shown, averaged and in the structured data (BZ-03).
+        const act = (action: string) =>
+          call(page, "POST", "/api/admin/plugin-pages", {
+            plugin: "business",
+            page: "reviews",
+            action,
+            key: waiting[0]!.key,
+          });
+        expect((await act("approve")).status).toBe(200);
+        await expect
+          .poll(
+            async () =>
+              (await fetch(site.base + "/guest-reviews").then((r) => r.text())).includes(
+                "best cake in town",
+              ),
+            {
+              timeout: 20_000,
+            },
+          )
+          .toBe(true);
+        const approved = await fetch(site.base + "/guest-reviews").then((r) => r.text());
+        expect(approved).toContain("5.0 out of 5, from 1 review");
+        expect(approved).toContain("Mia");
+        expect(approved).not.toContain("mia@example.com");
+        expect(ratingOf(approved)).toMatchObject({ ratingValue: "5", reviewCount: 1 });
+        // Rejected after all: gone from the page and from the data.
+        expect((await act("reject")).status).toBe(200);
+        await expect
+          .poll(
+            async () =>
+              (await fetch(site.base + "/guest-reviews").then((r) => r.text())).includes(
+                "best cake in town",
+              ),
+            {
+              timeout: 20_000,
+            },
+          )
+          .toBe(false);
+        expect(
+          ratingOf(await fetch(site.base + "/guest-reviews").then((r) => r.text())),
+        ).toBeUndefined();
+      } finally {
+        await call(page, "DELETE", "/api/admin/plugins?id=business");
+        await call(page, "DELETE", `/api/admin/entries/${id}`);
+      }
     }, 120_000);
 
     test("PG-12: the Forms plugin's Messages page lists what visitors sent, filters it, marks and deletes it, and downloads it", async () => {

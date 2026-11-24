@@ -1,10 +1,12 @@
 // /api/admin/plugin-pages: GET ?plugin=&page= (&filter=&after=) the rows of a plugin's admin page; GET with &export=1 the
 // same items as a CSV file; POST { plugin, page, action, key } does what a button on a row does. Only people who manage plugins.
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
+import { refreshPlugins } from "./refresh-cache";
 import { actOnPluginPage, exportPluginPage, loadPluginPage } from "./plugin-pages";
 
 const STATUS = { forbidden: 403, invalid: 400, not_found: 404 } as const;
@@ -61,5 +63,9 @@ export async function POST(request: Request) {
     String(input.key ?? ""),
   );
   if (!result.ok) return reply(result, STATUS[result.code]);
+  // Approving or deleting a review changes the rating in the structured data of every page (spec 19, section 6).
+  revalidateTag("settings", { expire: 0 });
+  // The pages that show a plugin's block (the reviews) are drawn again.
+  refreshPlugins();
   return NextResponse.json({ ok: true });
 }

@@ -58,6 +58,33 @@ for (const { kind, open, skip } of openers) {
       expect(await loadBusinessInfo(db.runner, OTHER)).toMatchObject({ name: "Elsewhere" });
     });
 
+    test("BZ-03: the rating counts only approved reviews kept by this site's own business plugin", async () => {
+      await plugin("business", "enabled", SITE, { name: "Weber Garden Cafe" });
+      await plugin("other", "enabled", SITE, { name: "x" });
+      const ext = String(
+        (await db.runner.all(`select "id" from "extensions" where "key" = 'business'`))[0]!["id"],
+      );
+      const other = String(
+        (await db.runner.all(`select "id" from "extensions" where "key" = 'other'`))[0]!["id"],
+      );
+      const put = (id: string, key: string, value: unknown) =>
+        db.run(
+          "insert into extension_storage (extension_id, collection, key, value, size_bytes, updated_at) values (?, 'reviews', ?, ?, 10, ?)",
+          [id, key, JSON.stringify(value), T],
+        );
+      expect((await loadBusinessInfo(db.runner, SITE))?.rating).toBeUndefined();
+      await put(ext, "a", { status: "approved", stars: 5 });
+      await put(ext, "b", { status: "approved", stars: 4 });
+      await put(ext, "c", { status: "pending", stars: 1 });
+      await put(ext, "d", { status: "rejected", stars: 1 });
+      await put(other, "e", { status: "approved", stars: 1 });
+      expect((await loadBusinessInfo(db.runner, SITE))?.rating).toEqual({ value: 4.5, count: 2 });
+      await db.run(`update extension_storage set value = ? where key = 'c'`, [
+        JSON.stringify({ status: "approved", stars: 3 }),
+      ]);
+      expect((await loadBusinessInfo(db.runner, SITE))?.rating).toEqual({ value: 4, count: 3 });
+    });
+
     test("the details and the hours are read as they were saved", async () => {
       await plugin("business", "enabled", SITE, {
         name: "Weber Garden Cafe",

@@ -3,6 +3,66 @@
 // details, and a payment link. The structured data for search engines is written by the site from the same settings. The
 // plugin never sees a visitor, takes no card details and sends nothing anywhere.
 
+/* global crypto, TextEncoder, URLSearchParams */
+
+const DAY = 24 * 60 * 60 * 1000;
+const MIN_SECONDS = 3;
+const MOST_REVIEWS_PER_HOUR = 20;
+const BAD_WORDS = ["viagra", "cialis", "casino", "porn"];
+const EMAIL = /^[^\s@,;<>]{1,64}@[^\s@,;<>]{1,190}\.[^\s@,;<>]{2,}$/;
+
+const hex = (bytes) =>
+  [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+async function hmac(secret, text) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text)));
+}
+
+async function secretOf(ctx) {
+  let secret = await ctx.storage.get("secrets", "hmac");
+  if (typeof secret !== "string" || secret.length < 32) {
+    secret = hex(crypto.getRandomValues(new Uint8Array(32)));
+    await ctx.storage.set("secrets", "hmac", secret);
+  }
+  return secret;
+}
+
+/** The time the form was drawn, signed, so a program cannot send a review faster than a person. */
+async function makeToken(ctx) {
+  const at = Date.now();
+  return `${at}.${(await hmac(await secretOf(ctx), `reviews.${at}`)).slice(0, 32)}`;
+}
+
+/** "ok", "fast", "old" or "invalid". */
+async function readToken(ctx, token) {
+  const m = /^(\d{10,15})\.([0-9a-f]{32})$/.exec(token);
+  if (!m) return "invalid";
+  if ((await hmac(await secretOf(ctx), `reviews.${m[1]}`)).slice(0, 32) !== m[2]) return "invalid";
+  const age = Date.now() - Number(m[1]);
+  if (age < MIN_SECONDS * 1000) return "fast";
+  return age > 30 * DAY ? "old" : "ok";
+}
+
+const problem = (status, title, text) => ({ status, page: { title, text } });
+
+/** The reviews that were approved, newest first (the latest 500 are read). */
+async function approvedReviews(ctx) {
+  const rows = await ctx.storage.list("reviews", { limit: 500, order: "desc" });
+  return rows
+    .map((r) => r.value)
+    .filter(
+      (v) =>
+        v && v.status === "approved" && Number.isInteger(v.stars) && v.stars >= 1 && v.stars <= 5,
+    );
+}
+
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const TIME = /^(?:[01]?\d|2[0-3]):[0-5]\d$|^24:00$/;
 const SPAN = /^\s*(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})\s*$/;
@@ -81,7 +141,166 @@ const paragraph = (id, content) => ({
 });
 
 export default {
+  routes: {
+    // A visitor sends a review. It is kept apart until the owner has read it (spec 19, section 6): nothing is shown, and no
+    // rating counts, before it is approved.
+    async review(req, ctx) {
+      const params = new URLSearchParams(req.body);
+      const timing = await readToken(ctx, params.get("_t") ?? "");
+      const stars = Number(params.get("stars") ?? "");
+      const name = clean(params.get("name"), 60);
+      const text = clean(params.get("text"), 1000);
+      const email = clean(params.get("email"), 200).toLowerCase();
+      const errors = [];
+      if (!Number.isInteger(stars) || stars < 1 || stars > 5)
+        errors.push("Your rating: choose from 1 to 5 stars.");
+      if (name === "") errors.push("Your name: this is required.");
+      if (text.length < 10) errors.push("Your review: please write at least a few words.");
+      if (email !== "" && !EMAIL.test(email))
+        errors.push("Your email: this is not an email address.");
+      const lower = `${name} ${text}`.toLowerCase();
+      const spam =
+        (params.get("_hp") ?? "") !== "" ||
+        timing === "invalid" ||
+        timing === "fast" ||
+        (lower.match(/https?:\/\/|www\./g) ?? []).length > 0 ||
+        BAD_WORDS.some((w) => lower.includes(w));
+      if (!spam && timing === "old")
+        return problem(
+          400,
+          "This page is out of date",
+          "Go back, reload the page and send your review again.",
+        );
+      if (!spam && errors.length > 0)
+        return problem(400, "Please check your answers", errors.join("\n\n"));
+      // A program is told the same as a person: it learns nothing about why a review was kept apart.
+      const thanks = problem(
+        200,
+        "Thank you",
+        "Thank you. Your review will be shown after the owner has read it.",
+      );
+      const hour = Math.floor(Date.now() / 3_600_000);
+      const row = await ctx.storage.get("rate", "reviews");
+      const n = row && row.hour === hour ? row.n : 0;
+      await ctx.storage.set("rate", "reviews", { hour, n: n + 1 });
+      if (n >= MOST_REVIEWS_PER_HOUR) return thanks;
+      if (spam && !(stars >= 1 && stars <= 5 && name && text)) return thanks;
+      const at = Date.now();
+      const key = `${String(at).padStart(15, "0")}-${hex(crypto.getRandomValues(new Uint8Array(3)))}`;
+      await ctx.storage.set("reviews", key, {
+        status: spam ? "spam" : "pending",
+        at,
+        stars: Math.min(Math.max(Math.trunc(stars) || 1, 1), 5),
+        name,
+        text,
+        // The address is kept only so that the owner can find and delete a person's review (spec 18, section 5); it is never shown.
+        emails: email !== "" && EMAIL.test(email) ? [email] : [],
+      });
+      return thanks;
+    },
+  },
   blocks: {
+    reviews: {
+      async render(props, ctx) {
+        const reviews = await approvedReviews(ctx);
+        const most = Math.min(Math.max(Math.trunc(Number(props?.most)) || 5, 1), 20);
+        const children = [
+          {
+            id: "rv-title",
+            type: "heading",
+            props: { level: 2 },
+            content: [text(clean(props?.title, 80) || "Reviews")],
+            children: [],
+          },
+        ];
+        if (reviews.length > 0) {
+          const average = reviews.reduce((n, r) => n + r.stars, 0) / reviews.length;
+          children.push(
+            paragraph("rv-average", [
+              text(
+                `${average.toFixed(1)} out of 5, from ${reviews.length} review${reviews.length === 1 ? "" : "s"}`,
+                { bold: true },
+              ),
+            ]),
+          );
+          for (const [i, r] of reviews.slice(0, most).entries()) {
+            children.push({
+              id: `rv-q${i}`,
+              type: "quote",
+              props: {},
+              content: [text(clean(r.text, 1000))],
+              children: [],
+            });
+            children.push(
+              paragraph(`rv-by${i}`, [
+                text(
+                  `${r.stars} out of 5 stars, ${clean(r.name, 60)}, ${new Date(r.at).toISOString().slice(0, 10)}`,
+                ),
+              ]),
+            );
+          }
+        } else children.push(paragraph("rv-none", [text("There are no reviews yet.")]));
+        if (props?.show_form !== false)
+          children.push({
+            id: "rv-form",
+            type: "form",
+            props: {
+              action: "/api/oks/plugins/business/review",
+              title: "Write a review",
+              submit: "Send review",
+              note: "Your review is shown after the owner has read it.",
+              noteHref: "",
+              token: await makeToken(ctx),
+              formId: "reviews",
+              fields: [
+                {
+                  name: "stars",
+                  label: "Your rating (5 is best)",
+                  type: "select",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: ["5", "4", "3", "2", "1"],
+                  value: "",
+                },
+                {
+                  name: "name",
+                  label: "Your name",
+                  type: "text",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+                {
+                  name: "text",
+                  label: "Your review",
+                  type: "textarea",
+                  required: true,
+                  help: "",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+                {
+                  name: "email",
+                  label: "Your email (optional, never shown)",
+                  type: "email",
+                  required: false,
+                  help: "Only so that you can ask us to delete your review later.",
+                  placeholder: "",
+                  options: [],
+                  value: "",
+                },
+              ],
+            },
+            content: null,
+            children: [],
+          });
+        return { id: "rv", type: "container", props: {}, content: null, children };
+      },
+    },
     "opening-hours": {
       async render(props, ctx) {
         const b = await read(ctx);

@@ -40,13 +40,18 @@ const SETTINGS = {
 };
 
 describe("the shipped plugin file", () => {
-  test("is a valid plugin file that asks for no permission and offers the three blocks", () => {
+  test("is a valid plugin file that offers the four blocks", () => {
     const read = readPluginFile(JSON.stringify(file));
     expect(read.ok ? "" : read.message).toBe("");
     if (!read.ok) return;
     expect(read.file.manifest.id).toBe("business");
-    expect(read.file.manifest.permissions).toEqual([]);
-    expect(read.file.manifest.blocks).toEqual(["opening-hours", "contact-details", "payment-link"]);
+    expect([...read.file.manifest.permissions].sort()).toEqual(["admin:pages", "routes:public"]);
+    expect(read.file.manifest.blocks).toEqual([
+      "opening-hours",
+      "contact-details",
+      "payment-link",
+      "reviews",
+    ]);
     expect(Object.keys(read.file.manifest.settings ?? {})).toContain("hours_sun");
   });
 });

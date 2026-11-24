@@ -1,6 +1,6 @@
 // The business the Business plugin describes (spec 19, section 3), read from the plugin's saved settings while the plugin is
 // switched on. The site reads it for the LocalBusiness structured data of every page; the plugin itself never sees a visitor.
-import { BUSINESS_PLUGIN_ID, readBusiness, type BusinessInfo } from "@oks-page/core";
+import { BUSINESS_PLUGIN_ID, ratingOf, readBusiness, type BusinessInfo } from "@oks-page/core";
 import type { SqlRunner } from "@oks-page/db";
 
 const decode = (runner: SqlRunner, raw: unknown): unknown => {
@@ -28,5 +28,13 @@ export async function loadBusinessInfo(
   );
   const values: Record<string, unknown> = {};
   for (const r of rows) values[String(r["key"])] = decode(runner, r["value"]);
-  return readBusiness(values);
+  const business = readBusiness(values);
+  if (!business) return null;
+  // The rating of the reviews collected on the site and approved (the latest 1,000 are read).
+  const reviews = await runner.all(
+    `select "value" from "extension_storage" where "extension_id" = ? and "collection" = 'reviews' order by "key" desc limit 1000`,
+    [String(found[0]!["id"])],
+  );
+  const rating = ratingOf(reviews.map((r) => decode(runner, r["value"])));
+  return rating ? { ...business, rating } : business;
 }

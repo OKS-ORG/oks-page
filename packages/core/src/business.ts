@@ -22,6 +22,8 @@ export interface BusinessInfo {
   social: string[];
   week: BusinessHours[];
   special: { date: string; note: string; times: [string, string][] }[];
+  /** The rating of the reviews collected on the site and approved (spec 19, section 6); never from anywhere else. */
+  rating?: { value: number; count: number };
 }
 
 const SCHEMA_TYPES: Record<string, string> = {
@@ -100,6 +102,24 @@ export function parseSpecialDays(text: string): BusinessInfo["special"] {
     });
   }
   return out;
+}
+
+/** The rating of a list of stored reviews: only approved ones with a whole number of stars from 1 to 5 count. */
+export function ratingOf(values: unknown[]): { value: number; count: number } | undefined {
+  let sum = 0;
+  let count = 0;
+  for (const v of values) {
+    const r = (v !== null && typeof v === "object" ? v : {}) as {
+      status?: unknown;
+      stars?: unknown;
+    };
+    if (r.status !== "approved" || typeof r.stars !== "number" || !Number.isInteger(r.stars))
+      continue;
+    if (r.stars < 1 || r.stars > 5) continue;
+    sum += r.stars;
+    count += 1;
+  }
+  return count > 0 ? { value: sum / count, count } : undefined;
 }
 
 /** The business from the plugin's saved settings, or null when it has no name (nothing to say about it). */
@@ -181,5 +201,17 @@ export function localBusinessStructuredData(b: BusinessInfo, origin: string): un
       : {}),
     ...(b.social.length > 0 ? { sameAs: b.social } : {}),
     ...(hours.length > 0 ? { openingHoursSpecification: hours } : {}),
+    // Only reviews collected on this site and approved by the owner count (BZ-03).
+    ...(b.rating && b.rating.count > 0
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: String(Math.round(b.rating.value * 10) / 10),
+            reviewCount: b.rating.count,
+            bestRating: "5",
+            worstRating: "1",
+          },
+        }
+      : {}),
   };
 }

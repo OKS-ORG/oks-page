@@ -2,7 +2,7 @@
 // typed can put anything but text into a page's head.
 import { describe, expect, test } from "vitest";
 import { jsonLd } from "./seo-meta.js";
-import { localBusinessStructuredData, readBusiness } from "./business.js";
+import { localBusinessStructuredData, ratingOf, readBusiness } from "./business.js";
 
 const SETTINGS = {
   name: "Weber Garden Cafe",
@@ -102,6 +102,49 @@ describe("LocalBusiness structured data", () => {
       name: "Weber Garden Cafe",
       url: "https://garden.example/",
     });
+  });
+
+  test("BZ-03: the rating appears only when approved reviews were counted, rounded to one place", () => {
+    const b = readBusiness(SETTINGS)!;
+    expect(localBusinessStructuredData(b, "https://g.example")).not.toHaveProperty(
+      "aggregateRating",
+    );
+    expect(
+      localBusinessStructuredData(
+        { ...b, rating: { value: 4.666, count: 3 } },
+        "https://g.example",
+      ),
+    ).toMatchObject({
+      aggregateRating: {
+        "@type": "AggregateRating",
+        ratingValue: "4.7",
+        reviewCount: 3,
+        bestRating: "5",
+        worstRating: "1",
+      },
+    });
+    expect(
+      localBusinessStructuredData({ ...b, rating: { value: 0, count: 0 } }, "https://g.example"),
+    ).not.toHaveProperty("aggregateRating");
+  });
+
+  test("only approved reviews with a whole number of stars from 1 to 5 count", () => {
+    expect(
+      ratingOf([
+        { status: "approved", stars: 5 },
+        { status: "approved", stars: 4 },
+        { status: "pending", stars: 1 },
+        { status: "rejected", stars: 1 },
+        { status: "spam", stars: 1 },
+        { status: "approved", stars: 6 },
+        { status: "approved", stars: 0 },
+        { status: "approved", stars: 4.5 },
+        { status: "approved", stars: "5" },
+        null,
+        "x",
+      ]),
+    ).toEqual({ value: 4.5, count: 2 });
+    expect(ratingOf([])).toBeUndefined();
   });
 
   test("text that tries to end the script tag cannot (it goes through the same escaping as every page)", () => {

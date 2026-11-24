@@ -134,8 +134,9 @@ export async function POST(request: Request) {
       pluginSettingsService(),
     );
     if (!result.ok) return reply(result, STATUS[result.code]);
-    // A plugin's details may be in the structured data of every page (the Business plugin).
+    // A plugin's details may be in the structured data of every page (the Business plugin), and its blocks draw from its settings.
     revalidateTag("settings", { expire: 0 });
+    refreshPlugins();
     return NextResponse.json({ ok: true });
   }
   if (input.action === "preview") {
