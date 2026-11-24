@@ -1,7 +1,14 @@
 "use client";
 // Settings > Privacy (design batch 5; spec 18): the cookies the site sets, whether a consent notice is needed, and the
 // privacy page (choose one, or have a draft written). Visitor counts come in a later release.
-import type { KeepingRule, KeepingView, PrivacySettings, SiteCookie } from "@oks-page/core";
+import type {
+  ConsentTextField,
+  ConsentTexts,
+  KeepingRule,
+  KeepingView,
+  PrivacySettings,
+  SiteCookie,
+} from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import type { ConsentNeeds } from "./consent-needs";
 import { useState, type FormEvent } from "react";
@@ -21,6 +28,8 @@ export function PrivacySettingsScreen({
   pages,
   keeping,
   keepingRules,
+  consentTexts,
+  consentFields,
 }: {
   cookies: SiteCookie[];
   noVisitorCookies: boolean;
@@ -30,6 +39,8 @@ export function PrivacySettingsScreen({
   pages: { id: string; title: string; status: string }[];
   keeping: KeepingView;
   keepingRules: KeepingRule[];
+  consentTexts: ConsentTexts;
+  consentFields: ConsentTextField[];
 }) {
   const [saved, setSaved] = useState(initial.pageId ?? "");
   const [pageId, setPageId] = useState(initial.pageId ?? "");
@@ -203,8 +214,86 @@ export function PrivacySettingsScreen({
         </p>
         <p role="status">{note}</p>
       </form>
+      <ConsentTextsSection initial={consentTexts} fields={consentFields} />
       <KeepingSection initial={keeping} rules={keepingRules} />
     </>
+  );
+}
+
+/** The words of the consent notice (spec 18, section 2). The rules stay fixed: both answers look and weigh the same. */
+function ConsentTextsSection({
+  initial,
+  fields,
+}: {
+  initial: ConsentTexts;
+  fields: ConsentTextField[];
+}) {
+  const [values, setValues] = useState<Record<string, string>>({ ...initial });
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setProblem(null);
+    setNote("Saving…");
+    const response = await fetch("/api/admin/settings/privacy", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ consentTexts: values }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      texts?: ConsentTexts;
+      error?: { message?: string };
+    } | null;
+    if (!response.ok || !body?.texts) {
+      setNote("");
+      setProblem(body?.error?.message ?? "The texts could not be saved.");
+      return;
+    }
+    setValues({ ...body.texts });
+    setNote("The notice texts are saved.");
+  }
+
+  return (
+    <form aria-labelledby="privacy-texts" onSubmit={(event) => void save(event)}>
+      <h2 id="privacy-texts">Words of the consent notice</h2>
+      <p>
+        Change what the notice says. Accept and refuse always look the same and nothing is ticked
+        for the visitor, whatever the words. Leave a field empty to use the standard words.
+      </p>
+      {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
+      {fields.map((f) => (
+        <p key={f.id}>
+          <label>
+            {f.label}
+            <br />
+            {f.long ? (
+              <textarea
+                value={values[f.id] ?? ""}
+                maxLength={f.max}
+                rows={4}
+                onChange={(e) => setValues({ ...values, [f.id]: e.target.value })}
+                style={{ ...FIELD, minBlockSize: "6rem" }}
+              />
+            ) : (
+              <input
+                type="text"
+                value={values[f.id] ?? ""}
+                maxLength={f.max}
+                onChange={(e) => setValues({ ...values, [f.id]: e.target.value })}
+                style={FIELD}
+              />
+            )}
+          </label>
+        </p>
+      ))}
+      <p>
+        <Button type="submit" color="primary">
+          Save notice texts
+        </Button>
+      </p>
+      <p role="status">{note}</p>
+    </form>
   );
 }
 
@@ -315,7 +404,7 @@ function KeepingSection({ initial, rules }: { initial: KeepingView; rules: Keepi
       </table>
       <p>
         {view.lastRun
-          ? `Last clean-up: ${new Date(view.lastRun.at).toISOString().slice(0, 16).replace("T", " ")} UTC. It deleted ${view.lastRun.deleted.email_log} email record(s), ${view.lastRun.deleted.audit_log} audit entr${view.lastRun.deleted.audit_log === 1 ? "y" : "ies"} and ${view.lastRun.deleted.search_terms} search count(s).`
+          ? `Last clean-up: ${new Date(view.lastRun.at).toISOString().slice(0, 16).replace("T", " ")} UTC. It deleted ${view.lastRun.deleted.email_log} email record(s), ${view.lastRun.deleted.audit_log} audit entr${view.lastRun.deleted.audit_log === 1 ? "y" : "ies"} and ${view.lastRun.deleted.search_terms} search count(s) and ${view.lastRun.deleted.consent_records} consent record(s).`
           : "The first clean-up has not run yet. It runs once a day."}
       </p>
       <p>

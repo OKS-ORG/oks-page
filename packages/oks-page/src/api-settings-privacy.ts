@@ -4,6 +4,7 @@ import {
   SMTP_PRESETS,
   loadEmailSettings,
   loadGeneralSettings,
+  saveConsentTexts,
   saveKeeping,
   savePrivacyPage,
   writePrivacyDraft,
@@ -36,6 +37,17 @@ export async function PUT(request: Request) {
     );
     if (!saved.ok) return reply(saved, saved.code === "forbidden" ? 403 : 400);
     return NextResponse.json({ ok: true, keeping: saved.keeping });
+  }
+  // The words of the consent notice (spec 18, section 2) are saved on their own too.
+  if (input["consentTexts"] !== undefined) {
+    const saved = await saveConsentTexts(
+      getRunner(),
+      await actorOf(member),
+      member.siteId,
+      input["consentTexts"],
+    );
+    if (!saved.ok) return reply(saved, saved.code === "forbidden" ? 403 : 400);
+    return NextResponse.json({ ok: true, texts: saved.texts });
   }
   const result = await savePrivacyPage(
     getRunner(),

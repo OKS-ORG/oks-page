@@ -12582,7 +12582,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
       ],
     );
     const info = await (await fetch(site.base + "/api/privacy/consent")).json();
-    expect(info).toEqual({
+    expect(info).toMatchObject({
       needed: true,
       purposes: ["statistics", "media"],
       version: "statistics,media",
@@ -12693,6 +12693,68 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     });
     expect(refused.status).toBe(400);
     expect((await db.run("select id from consent_records")).length).toBe(3);
+  });
+
+  test("PR-09: the owner changes the words of the consent notice in Settings > Privacy, a text that is too long is refused, and the visitor sees the new words", async () => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await page.goto(site.base + "/admin/settings/privacy");
+    await page.getByRole("heading", { name: "Words of the consent notice", level: 2 }).waitFor();
+    const heading = page.getByLabel("Heading", { exact: true });
+    expect(await heading.inputValue()).toBe("Your privacy choices");
+    expect(await axeViolations(page)).toEqual([]);
+
+    // Too long: the field itself stops it, and the site refuses it too if it is sent anyway.
+    const tooLong = await page.request.put(site.base + "/api/admin/settings/privacy", {
+      headers: { origin: site.base },
+      data: { consentTexts: { title: "x".repeat(61) } },
+    });
+    expect(tooLong.status()).toBe(400);
+    expect(JSON.stringify(await tooLong.json())).toContain("Heading: use at most 60 characters.");
+
+    await heading.fill("Cookies and you");
+    await page.getByLabel("Button: accept everything").fill("Yes, please");
+    await page.getByLabel("Button: refuse everything").fill("No, thanks");
+    await page.getByRole("button", { name: "Save notice texts" }).click();
+    await page.getByText("The notice texts are saved.").waitFor();
+    await page.reload();
+    expect(await page.getByLabel("Heading", { exact: true }).inputValue()).toBe("Cookies and you");
+
+    // The visitor sees the new words (the notice only shows when something needs consent: PR-03 added a plugin and a video).
+    const info = (await (await fetch(site.base + "/api/privacy/consent")).json()) as {
+      texts: Record<string, string>;
+    };
+    expect(info.texts).toMatchObject({
+      title: "Cookies and you",
+      accept: "Yes, please",
+      refuse: "No, thanks",
+      save: "Save my choices",
+    });
+    const visitor = await browser.newPage();
+    await visitor.goto(site.base + "/consent-film");
+    const notice = visitor.getByRole("region", { name: "Cookies and you" });
+    await notice.waitFor();
+    const look = (name: string) =>
+      notice.getByRole("button", { name, exact: true }).evaluate((el) => {
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return [s.color, s.backgroundColor, s.borderTopWidth, s.fontSize, Math.round(r.height)];
+      });
+    expect(await look("Yes, please")).toEqual(await look("No, thanks"));
+    await visitor.close();
+
+    // Empty goes back to the standard words.
+    await page.getByLabel("Heading", { exact: true }).fill("");
+    await page.getByRole("button", { name: "Save notice texts" }).click();
+    await page.getByText("The notice texts are saved.").waitFor();
+    expect(await page.getByLabel("Heading", { exact: true }).inputValue()).toBe(
+      "Your privacy choices",
+    );
+    await page.close();
   });
 });
 

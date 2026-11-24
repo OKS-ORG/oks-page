@@ -1,6 +1,7 @@
 // /api/privacy/consent (spec 18, section 2). GET says whether the site needs a consent notice and what it asks about; POST
 // keeps what a visitor chose, as proof that they were asked (a time, the accepted purposes and the notice version, nothing
 // that points to a person). Open to everyone, so a visitor may only send a few choices an hour.
+import { DEFAULT_CONSENT_TEXTS, loadConsentTexts } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { isSameOrigin } from "./api-entries";
 import { consentInfoOf, recordConsent } from "./consent-record";
@@ -15,9 +16,15 @@ export async function GET() {
   try {
     siteId = await getSiteId();
   } catch {
-    return NextResponse.json({ needed: false, purposes: [], version: "" }, { headers: base });
+    return NextResponse.json(
+      { needed: false, purposes: [], version: "", texts: DEFAULT_CONSENT_TEXTS },
+      { headers: base },
+    );
   }
-  const info = consentInfoOf(await loadConsentNeeds(getRunner(), siteId));
+  const info = {
+    ...consentInfoOf(await loadConsentNeeds(getRunner(), siteId)),
+    texts: await loadConsentTexts(getRunner(), siteId),
+  };
   // A minute at most: a page that was opened a moment ago may not know about a plugin that was just switched on.
   return NextResponse.json(info, { headers: { ...base, "cache-control": "public, max-age=60" } });
 }

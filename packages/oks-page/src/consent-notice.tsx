@@ -7,11 +7,13 @@
 import { useEffect, useRef, useState } from "react";
 import { loadConsentedVideos } from "./block-behaviour";
 import { readChoice, STORE_KEY, writeChoice } from "./consent-choice";
+import { NOTICE_TEXTS, type NoticeTexts } from "./consent-notice-texts";
 
 interface Info {
   needed: boolean;
   purposes: string[];
   version: string;
+  texts?: Partial<NoticeTexts>;
 }
 
 const WORDS: Record<string, { name: string; what: string }> = {
@@ -94,6 +96,7 @@ export function ConsentNotice() {
   }, [open]);
 
   if (!info?.needed) return null;
+  const words: NoticeTexts = { ...NOTICE_TEXTS, ...info.texts };
 
   function save(accepted: string[]) {
     if (!info) return;
@@ -127,7 +130,7 @@ export function ConsentNotice() {
             setOpen(true);
           }}
         >
-          Privacy choices
+          {words.reopen}
         </button>
       </p>
     );
@@ -151,12 +154,9 @@ export function ConsentNotice() {
       }}
     >
       <h2 id="oks-consent-title" ref={heading} tabIndex={-1} style={{ marginBlock: "0 .5rem" }}>
-        Your privacy choices
+        {words.title}
       </h2>
-      <p style={{ marginBlock: "0 .75rem" }}>
-        This site would like to use the following. Nothing in this list is used unless you agree,
-        and you can change your mind at any time with the “Privacy choices” button.
-      </p>
+      <p style={{ marginBlock: "0 .75rem" }}>{words.intro}</p>
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 .75rem" }}>
         {info.purposes.map((p) => (
           <li key={p} style={{ marginBlockEnd: ".5rem" }}>
@@ -180,17 +180,17 @@ export function ConsentNotice() {
       </ul>
       <div style={{ display: "flex", flexWrap: "wrap", gap: ".75rem" }}>
         <button type="button" style={BUTTON} onClick={() => save(info.purposes)}>
-          Accept all
+          {words.accept}
         </button>
         <button type="button" style={BUTTON} onClick={() => save([])}>
-          Refuse all
+          {words.refuse}
         </button>
         <button
           type="button"
           style={BUTTON}
           onClick={() => save(info.purposes.filter((p) => picked.includes(p)))}
         >
-          Save my choices
+          {words.save}
         </button>
       </div>
     </section>

@@ -54,6 +54,7 @@ export * from "./reading-settings.js";
 export * from "./screen-sizes.js";
 export * from "./video-covers.js";
 export * from "./site-settings.js";
+export * from "./consent-texts.js";
 export * from "./keeping.js";
 export * from "./privacy-settings.js";
 export * from "./search-stats.js";

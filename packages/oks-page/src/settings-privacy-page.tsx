@@ -2,9 +2,11 @@
 import {
   SITE_COOKIES,
   consentNeeded,
+  CONSENT_TEXT_FIELDS,
   KEEPING_RULES,
   isSetupDone,
   listPrivacyPageChoices,
+  loadConsentTexts,
   loadKeeping,
   loadPrivacySettings,
   noVisitorCookies,
@@ -51,6 +53,8 @@ export default async function PrivacySettingsPage() {
         pages={await listPrivacyPageChoices(getRunner(), member.siteId)}
         keeping={await loadKeeping(getRunner(), member.siteId)}
         keepingRules={KEEPING_RULES}
+        consentTexts={await loadConsentTexts(getRunner(), member.siteId)}
+        consentFields={CONSENT_TEXT_FIELDS}
       />
     </AdminFrame>
   );
