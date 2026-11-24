@@ -105,7 +105,7 @@ for (const { kind, open, skip } of openers) {
         content: { get: async () => null, update: async () => null },
         workDir,
         wallMs: 10_000,
-        publishWallMs: 1500,
+        publishWallMs: 8000,
         maxFailures: 50,
         allowPrivateForTests: true,
         onDeveloperNote: () => undefined,

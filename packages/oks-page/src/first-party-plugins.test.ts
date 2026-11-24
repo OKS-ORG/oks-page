@@ -69,6 +69,47 @@ for (const { kind, open, skip } of openers) {
       expect(JSON.stringify(log[0]!["detail"])).toContain("setup");
     });
 
+    test("a site for a business also starts with the Business plugin, switched on and filled in (spec 19, section 2)", async () => {
+      const r = await installDefaultPlugins(db.runner, SITE, USER, "anna@example.com", settings(), {
+        purpose: "business",
+        siteName: "Weber Garden Cafe",
+        timeZone: "Europe/Berlin",
+      });
+      expect(r).toEqual({ ok: true });
+      const listed = await listPlugins(db.runner, SITE);
+      expect(listed.map((p) => [p.id, p.status]).sort()).toEqual([
+        ["business", "enabled"],
+        ["forms", "enabled"],
+      ]);
+      const business = listed.find((p) => p.id === "business")!;
+      expect(business.permissions.every((p) => p.approved)).toBe(true);
+      expect(business.pages.map((p) => p.id).sort()).toEqual(["bookings", "calendar", "reviews"]);
+      const view = await loadPluginSettings(db.runner, owner, SITE, "business", settings());
+      expect(view.ok && view.settings.values).toMatchObject({
+        name: "Weber Garden Cafe",
+        email: "anna@example.com",
+        time_zone: "Europe/Berlin",
+      });
+    });
+
+    test("a site for anything else, or with no time zone, starts as before", async () => {
+      await installDefaultPlugins(db.runner, SITE, USER, "anna@example.com", settings(), {
+        purpose: "blog",
+        siteName: "Anna's Garden",
+        timeZone: "Europe/Berlin",
+      });
+      expect((await listPlugins(db.runner, SITE)).map((p) => p.id)).toEqual(["forms"]);
+      await db.run("delete from extensions");
+      await installDefaultPlugins(db.runner, SITE, USER, "anna@example.com", settings(), {
+        purpose: "business",
+        siteName: "Cafe",
+        timeZone: null,
+      });
+      const view = await loadPluginSettings(db.runner, owner, SITE, "business", settings());
+      expect(view.ok && view.settings.values["time_zone"]).toBeFalsy();
+      expect(view.ok && view.settings.values["name"]).toBe("Cafe");
+    });
+
     test("running it twice does not install it twice, and the owner can remove it", async () => {
       await installDefaultPlugins(db.runner, SITE, USER, "anna@example.com", settings());
       const again = await installDefaultPlugins(

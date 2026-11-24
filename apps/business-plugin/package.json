@@ -10,7 +10,7 @@
     "type": "plugin",
     "id": "business",
     "displayName": "Business",
-    "description": "Your business on your site: details, opening hours, contact details, a payment link, reviews and booking requests, and the structured data search engines read. Write opening hours like 09:00-12:00, 13:00-17:00 (empty means closed). Special days like: 2026-12-25 closed Christmas Day; 2026-12-24 09:00-12:00 Christmas Eve. Services like: Haircut | 30 | 25 EUR; Colour | 90 | from 60 EUR.",
+    "description": "Your business on your site: details, opening hours, a map, contact details, a payment link, reviews and booking requests, and the structured data search engines read. Write opening hours like 09:00-12:00, 13:00-17:00 (empty means closed). Special days like: 2026-12-25 closed Christmas Day; 2026-12-24 09:00-12:00 Christmas Eve. Services like: Haircut | 30 | 25 EUR; Colour | 90 | from 60 EUR.",
     "permissions": [
       "admin:pages",
       "email:send",
@@ -22,7 +22,8 @@
       "contact-details",
       "payment-link",
       "reviews",
-      "booking"
+      "booking",
+      "map"
     ],
     "blockInfo": {
       "opening-hours": {
@@ -89,6 +90,26 @@
           "service": {
             "type": "text",
             "label": "Service (a name from your services; empty: the first)"
+          }
+        }
+      },
+      "map": {
+        "label": "Map",
+        "settings": {
+          "provider": {
+            "type": "text",
+            "label": "Which map to open",
+            "default": "osm",
+            "options": [
+              {
+                "value": "osm",
+                "label": "OpenStreetMap"
+              },
+              {
+                "value": "google",
+                "label": "Google Maps"
+              }
+            ]
           }
         }
       }

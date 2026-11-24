@@ -1,5 +1,6 @@
 // POST /api/setup: the last step of the setup wizard. Makes the site and the first Administrator, then signs them in.
 import { runSetup, SetupError, type SetupInput } from "@oks-page/core";
+import { isTimeZone } from "@oks-page/content-safety";
 import { NextResponse } from "next/server";
 import { CLIENT_HEADER, getAuth, requestOrigin } from "./auth";
 import { getRunner } from "./db";
@@ -47,6 +48,12 @@ export async function POST(request: Request) {
       made.userId,
       input.admin.email.trim(),
       pluginSettingsService(),
+      {
+        ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
+        siteName: input.siteName,
+        timeZone:
+          typeof input.timeZone === "string" && isTimeZone(input.timeZone) ? input.timeZone : null,
+      },
     );
     if (!plugins.ok)
       console.error("[oks] The Forms plugin could not be installed:", plugins.message);

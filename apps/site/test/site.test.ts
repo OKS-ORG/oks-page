@@ -14047,3 +14047,63 @@ describe.skipIf(!findBrowser())(
     });
   },
 );
+
+describe("the setup wizard for a business (spec 19, section 2)", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-business-setup-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "b".repeat(40) });
+  }, 300_000);
+
+  afterAll(async () => {
+    site?.server.kill();
+    await db?.close();
+  });
+
+  test("BZ-08: a site that says it is for a business starts with Forms and the Business plugin, switched on, filled in with its name, the owner's email and the time zone", async () => {
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Weber Garden Cafe",
+        purpose: "business",
+        timeZone: "Europe/Berlin",
+        starterContent: true,
+        admin: { name: "Anna", email: "anna@example.com", password: "a-long-password" },
+      }),
+    });
+    expect(made.status).toBe(200);
+    const plugins = await db.run(
+      "select key, status from extensions where kind = 'plugin' order by key",
+    );
+    expect(plugins).toEqual([
+      { key: "business", status: "enabled" },
+      { key: "forms", status: "enabled" },
+    ]);
+    const values = await db.run(
+      `select s.key, s.value from extension_settings s join extensions e on e.id = s.extension_id where e.key = 'business' order by s.key`,
+    );
+    const got = Object.fromEntries(
+      values.map((r) => [String(r["key"]), JSON.parse(String(r["value"]))]),
+    );
+    expect(got).toMatchObject({
+      name: "Weber Garden Cafe",
+      email: "anna@example.com",
+      time_zone: "Europe/Berlin",
+    });
+    // Its structured data is on the front page from the first minute.
+    await expect
+      .poll(
+        async () =>
+          (await (await fetch(site.base + "/")).text()).includes('"name":"Weber Garden Cafe"'),
+        {
+          timeout: 20_000,
+        },
+      )
+      .toBe(true);
+    const html = await (await fetch(site.base + "/")).text();
+    expect(html).toContain("LocalBusiness");
+  });
+});

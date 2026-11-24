@@ -21,6 +21,15 @@ export const BUNDLED_PLUGINS: Record<string, string> = {
   business: BUSINESS_PLUGIN_TEXT,
 };
 
+/** What the wizard knows about the site, for the plugins that start from it. */
+export interface DefaultPluginsOptions {
+  /** What the owner said the site is for. A site for a business starts with the Business plugin too. */
+  purpose?: string;
+  siteName?: string;
+  /** The site's time zone, when the wizard had a real one. */
+  timeZone?: string | null;
+}
+
 export type DefaultPluginsResult = { ok: true } | { ok: false; message: string };
 
 /**
@@ -35,6 +44,7 @@ export async function installDefaultPlugins(
   userId: string,
   adminEmail: string,
   settings: PluginSettings,
+  options: DefaultPluginsOptions = {},
 ): Promise<DefaultPluginsResult> {
   // The person who set the site up acts here with the plugin rights, as the one who made the site.
   const actor: Actor = { userId, can: () => true };
@@ -58,7 +68,35 @@ export async function installDefaultPlugins(
       { send_to: adminEmail },
       settings,
     );
-    return saved.ok ? { ok: true } : { ok: false, message: saved.message };
+    if (!saved.ok) return { ok: false, message: saved.message };
+    // A site for a business also starts with the Business plugin, switched on, with the business name, the owner's email and the
+    // site's time zone filled in (spec 19, section 2). If it cannot be added the site and Forms are still there.
+    if (options.purpose === "business") {
+      const business = await installPlugin(
+        runner,
+        actor,
+        siteId,
+        BUSINESS_PLUGIN_TEXT,
+        businessFile.manifest.permissions,
+        "setup",
+      );
+      if (!business.ok)
+        return business.code === "taken" ? { ok: true } : { ok: false, message: business.message };
+      const filled = await savePluginSettings(
+        runner,
+        actor,
+        siteId,
+        businessFile.manifest.id,
+        {
+          name: (options.siteName ?? "").trim().slice(0, 120),
+          email: adminEmail,
+          ...(options.timeZone ? { time_zone: options.timeZone } : {}),
+        },
+        settings,
+      );
+      if (!filled.ok) return { ok: false, message: filled.message };
+    }
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,

@@ -40,7 +40,7 @@ const SETTINGS = {
 };
 
 describe("the shipped plugin file", () => {
-  test("is a valid plugin file that offers the five blocks", () => {
+  test("is a valid plugin file that offers the six blocks", () => {
     const read = readPluginFile(JSON.stringify(file));
     expect(read.ok ? "" : read.message).toBe("");
     if (!read.ok) return;
@@ -56,6 +56,7 @@ describe("the shipped plugin file", () => {
       "payment-link",
       "reviews",
       "booking",
+      "map",
     ]);
     expect(Object.keys(read.file.manifest.settings ?? {})).toContain("hours_sun");
   });
@@ -129,6 +130,29 @@ describe("the blocks", () => {
     expect(html).toContain('href="tel:+49301234567"');
     expect(html).toContain('href="mailto:hello@weber.example"');
     expect(await render("contact-details", {}, {})).toBeNull();
+  });
+
+  test("map: the core's map block filled from the address, which asks a map company for nothing until the visitor follows its link", async () => {
+    const html = await page(await render("map", {}, SETTINGS));
+    expect(html).toContain('<p class="map">');
+    expect(html).toContain(
+      "https://www.openstreetmap.org/search?query=Lindenstrasse%204%2C%2010115%20Berlin%2C%20DE",
+    );
+    expect(html).toContain("Show the map: Lindenstrasse 4, 10115 Berlin, DE");
+    expect(html).toContain("Opens OpenStreetMap.");
+    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("<script");
+    const google = await page(await render("map", { provider: "google" }, SETTINGS));
+    expect(google).toContain("https://www.google.com/maps/search/?api=1&amp;query=");
+    expect(google).toContain("Opens Google Maps.");
+    // A provider that is not on the list is OpenStreetMap; without an address there is no map.
+    expect(await page(await render("map", { provider: "evil" }, SETTINGS))).toContain(
+      "Opens OpenStreetMap.",
+    );
+    expect(await render("map", {}, { name: "x", phone: "123" })).toBeNull();
+    expect(await page(await render("map", {}, { city: "Berlin" }))).toContain(
+      "Show the map: Berlin",
+    );
   });
 
   test("an email that is not one is not made a link, and text is escaped", async () => {

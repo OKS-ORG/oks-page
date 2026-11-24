@@ -553,6 +553,27 @@ export default {
     },
   },
   blocks: {
+    map: {
+      // The map block of the core, filled from the business address: it asks no map company for anything until the visitor
+      // follows its link (spec 19, section 5; spec 06, 14.3).
+      async render(props, ctx) {
+        const b = await read(ctx);
+        const query = [b.street, [b.postal, b.city].filter(Boolean).join(" "), b.country]
+          .filter(Boolean)
+          .join(", ");
+        if (!b.street && !b.city) return null;
+        return {
+          id: "mp",
+          type: "map",
+          props: {
+            query: query.slice(0, 200),
+            provider: props?.provider === "google" ? "google" : "osm",
+          },
+          content: null,
+          children: [],
+        };
+      },
+    },
     booking: {
       async render(props, ctx) {
         const b = { ...(await read(ctx)), ...(await readBooking(ctx)) };
