@@ -26,14 +26,14 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     key: "content",
     label: "Content",
     href: "/admin/content",
-    needs: ["content_types.manage", "content.edit_any"],
+    needs: ["content_types.manage", "content.publish_any"],
   },
   { key: "comments", label: "Comments", href: "/admin/comments", needs: ["comments.moderate"] },
   {
     key: "taxonomies",
     label: "Categories and tags",
     href: "/admin/categories",
-    needs: ["content.edit_any"],
+    needs: ["content.publish_any"],
   },
   { key: "menus", label: "Menus", href: "/admin/menus", needs: ["menus.manage"] },
   {
@@ -50,6 +50,12 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     key: "statistics",
     label: "Statistics",
     href: "/admin/tools/statistics",
+    needs: ["settings.manage"],
+  },
+  {
+    key: "handoff",
+    label: "Handoff",
+    href: "/admin/tools/handoff",
     needs: ["settings.manage"],
   },
   {

@@ -6,6 +6,7 @@
 import type { SqlRunner } from "@oks-page/db";
 import { createHash, randomBytes } from "node:crypto";
 import type { Actor } from "./content.js";
+import { ensureDefaultRoles } from "./roles.js";
 import type { CreateAccount } from "./setup.js";
 
 export const INVITE_DEFAULT_DAYS = 7;
@@ -64,6 +65,8 @@ export async function listMembers(runner: SqlRunner, siteId: string): Promise<Me
 
 /** The roles a person can have on this site (the five default ones, and custom ones later). */
 export async function listRoles(runner: SqlRunner, siteId: string): Promise<RoleChoice[]> {
+  // A site made before a default role existed (Client) gets it the first time the roles are listed.
+  await ensureDefaultRoles(runner, siteId);
   const rows = await runner.all(
     `select "key", "label" from "roles" where "site_id" = ? order by "created_at", "key"`,
     [siteId],
@@ -72,6 +75,7 @@ export async function listRoles(runner: SqlRunner, siteId: string): Promise<Role
 }
 
 async function roleId(runner: SqlRunner, siteId: string, key: string): Promise<string | null> {
+  await ensureDefaultRoles(runner, siteId);
   const rows = await runner.all(`select "id" from "roles" where "site_id" = ? and "key" = ?`, [
     siteId,
     key,

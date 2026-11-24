@@ -9511,7 +9511,10 @@ describe.skipIf(!findBrowser())(
       await page.getByLabel("Folder on the server").fill("/var/www/site");
       // Without checking the server first, nothing is saved.
       await page.getByRole("button", { name: "Save this place" }).click();
-      await page.getByText(/Check the server first/).waitFor();
+      await page
+        .getByText(/Check the server first/)
+        .first()
+        .waitFor();
       // The server shows its fingerprint; it is trusted only after the owner says so.
       await page.getByRole("button", { name: "Check the server" }).click();
       await page.getByText(TEST_HOST_KEY).waitFor();
@@ -13334,6 +13337,64 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
       ).length,
     ).toBe(0);
     await page.close();
+  });
+
+  test("AG-50, AG-51, AG-52: a client is invited, sees only Home, Pages, Posts and Media, cannot reach the handoff checklist, and the owner's checklist keeps its ticks", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    const invited = await owners.request.post(site.base + "/api/admin/users", {
+      headers: { origin: site.base },
+      data: { name: "Cleo", email: "cleo@example.com", roleKey: "client", days: 1 },
+    });
+    expect(invited.status(), await invited.text()).toBe(201);
+    const link = String(((await invited.json()) as { link: string }).link);
+
+    // The client opens the link in their own browser and chooses a password.
+    const cleo = await (await browser.newContext()).newPage();
+    await cleo.goto(link);
+    await cleo.getByLabel(/^Password/).fill("cleo-has-a-long-password");
+    await cleo.getByRole("button", { name: "Join" }).click();
+    await cleo.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    for (const wanted of ["Pages", "Posts", "Media"])
+      expect(
+        await cleo.getByRole("link", { name: wanted, exact: true }).count(),
+        wanted,
+      ).toBeGreaterThan(0);
+    for (const hidden of [
+      "Handoff",
+      "Settings",
+      "Plugins",
+      "Users",
+      "Tools",
+      "Menus",
+      "Categories and tags",
+      "Comments",
+      "Statistics",
+    ])
+      expect(await cleo.getByRole("link", { name: hidden, exact: true }).count(), hidden).toBe(0);
+    // The server says no too: the checklist page leads back to Home, and saving it is refused.
+    await cleo.goto(site.base + "/admin/tools/handoff");
+    await cleo.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    const refused = await cleo.request.put(site.base + "/api/admin/handoff", {
+      headers: { origin: site.base },
+      data: { done: ["passwords"] },
+    });
+    expect(refused.status()).toBe(403);
+    await cleo.context().close();
+
+    // The owner's checklist: ticks are saved at once and are still there after a reload.
+    await owners.goto(site.base + "/admin/tools/handoff");
+    await owners.getByRole("heading", { name: "Handoff", level: 1 }).waitFor();
+    await owners.getByText("0 of 9 done").waitFor();
+    await owners.getByText(/Looks done: .*two-factor|Not yet: .*two-factor/).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    await owners.getByLabel(/Passwords are changed/).check();
+    await owners.getByText("Saved. 1 of 9 done.").waitFor();
+    await owners.reload();
+    await owners.getByText("1 of 9 done").waitFor();
+    expect(await owners.getByLabel(/Passwords are changed/).isChecked()).toBe(true);
+    expect(await owners.getByLabel(/The client has a short guide/).isChecked()).toBe(false);
+    await owners.close();
   });
 });
 

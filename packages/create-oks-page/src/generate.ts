@@ -278,6 +278,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
 `,
     },
     {
+      path: "app/admin/tools/handoff/page.tsx",
+      content: `export { default, metadata } from ${from("tools-handoff-page")};\n`,
+    },
+    {
+      path: "app/api/admin/handoff/route.ts",
+      content: `export { PUT } from ${from("api-handoff")};\n`,
+    },
+    {
       path: "app/admin/tools/statistics/page.tsx",
       content: `export { default, metadata } from ${from("tools-statistics-page")};\n`,
     },

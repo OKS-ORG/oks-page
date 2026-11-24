@@ -60,11 +60,37 @@ export async function openSqlite(file = ":memory:"): Promise<TestDb> {
 }
 
 let counter = 0;
+let swept = false;
+
+/**
+ * Drops the schemas that test processes left behind when they stopped without closing their database (a killed run, a test
+ * that never closed). Each is named `t_<process id>_...`, so a schema whose process is gone is safe to drop. Without this the
+ * database grows by gigabytes and takes many minutes to recover after an unclean stop. Done once in each process.
+ */
+async function sweepStaleSchemas(client: pg.Client): Promise<void> {
+  if (swept) return;
+  swept = true;
+  const rows = await client.query<{ nspname: string }>(
+    `select nspname from pg_namespace where nspname like 't\\_%'`,
+  );
+  for (const { nspname } of rows.rows) {
+    const pid = Number(/^t_(\d+)_/.exec(nspname)?.[1]);
+    if (!Number.isInteger(pid) || pid === process.pid) continue;
+    try {
+      process.kill(pid, 0);
+      continue; // the process is still running: its schema is in use
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ESRCH") continue;
+    }
+    await client.query(`drop schema if exists "${nspname}" cascade`).catch(() => undefined);
+  }
+}
 
 export async function openPg(): Promise<TestDb> {
   if (!pgUrl) throw new Error("DATABASE_URL is not set");
   const client = new pg.Client({ connectionString: pgUrl });
   await client.connect();
+  await sweepStaleSchemas(client);
   const schema = `t_${process.pid}_${Date.now()}_${counter++}`;
   await client.query(`create schema "${schema}"`);
   await client.query(`set search_path to "${schema}"`);

@@ -93,6 +93,7 @@ for (const { kind, open, skip } of openers) {
         expect((await listRoles(db.runner, siteId)).map((r) => r.key).sort()).toEqual([
           "administrator",
           "author",
+          "client",
           "contributor",
           "editor",
           "subscriber",

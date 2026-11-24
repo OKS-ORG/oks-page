@@ -23,6 +23,7 @@ describe("the menu for each default role", () => {
       "plugins",
       "publish",
       "statistics",
+      "handoff",
       "privacy-requests",
       "settings",
     ]);
@@ -44,6 +45,9 @@ describe("the menu for each default role", () => {
   });
   test("contributor writes but has no library and no settings", () => {
     expect(keysOf("contributor")).toEqual(["home", "pages", "posts"]);
+  });
+  test("the client (spec 11, section 4) sees Home, Pages, Posts and Media, and nothing about the site's structure or settings", () => {
+    expect(keysOf("client")).toEqual(["home", "pages", "posts", "media"]);
   });
   test("subscriber only has Home", () => {
     expect(keysOf("subscriber")).toEqual(["home"]);
