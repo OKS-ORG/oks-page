@@ -8,6 +8,7 @@ import {
   listPrivacyPageChoices,
   loadConsentTexts,
   loadKeeping,
+  statisticsEnabled,
   loadPrivacySettings,
   noVisitorCookies,
 } from "@oks-page/core";
@@ -55,6 +56,7 @@ export default async function PrivacySettingsPage() {
         keepingRules={KEEPING_RULES}
         consentTexts={await loadConsentTexts(getRunner(), member.siteId)}
         consentFields={CONSENT_TEXT_FIELDS}
+        statisticsOn={await statisticsEnabled(getRunner(), member.siteId)}
       />
     </AdminFrame>
   );

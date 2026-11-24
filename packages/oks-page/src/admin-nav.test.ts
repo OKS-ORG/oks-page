@@ -22,6 +22,7 @@ describe("the menu for each default role", () => {
       "tools",
       "plugins",
       "publish",
+      "statistics",
       "privacy-requests",
       "settings",
     ]);

@@ -56,6 +56,7 @@ export * from "./video-covers.js";
 export * from "./site-settings.js";
 export * from "./consent-texts.js";
 export * from "./keeping.js";
+export * from "./statistics.js";
 export * from "./privacy-settings.js";
 export * from "./search-stats.js";
 export * from "./word-forms.js";

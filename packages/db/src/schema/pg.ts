@@ -1343,6 +1343,38 @@ export const consentRecords = pgTable(
   ],
 );
 
+// Visitor statistics (spec 18, section 3): daily totals only. A row counts one thing for one day: `kind` is "views",
+// "visitors", "page", "referrer", "search", "country" or "device", `key` says which one (a page address, a host, a country
+// code...). Nothing in it points to a person.
+export const statsDaily = pgTable(
+  "stats_daily",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    // The day, as YYYY-MM-DD in UTC.
+    day: text("day").notNull(),
+    kind: text("kind").notNull(),
+    key: text("key").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.day, t.kind, t.key] })],
+);
+
+// Which visitors were counted today, so that one visitor is counted once a day. A line is a hash made with a secret that
+// changes every day; it cannot be turned back into an address, and lines of earlier days are deleted.
+export const statsSeen = pgTable(
+  "stats_seen",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    day: text("day").notNull(),
+    hash: text("hash").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.day, t.hash] })],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -1394,4 +1426,6 @@ export const tableNames = [
   "cache_tags",
   "privacy_requests",
   "consent_records",
+  "stats_daily",
+  "stats_seen",
 ] as const;

@@ -9,7 +9,8 @@ export const KEEPING_KEY = "keeping";
 export const KEEPING_LAST_KEY = "keeping_last_run";
 const DAY = 24 * 60 * 60 * 1000;
 
-export type KeepingId = "email_log" | "audit_log" | "search_terms" | "consent_records";
+export type KeepingId =
+  "email_log" | "audit_log" | "search_terms" | "consent_records" | "statistics";
 
 export interface KeepingRule {
   id: KeepingId;
@@ -49,6 +50,13 @@ export const KEEPING_RULES: KeepingRule[] = [
     label: "Consent records",
     what: "What visitors chose in the consent notice, and when, as proof that they were asked. Nothing in it points to a person.",
     defaultDays: 365,
+    leastDays: 30,
+  },
+  {
+    id: "statistics",
+    label: "Visitor statistics",
+    what: "Daily totals of page views and visitors, by page, source, country and device type. Nothing in it points to a person.",
+    defaultDays: 730,
     leastDays: 30,
   },
 ];
@@ -214,6 +222,26 @@ export async function purgeConsentRecords(
   return gone.length;
 }
 
+/** Deletes the daily statistics of days before the last `days` days (today counts as the first). */
+export async function purgeStatistics(
+  runner: SqlRunner,
+  siteId: string,
+  days: number,
+  now: () => number,
+): Promise<number> {
+  const first = dayText(now() - (days - 1) * DAY);
+  const gone = await runner.all(
+    `delete from "stats_daily" where "site_id" = ? and "day" < ? returning "day"`,
+    [siteId, first],
+  );
+  // The marks of who was counted are only needed for the day itself; yesterday's go too.
+  await runner.all(`delete from "stats_seen" where "site_id" = ? and "day" < ?`, [
+    siteId,
+    dayText(now()),
+  ]);
+  return gone.length;
+}
+
 /** The day (`YYYY-MM-DD`, UTC) a count must be from to be kept: counts older than `days` days go. */
 const dayText = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
@@ -247,6 +275,7 @@ export async function runKeeping(
     audit_log: 0,
     search_terms: 0,
     consent_records: 0,
+    statistics: 0,
   };
   const sites = await runner.all(`select "id" from "sites"`);
   for (const s of sites) {
@@ -257,6 +286,7 @@ export async function runKeeping(
       audit_log: await purgeAuditLog(runner, siteId, days.audit_log, now),
       search_terms: await purgeSearchCounts(runner, siteId, days.search_terms, now),
       consent_records: await purgeConsentRecords(runner, siteId, days.consent_records, now),
+      statistics: await purgeStatistics(runner, siteId, days.statistics, now),
     };
     for (const r of KEEPING_RULES) total[r.id] += deleted[r.id];
     await write(runner, siteId, KEEPING_LAST_KEY, { at: now(), deleted }, now());

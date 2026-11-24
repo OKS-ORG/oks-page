@@ -399,6 +399,14 @@ export async function seedEverything(db: TestDb): Promise<void> {
     version: "media,statistics",
     created_at: T,
   });
+  await ins(db, "stats_daily", {
+    site_id: site,
+    day: "2026-11-23",
+    kind: "views",
+    key: "",
+    count: 7,
+  });
+  await ins(db, "stats_seen", { site_id: site, day: "2026-11-23", hash: "a".repeat(32) });
   await ins(db, "extension_settings", {
     extension_id: ext,
     key: "units",

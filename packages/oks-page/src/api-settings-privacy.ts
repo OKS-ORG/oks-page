@@ -5,6 +5,8 @@ import {
   loadEmailSettings,
   loadGeneralSettings,
   saveConsentTexts,
+  saveStatisticsEnabled,
+  statisticsEnabled,
   saveKeeping,
   savePrivacyPage,
   writePrivacyDraft,
@@ -14,6 +16,7 @@ import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { loadConsentNeeds } from "./consent-needs";
+import { forgetStatisticsSetting } from "./stats-collect";
 import { getRunner } from "./db";
 
 export async function PUT(request: Request) {
@@ -37,6 +40,18 @@ export async function PUT(request: Request) {
     );
     if (!saved.ok) return reply(saved, saved.code === "forbidden" ? 403 : 400);
     return NextResponse.json({ ok: true, keeping: saved.keeping });
+  }
+  // Counting visitors on or off (spec 18, section 3).
+  if (input["statistics"] !== undefined) {
+    const saved = await saveStatisticsEnabled(
+      getRunner(),
+      await actorOf(member),
+      member.siteId,
+      (input["statistics"] as { enabled?: unknown } | null)?.enabled,
+    );
+    if (!saved.ok) return reply(saved, saved.code === "forbidden" ? 403 : 400);
+    forgetStatisticsSetting();
+    return NextResponse.json({ ok: true, enabled: saved.enabled });
   }
   // The words of the consent notice (spec 18, section 2) are saved on their own too.
   if (input["consentTexts"] !== undefined) {
@@ -81,6 +96,7 @@ export async function POST(request: Request) {
       hosts: p.outsideHosts,
     })),
     loadAtOnce: needs.videos.map((v) => v.company),
+    statistics: await statisticsEnabled(getRunner(), member.siteId),
   });
   if (!result.ok) return reply(result, result.code === "forbidden" ? 403 : 400);
   return NextResponse.json(

@@ -71,6 +71,18 @@ export function AdminDashboard({
           </dl>
         </CardBody>
       </Card>
+      {canManageSettings && data.visits ? (
+        <Card>
+          <CardHeader>Visitors, last 7 days</CardHeader>
+          <CardBody>
+            <p>
+              {data.visits.visitors} visitor{data.visits.visitors === 1 ? "" : "s"} (added up over
+              the days) and {data.visits.views} page view{data.visits.views === 1 ? "" : "s"}.{" "}
+              <a href="/admin/tools/statistics">Open Statistics</a>
+            </p>
+          </CardBody>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader>Recent edits</CardHeader>
         <CardBody>

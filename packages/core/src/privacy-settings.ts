@@ -152,6 +152,8 @@ export interface PrivacyFacts {
   }[];
   /** The companies that videos set to "load at once" come from. */
   loadAtOnce?: string[];
+  /** True while the site counts visitors (spec 18, section 3). */
+  statistics?: boolean;
 }
 
 /** The blocks of a draft privacy page, from what the site really uses (spec 18, section 4). */
@@ -199,7 +201,12 @@ export function privacyDraftBlocks(facts: PrivacyFacts): unknown[] {
     ),
     ...outsideLines,
     heading("stats-h", "Visitor statistics"),
-    paragraph("stats", "The site does not count or follow visitors."),
+    paragraph(
+      "stats",
+      facts.statistics
+        ? 'The site counts visits to its pages: how many page views and visitors, which pages, where visitors came from (a search engine or another site), their country and the kind of device. It uses no cookies and does not keep your address: your address and browser are turned into a code with a secret that changes every day, only to count you once that day, and the code is deleted the next day. Only daily totals are kept, for 24 months. Browsers that send a "do not track" signal are not counted.'
+        : "The site does not count or follow visitors.",
+    ),
   ];
   if (facts.emailProvider)
     blocks.push(

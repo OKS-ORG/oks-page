@@ -113,6 +113,13 @@
       "when": 1795447413631,
       "tag": "0015_dusty_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795496716669,
+      "tag": "0016_right_captain_cross",
+      "breakpoints": true
     }
   ]
 }

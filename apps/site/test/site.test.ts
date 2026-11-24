@@ -12756,6 +12756,126 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     );
     await page.close();
   });
+
+  test("PR-04: visitors are counted without cookies and without keeping an address; do-not-track, robots, prefetches and signed-in people are not counted; the totals are in Tools > Statistics and on the dashboard; counting can be switched off", async () => {
+    const slug = String(
+      (
+        await db.run(
+          "select slug from entries where type_key = 'page' and status = 'published' and slug <> 'home' and slug not like '%/%' order by slug limit 1",
+        )
+      )[0]!["slug"],
+    );
+    const url = site.base + "/" + slug;
+    const totals = async () => {
+      const rows = await db.run(
+        "select kind, key, sum(count) as n from stats_daily group by kind, key",
+      );
+      return Object.fromEntries(
+        rows.map((r) => [`${String(r["kind"])}:${String(r["key"])}`, Number(r["n"])]),
+      );
+    };
+    const FIREFOX = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0";
+    const PHONE =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605 Mobile/15E148";
+    const visit = (headers: Record<string, string>) =>
+      fetch(url, { headers: { accept: "text/html", ...headers } });
+    // Visits made while the site was starting (its own readiness checks) may still be waiting to be written.
+    await new Promise((r) => setTimeout(r, 2500));
+    const before = await totals();
+    const n = (t: Record<string, number>, k: string) => t[k] ?? 0;
+
+    // One visitor twice, another from a phone via a news site; none of them gets a cookie.
+    const one = {
+      "user-agent": FIREFOX,
+      "x-forwarded-for": "203.0.113.77",
+      referer: "https://www.google.com/search?q=secret+words",
+      "cf-ipcountry": "DE",
+    };
+    const first = await visit(one);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("set-cookie")).toBeNull();
+    await visit(one);
+    await visit({
+      "user-agent": PHONE,
+      "x-forwarded-for": "203.0.113.78",
+      referer: "https://news.example.org/story?id=7",
+    });
+    // Not counted: robots, "do not track", Global Privacy Control, a prefetch, and a command-line tool.
+    await visit({ "user-agent": "Googlebot/2.1", "x-forwarded-for": "203.0.113.79" });
+    await visit({ "user-agent": FIREFOX, "x-forwarded-for": "203.0.113.80", dnt: "1" });
+    await visit({ "user-agent": FIREFOX, "x-forwarded-for": "203.0.113.81", "sec-gpc": "1" });
+    await visit({
+      "user-agent": FIREFOX,
+      "x-forwarded-for": "203.0.113.82",
+      "sec-purpose": "prefetch",
+    });
+    await visit({ "user-agent": "curl/8.5", "x-forwarded-for": "203.0.113.83" });
+    await expect
+      .poll(async () => n(await totals(), "views:") - n(before, "views:"), { timeout: 20_000 })
+      .toBe(3);
+    // Give anything that was wrongly counted time to show up.
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = await totals();
+    const grew = (k: string) => n(after, k) - n(before, k);
+    expect(grew("views:")).toBe(3);
+    expect(grew("visitors:")).toBe(2);
+    expect(grew(`page:/${slug}`)).toBe(3);
+    expect(grew("search:Google")).toBe(1);
+    expect(grew("referrer:news.example.org")).toBe(1);
+    expect(grew("country:DE")).toBe(1);
+    expect(grew("device:desktop")).toBe(1);
+    expect(grew("device:mobile")).toBe(1);
+
+    // Nothing that points to a person is kept: no address, no browser name, no words searched for.
+    const kept = JSON.stringify([
+      await db.run("select * from stats_daily"),
+      await db.run("select * from stats_seen"),
+    ]);
+    for (const secret of ["203.0.113", "Firefox", "iPhone", "secret", "story?id"])
+      expect(kept).not.toContain(secret);
+
+    // The totals are in Tools > Statistics and on the dashboard, and the screens pass the accessibility check.
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(owner.email);
+    await page.getByLabel(/^Password/).fill(owner.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await page.getByText("Visitors, last 7 days").waitFor();
+    await page.getByRole("link", { name: "Statistics" }).first().click();
+    await page.getByRole("heading", { name: "Statistics", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Popular pages", level: 2 }).waitFor();
+    await page.getByRole("rowheader", { name: `/${slug}`, exact: true }).waitFor();
+    await page.getByRole("rowheader", { name: "Google", exact: true }).waitFor();
+    await page.getByRole("rowheader", { name: "news.example.org", exact: true }).waitFor();
+    await page.getByRole("rowheader", { name: "DE", exact: true }).waitFor();
+    await page.getByRole("link", { name: "Last 30 days" }).click();
+    await page.getByRole("heading", { name: "Totals, last 30 days" }).waitFor();
+    expect(await axeViolations(page)).toEqual([]);
+    // The owner looking at their own site is not counted.
+    const viewsNow = n(await totals(), "views:");
+    await page.goto(url);
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(n(await totals(), "views:")).toBe(viewsNow);
+
+    // Counting can be switched off in Settings > Privacy, and then nothing is added.
+    await page.goto(site.base + "/admin/settings/privacy");
+    const box = page.getByLabel("Count visitors");
+    expect(await box.isChecked()).toBe(true);
+    await box.uncheck();
+    await page.getByText("Visitors are not counted.").waitFor();
+    await visit({ "user-agent": FIREFOX, "x-forwarded-for": "203.0.113.90" });
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(n(await totals(), "views:")).toBe(viewsNow);
+    await page.getByText("Visitor statistics", { exact: false }).first().waitFor();
+    await box.check();
+    await page.getByText("Visitors are counted.").waitFor();
+    await visit({ "user-agent": FIREFOX, "x-forwarded-for": "203.0.113.91" });
+    await expect
+      .poll(async () => n(await totals(), "views:"), { timeout: 20_000 })
+      .toBe(viewsNow + 1);
+    await page.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {

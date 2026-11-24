@@ -1,6 +1,6 @@
 "use client";
 // Settings > Privacy (design batch 5; spec 18): the cookies the site sets, whether a consent notice is needed, and the
-// privacy page (choose one, or have a draft written). Visitor counts come in a later release.
+// privacy page (choose one, or have a draft written), whether visitors are counted, and how long data is kept.
 import type {
   ConsentTextField,
   ConsentTexts,
@@ -30,6 +30,7 @@ export function PrivacySettingsScreen({
   keepingRules,
   consentTexts,
   consentFields,
+  statisticsOn,
 }: {
   cookies: SiteCookie[];
   noVisitorCookies: boolean;
@@ -41,7 +42,10 @@ export function PrivacySettingsScreen({
   keepingRules: KeepingRule[];
   consentTexts: ConsentTexts;
   consentFields: ConsentTextField[];
+  statisticsOn: boolean;
 }) {
+  const [counting, setCounting] = useState(statisticsOn);
+  const [countNote, setCountNote] = useState("");
   const [saved, setSaved] = useState(initial.pageId ?? "");
   const [pageId, setPageId] = useState(initial.pageId ?? "");
   const [note, setNote] = useState("");
@@ -168,7 +172,41 @@ export function PrivacySettingsScreen({
       </section>
       <section aria-labelledby="privacy-counts">
         <h2 id="privacy-counts">Visitor counts</h2>
-        <p>Your site does not count visitors. Counting without cookies comes in a later release.</p>
+        <p>
+          The site counts page views and visitors without cookies and without keeping anyone&apos;s
+          address: each visitor is a code made with a secret that changes every day, used to count
+          them once that day and deleted the next day. Only daily totals are kept. Browsers that
+          send &ldquo;do not track&rdquo; are not counted. See the totals in{" "}
+          <a href="/admin/tools/statistics">Tools &gt; Statistics</a>.
+        </p>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={counting}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setCounting(enabled);
+                setCountNote("Saving…");
+                void fetch("/api/admin/settings/privacy", {
+                  method: "PUT",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ statistics: { enabled } }),
+                }).then(async (response) => {
+                  if (!response.ok) {
+                    // Back to what is really saved.
+                    setCounting(!enabled);
+                    setCountNote("The choice could not be saved.");
+                    return;
+                  }
+                  setCountNote(enabled ? "Visitors are counted." : "Visitors are not counted.");
+                });
+              }}
+            />{" "}
+            Count visitors
+          </label>
+        </p>
+        <p role="status">{countNote}</p>
       </section>
       <form aria-labelledby="privacy-page" onSubmit={(event) => void save(event)}>
         <h2 id="privacy-page">Privacy page</h2>
@@ -394,7 +432,7 @@ function KeepingSection({ initial, rules }: { initial: KeepingView; rules: Keepi
           </tr>
           <tr>
             <th scope="row">
-              Visitor counts and commenters&apos; addresses
+              Commenters&apos; addresses
               <br />
               <small style={{ fontWeight: "normal" }}>Not kept by this site.</small>
             </th>
@@ -404,7 +442,7 @@ function KeepingSection({ initial, rules }: { initial: KeepingView; rules: Keepi
       </table>
       <p>
         {view.lastRun
-          ? `Last clean-up: ${new Date(view.lastRun.at).toISOString().slice(0, 16).replace("T", " ")} UTC. It deleted ${view.lastRun.deleted.email_log} email record(s), ${view.lastRun.deleted.audit_log} audit entr${view.lastRun.deleted.audit_log === 1 ? "y" : "ies"} and ${view.lastRun.deleted.search_terms} search count(s) and ${view.lastRun.deleted.consent_records} consent record(s).`
+          ? `Last clean-up: ${new Date(view.lastRun.at).toISOString().slice(0, 16).replace("T", " ")} UTC. It deleted ${view.lastRun.deleted.email_log} email record(s), ${view.lastRun.deleted.audit_log} audit entr${view.lastRun.deleted.audit_log === 1 ? "y" : "ies"} and ${view.lastRun.deleted.search_terms} search count(s) , ${view.lastRun.deleted.consent_records} consent record(s) and ${view.lastRun.deleted.statistics} daily total(s) of visitor counts.`
           : "The first clean-up has not run yet. It runs once a day."}
       </p>
       <p>

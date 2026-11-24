@@ -18,6 +18,7 @@ import {
 import { mayPassMaintenance } from "./maintenance-gate";
 import { pagePath, pagingOf } from "./paging";
 import { mayPreview } from "./preview-gate";
+import { trackView } from "./stats-collect";
 import {
   cdnEnabled,
   maintenanceSettings,
@@ -139,6 +140,7 @@ export async function proxy(request: NextRequest) {
     return apply(NextResponse.redirect(new URL("/", request.url), 308), {});
   if (slug === "home" && (reading.homeShows === "posts" || reading.homeSlug !== "home")) {
     const tags = [`site:${await getSiteId()}`, "feed", ...MENU_TAGS];
+    void trackView(request, "/", visitor);
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   if (found) {
@@ -148,10 +150,13 @@ export async function proxy(request: NextRequest) {
       `type:${found.type}`,
       ...MENU_TAGS,
     ];
+    // A page that is shown is counted (spec 18, section 3): no cookie, and nothing that points to a person is kept.
+    void trackView(request, path, visitor);
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   if (archive) {
     const tags = [`site:${await getSiteId()}`, `term:${archive.id}`, ...MENU_TAGS];
+    void trackView(request, path, visitor);
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   if (typeList) {
@@ -161,6 +166,7 @@ export async function proxy(request: NextRequest) {
       "archive:posts",
       ...MENU_TAGS,
     ];
+    void trackView(request, path, visitor);
     return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
   }
   const paging = pagingOf(slug);
@@ -178,6 +184,7 @@ export async function proxy(request: NextRequest) {
             : ["feed"]),
         ...MENU_TAGS,
       ];
+      void trackView(request, path, visitor);
       return apply(NextResponse.next(), pageHeaders({ cdn, visitor, tags }));
     }
   }

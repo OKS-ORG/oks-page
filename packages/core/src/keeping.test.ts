@@ -33,6 +33,7 @@ describe("the rules", () => {
       audit_log: [30, 365],
       search_terms: [7, 90],
       consent_records: [30, 365],
+      statistics: [30, 730],
     });
   });
 });
@@ -82,12 +83,14 @@ for (const { kind, open, skip } of openers) {
         audit_log: 365,
         search_terms: 90,
         consent_records: 365,
+        statistics: 730,
       });
       expect(fresh.shortened).toEqual({
         email_log: false,
         audit_log: false,
         search_terms: false,
         consent_records: false,
+        statistics: false,
       });
       expect(fresh.lastRun).toBeNull();
       const saved = await saveKeeping(db.runner, admin, SITE, { email_log: 7, audit_log: "180" });
@@ -96,12 +99,14 @@ for (const { kind, open, skip } of openers) {
         audit_log: 180,
         search_terms: 90,
         consent_records: 365,
+        statistics: 730,
       });
       expect(saved.ok && saved.keeping.shortened).toEqual({
         email_log: true,
         audit_log: true,
         search_terms: false,
         consent_records: false,
+        statistics: false,
       });
       // Another site is not touched.
       expect((await loadKeeping(db.runner, SITE2)).days.email_log).toBe(30);
@@ -112,6 +117,7 @@ for (const { kind, open, skip } of openers) {
         audit_log: 365,
         search_terms: 90,
         consent_records: 365,
+        statistics: 730,
       });
     });
 
@@ -148,6 +154,7 @@ for (const { kind, open, skip } of openers) {
         audit_log: false,
         search_terms: false,
         consent_records: false,
+        statistics: false,
       });
     });
 
@@ -170,6 +177,7 @@ for (const { kind, open, skip } of openers) {
         audit_log: 365,
         search_terms: 90,
         consent_records: 365,
+        statistics: 730,
       });
     });
 
@@ -185,7 +193,7 @@ for (const { kind, open, skip } of openers) {
       const r = await runKeeping(db.runner, () => NOW);
       expect(r).toEqual({
         sites: 2,
-        deleted: { email_log: 1, audit_log: 1, search_terms: 1, consent_records: 0 },
+        deleted: { email_log: 1, audit_log: 1, search_terms: 1, consent_records: 0, statistics: 0 },
       });
       expect([
         await left("email_log", SITE),
@@ -226,7 +234,7 @@ for (const { kind, open, skip } of openers) {
       const view = await loadKeeping(db.runner, SITE);
       expect(view.lastRun).toEqual({
         at: NOW + 1000,
-        deleted: { email_log: 1, audit_log: 1, search_terms: 0, consent_records: 0 },
+        deleted: { email_log: 1, audit_log: 1, search_terms: 0, consent_records: 0, statistics: 0 },
       });
       // Running it again deletes nothing more.
       expect((await runKeeping(db.runner, () => NOW + 2000)).deleted).toEqual({
@@ -234,6 +242,7 @@ for (const { kind, open, skip } of openers) {
         audit_log: 0,
         search_terms: 0,
         consent_records: 0,
+        statistics: 0,
       });
     });
 
