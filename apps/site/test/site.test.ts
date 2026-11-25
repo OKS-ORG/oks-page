@@ -14871,9 +14871,29 @@ describe.skipIf(!findBrowser())(
       // Check, then read the counts.
       await page.getByRole("button", { name: "Check all sites" }).click();
       await page.getByText("All sites were asked.").waitFor();
-      await page.getByRole("button", { name: "Counts for Weber Garden online" }).click();
-      await page.getByText(/page views, .* visitors, .* published pages/).waitFor();
       expect(await axe()).toEqual([]);
+      // The report for the client: counts, the pages read, the state of the site, and a way to print or send it.
+      await page.getByRole("link", { name: "Report for Weber Garden online" }).click();
+      await page.getByRole("heading", { name: "Report for Weber Garden", level: 1 }).waitFor();
+      await page.getByText(/page views by .* visitors/).waitFor();
+      await page.getByRole("heading", { name: "The most read pages", level: 2 }).waitFor();
+      await page.getByText(/published pages\./).waitFor();
+      await page.getByText(/Fine: The database answers/).waitFor();
+      await page.getByRole("img", { name: /Page views for each day from/ }).waitFor();
+      await page.getByText(/From \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2} \(30 days\)/).waitFor();
+      expect(await axe()).toEqual([]);
+      await page.getByRole("link", { name: "7 days" }).click();
+      await page.getByText(/\(7 days\)/).waitFor();
+      await page.getByRole("button", { name: "Print or save as PDF" }).waitFor();
+      // This site has no email set up, so sending says so, in words.
+      await page.getByLabel(/The client's email address/).fill("client@weber.example");
+      await page.getByRole("button", { name: "Email the report" }).click();
+      await page.getByText(/Email is not set up/).waitFor();
+      // A period that is not offered falls back to 30 days.
+      await page.goto(page.url().split("?")[0] + "?days=15");
+      await page.getByText(/\(30 days\)/).waitFor();
+      await page.getByRole("link", { name: "Back to the agency dashboard" }).click();
+      await page.getByRole("heading", { name: "Agency dashboard", level: 1 }).waitFor();
       // A key that the site removed stops working, and the dashboard says so in words.
       await page.goto(site.base + "/admin/tools/connector");
       await page.getByRole("button", { name: `Remove key ${parsed.key}` }).click();

@@ -2,15 +2,19 @@
 //   add     { code, name? }  connects a client site with the connection code made on it
 //   check   {}               asks every connected site for its status, all at once, within a time budget
 //   remove  { id }           disconnects a site
-//   report  { id }           fetches one site's page and visit counts
+//   report  { id, days? }    fetches one site's page and visit counts (7, 30 or 90 days)
+//   email-report { id, days?, to, note? }  sends the client's report by email from this site
 // For people who manage the settings. Adding, checking and reports need an Agency key; removing never does.
 import {
   addAgencySite,
   agencySiteLimit,
   agencyActive,
   checkAgencySites,
+  emailClientReport,
   fetchSiteReport,
   listLicences,
+  loadGeneralSettings,
+  loadWhiteLabel,
   removeAgencySite,
 } from "@oks-page/core";
 import { headers } from "next/headers";
@@ -77,9 +81,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
     case "report": {
-      const done = await fetchSiteReport(runner, actor, member.siteId, siteSecrets(), id, ctx);
+      const days = input["days"] === undefined ? 30 : Number(input["days"]);
+      const done = await fetchSiteReport(
+        runner,
+        actor,
+        member.siteId,
+        siteSecrets(),
+        id,
+        ctx,
+        days,
+      );
       if (!done.ok) return reply(done, STATUS[done.code]);
       return NextResponse.json({ ok: true, report: done.report });
+    }
+    case "email-report": {
+      const days = input["days"] === undefined ? 30 : Number(input["days"]);
+      // The report is signed with the agency's own name (its white-label name when it has one).
+      const wl = await loadWhiteLabel(runner, member.siteId);
+      const preparedBy = wl.name || (await loadGeneralSettings(runner, member.siteId)).siteName;
+      const done = await emailClientReport(
+        runner,
+        actor,
+        member.siteId,
+        siteSecrets(),
+        { id, days, to: input["to"], note: input["note"] },
+        ctx,
+        preparedBy,
+      );
+      if (!done.ok) return reply(done, STATUS[done.code]);
+      return NextResponse.json({ ok: true });
     }
     default:
       return reply({ code: "invalid", message: "The request was not understood." }, 400);

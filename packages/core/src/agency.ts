@@ -73,6 +73,65 @@ export function checkSiteUrl(
   return { ok: true, url: u.toString().replace(/\/$/, "") };
 }
 
+// What a client site says is read as untrusted: every value is checked and cut to size before it is kept or shown, so a site that
+// answers with something odd (or hostile) cannot fill the dashboard's settings or put markup in a report.
+const text = (v: unknown, max: number): string =>
+  typeof v === "string"
+    ? v
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .trim()
+        .slice(0, max)
+    : "";
+const count = (v: unknown): number =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.trunc(v), 1e12) : 0;
+const orNull = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.trunc(v), 1e15) : null;
+const list = (v: unknown, max: number): unknown[] => (Array.isArray(v) ? v.slice(0, max) : []);
+const obj = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+
+export function cleanStatus(data: unknown): ConnectorStatus | null {
+  const d = obj(data);
+  if (d["ok"] !== true) return null;
+  return {
+    version: text(d["version"], 40),
+    siteName: text(d["siteName"], 120),
+    pendingUpdates: orNull(d["pendingUpdates"]),
+    lastBackupAt: orNull(d["lastBackupAt"]),
+    diskFreeBytes: orNull(d["diskFreeBytes"]),
+    checks: list(d["checks"], 20).map((c) => ({
+      id: text(obj(c)["id"], 40),
+      label: text(obj(c)["label"], 120),
+      ok: obj(c)["ok"] === true,
+    })),
+    at: count(d["at"]),
+  };
+}
+
+export function cleanReport(data: unknown): ConnectorReport | null {
+  const d = obj(data);
+  if (d["ok"] !== true) return null;
+  const days = Math.min(Math.max(count(d["days"]), 1), 90);
+  return {
+    days,
+    views: count(d["views"]),
+    visitors: count(d["visitors"]),
+    publishedPages: count(d["publishedPages"]),
+    topPages: list(d["topPages"], 10).map((p) => ({
+      key: text(obj(p)["key"], 200),
+      count: count(obj(p)["count"]),
+    })),
+    perDay: list(d["perDay"], 90)
+      .map((p) => ({
+        day: text(obj(p)["day"], 10),
+        views: count(obj(p)["views"]),
+        visitors: count(obj(p)["visitors"]),
+      }))
+      .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.day)),
+  };
+}
+
 export interface SiteCheck {
   at: number;
   ok: boolean;
@@ -278,13 +337,14 @@ export async function addAgencySite(
   if (!checked.ok) return fail("invalid", checked.message);
   if (sites.some((s) => s.url === checked.url))
     return fail("invalid", "This site is connected already. Remove it first to connect it again.");
-  const asked = await callSite<{ status?: ConnectorStatus } & ConnectorStatus>(
+  const asked = await callSite<unknown>(
     { url: checked.url, keyId: parsed.keyId, secret: parsed.secret },
     "/api/oks/v1/status",
     ctx,
   );
   if (!asked.ok) return fail("invalid", asked.message);
-  const status = asked.data;
+  const status = cleanStatus(asked.data);
+  if (!status) return fail("invalid", "The site's answer was not understood.");
   const given = typeof input.name === "string" ? input.name.trim() : "";
   if (given.length > AGENCY_SITE_NAME_MAX)
     return fail("invalid", `The name can be at most ${AGENCY_SITE_NAME_MAX} characters.`);
@@ -363,15 +423,23 @@ export async function checkAgencySites(
         continue;
       }
       const left = Math.max(1, ctx.budgetMs - (ctx.now() - started));
-      const r = await callSite<ConnectorStatus>(
+      const r = await callSite<unknown>(
         { url: mine.url, keyId: mine.keyId, secret },
         "/api/oks/v1/status",
         { ...ctx, timeoutMs: Math.min(ctx.timeoutMs, left) },
       );
+      const status = r.ok ? cleanStatus(r.data) : null;
       results.set(
         mine.id,
         r.ok
-          ? { at: ctx.now(), ok: true, status: r.data }
+          ? status
+            ? { at: ctx.now(), ok: true, status }
+            : {
+                at: ctx.now(),
+                ok: false,
+                code: "failed",
+                error: "The site's answer was not understood.",
+              }
           : { at: ctx.now(), ok: false, code: r.code, error: r.message },
       );
     }
@@ -384,7 +452,38 @@ export async function checkAgencySites(
   return { ok: true, sites: merged.map(view) };
 }
 
-/** A client site's page and visit counts (the same signed request, another fixed action). */
+export const REPORT_DAYS = [7, 30, 90] as const;
+
+/** A connected site with its key opened, for the requests the dashboard makes. */
+export async function openAgencySite(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  id: string,
+): Promise<
+  | { ok: true; name: string; url: string; keyId: string; secret: string }
+  | { ok: false; code: "not_found" | "invalid"; message: string }
+> {
+  const mine = (await stored(runner, siteId)).find((s) => s.id === id);
+  if (!mine) return { ok: false, code: "not_found", message: "This site is not connected." };
+  try {
+    return {
+      ok: true,
+      name: mine.name,
+      url: mine.url,
+      keyId: mine.keyId,
+      secret: secrets.open(mine.sealed, place(mine.id)),
+    };
+  } catch {
+    return {
+      ok: false,
+      code: "invalid",
+      message: "The saved key cannot be read. Connect the site again.",
+    };
+  }
+}
+
+/** A client site's page and visit counts for the last `days` days (the same signed request, another fixed action). */
 export async function fetchSiteReport(
   runner: SqlRunner,
   actor: Actor,
@@ -392,23 +491,18 @@ export async function fetchSiteReport(
   secrets: SiteSecrets,
   id: string,
   ctx: AgencyContext,
+  days: number = 30,
 ): Promise<{ ok: true; report: ConnectorReport } | Fail> {
   if (!actor.can("settings.manage")) return fail("forbidden", "You may not see client reports.");
   if (!ctx.agency.active)
     return fail("forbidden", "Client reports need an Agency key that is still valid.");
-  const mine = (await stored(runner, siteId)).find((s) => s.id === id);
-  if (!mine) return fail("not_found", "This site is not connected.");
-  let secret: string;
-  try {
-    secret = secrets.open(mine.sealed, place(mine.id));
-  } catch {
-    return fail("invalid", "The saved key cannot be read. Connect the site again.");
-  }
-  const r = await callSite<ConnectorReport>(
-    { url: mine.url, keyId: mine.keyId, secret },
-    "/api/oks/v1/report?days=30",
-    ctx,
-  );
+  if (!(REPORT_DAYS as readonly number[]).includes(days))
+    return fail("invalid", "A report covers 7, 30 or 90 days.");
+  const opened = await openAgencySite(runner, siteId, secrets, id);
+  if (!opened.ok) return fail(opened.code, opened.message);
+  const r = await callSite<unknown>(opened, `/api/oks/v1/report?days=${days}`, ctx);
   if (!r.ok) return fail("invalid", r.message);
-  return { ok: true, report: r.data };
+  const report = cleanReport(r.data);
+  if (!report) return fail("invalid", "The site's answer was not understood.");
+  return { ok: true, report };
 }

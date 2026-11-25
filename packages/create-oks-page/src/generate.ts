@@ -303,6 +303,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { default, metadata } from ${from("tools-connector-page")};\n`,
     },
     {
+      path: "app/admin/tools/agency/report/[id]/page.tsx",
+      content: `export { default, metadata } from ${from("tools-agency-report-page")};\n`,
+    },
+    {
       path: "app/admin/tools/agency/page.tsx",
       content: `export { default, metadata } from ${from("tools-agency-page")};\n`,
     },

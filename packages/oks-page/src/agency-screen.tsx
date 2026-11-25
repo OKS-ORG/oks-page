@@ -1,7 +1,7 @@
 "use client";
 // Tools > Agency dashboard (spec 11, section 6): connect client sites with the code each site made, see their state at a glance,
 // check them all at once, and read a site's page and visit counts.
-import type { AgencySiteView, ConnectorReport } from "@oks-page/core";
+import type { AgencySiteView } from "@oks-page/core";
 import { Alert } from "oks-ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -19,7 +19,6 @@ async function post(body: Record<string, unknown>) {
   const data = (await response.json().catch(() => null)) as {
     ok?: boolean;
     error?: { message?: string };
-    report?: ConnectorReport;
   } | null;
   return {
     ok: response.ok && data?.ok === true,
@@ -58,7 +57,6 @@ export function AgencyScreen({
   const [name, setName] = useState("");
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
-  const [report, setReport] = useState<{ id: string; data: ConnectorReport } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function run(body: Record<string, unknown>, done?: string) {
@@ -156,16 +154,13 @@ export function AgencyScreen({
                     <td>{s.last?.status ? gb(s.last.status.diskFreeBytes) : "-"}</td>
                     <td>{s.last ? when(s.last.at) : "-"}</td>
                     <td>
-                      <button
-                        type="button"
-                        disabled={!active || busy}
-                        onClick={async () => {
-                          const r = await run({ action: "report", id: s.id });
-                          if (r?.data?.report) setReport({ id: s.id, data: r.data.report });
-                        }}
-                      >
-                        Counts for {s.name}
-                      </button>{" "}
+                      {active ? (
+                        <>
+                          <a href={`/admin/tools/agency/report/${s.id}`}>
+                            Report for {s.name}
+                          </a>{" "}
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         disabled={busy}
@@ -182,27 +177,6 @@ export function AgencyScreen({
             </table>
           </>
         )}
-        {report ? (
-          <div role="status">
-            <h3>
-              {sites.find((s) => s.id === report.id)?.name ?? "Site"}: the last {report.data.days}{" "}
-              days
-            </h3>
-            <p>
-              {report.data.views} page views, {report.data.visitors} visitors,{" "}
-              {report.data.publishedPages} published pages.
-            </p>
-            {report.data.topPages.length > 0 ? (
-              <ul>
-                {report.data.topPages.map((p) => (
-                  <li key={p.key}>
-                    {p.key || "/"}: {p.count}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
       </section>
 
       <section
