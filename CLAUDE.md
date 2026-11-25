@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-> Code repository guide. Started 23 October 2026 from the [M1 plan](https://github.com/OKS-ORG/CMS-Docs) (`docs/08-m1-plan.md`) and the [documentation repository's CLAUDE.md](https://github.com/OKS-ORG/CMS-Docs) (`CLAUDE.md`). Change anything that does not match the founder's wishes.
+> Code repository guide. Started 23 October 2026 from the [M1 plan](https://github.com/OKS-ORG/oks-page-docs) (`docs/08-m1-plan.md`) and the [documentation repository's CLAUDE.md](https://github.com/OKS-ORG/oks-page-docs) (`CLAUDE.md`). Change anything that does not match the founder's wishes.
 
-Guidance for Claude (and anyone) working in this repository. This repository holds the **code** for oks-page (final name since 11 November 2026, D144), a WordPress alternative built with Next.js, Tailwind CSS or custom CSS, and oks-ui. The **research, specifications and decisions live in the documentation repository** `OKS-ORG/CMS-Docs`. Code follows the approved specs there.
+Guidance for Claude (and anyone) working in this repository. This repository holds the **code** for oks-page (final name since 11 November 2026, D144), a WordPress alternative built with Next.js, Tailwind CSS or custom CSS, and oks-ui. The **research, specifications and decisions live in the documentation repository** `OKS-ORG/oks-page-docs`. Code follows the approved specs there.
 
 ## Read first
 

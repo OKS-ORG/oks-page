@@ -104,6 +104,9 @@ export function main() {
     const j = pkg.json;
     if (!j.version || j.version === "0.0.0")
       problems.push(`${j.name}: version is ${j.version}; run with --version`);
+    // npm shows the README and the licence of a package from the package's own folder.
+    for (const file of ["README.md", "LICENSE"])
+      if (!existsSync(join(pkg.dir, file))) problems.push(`${j.name}: ${file} is missing`);
     for (const [dep, range] of Object.entries({ ...j.dependencies })) {
       if (range.startsWith("link:") || range.startsWith("file:"))
         problems.push(`${j.name}: ${dep} is "${range}"`);

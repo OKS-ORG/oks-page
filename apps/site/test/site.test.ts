@@ -13368,11 +13368,9 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await cleo.getByLabel(/^Password/).fill("cleo-has-a-long-password");
     await cleo.getByRole("button", { name: "Join" }).click();
     await cleo.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    // The menu is drawn a moment after the heading: wait for each link, then look at what is not there.
     for (const wanted of ["Pages", "Posts", "Media"])
-      expect(
-        await cleo.getByRole("link", { name: wanted, exact: true }).count(),
-        wanted,
-      ).toBeGreaterThan(0);
+      await cleo.getByRole("link", { name: wanted, exact: true }).first().waitFor();
     for (const hidden of [
       "Handoff",
       "Settings",
@@ -13895,6 +13893,26 @@ describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, 
       (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
     );
   };
+
+  test("pages that do not exist answer 404 every time, also when many ask at once and after the server was idle, and the server never sends the request to itself over HTTP", async () => {
+    const codes: number[] = [];
+    for (let round = 0; round < 6; round++) {
+      const batch = await Promise.all(
+        Array.from({ length: 80 }, (_, i) =>
+          fetch(site.base + `/no-such-page-${round}-${i}`).then((r) => r.status),
+        ),
+      );
+      codes.push(...batch);
+      // Around the five seconds after which Node's servers close an idle connection.
+      await new Promise((done) => setTimeout(done, round % 2 === 0 ? 4_500 : 5_200));
+    }
+    expect(codes.filter((c) => c !== 404)).toEqual([]);
+    expect(site.log()).not.toContain("Failed to proxy");
+    // The 404 page keeps what it always sent.
+    const one = await fetch(site.base + "/no-such-page-again");
+    expect(one.status).toBe(404);
+    expect(one.headers.get("x-robots-tag")).toContain("noindex");
+  }, 120_000);
 
   test("searches are counted by word and day only; Tools > Site search lists them; Hide from site search (SEO-75)", async () => {
     const about = (await db.run("select id, title from entries where slug = 'about'"))[0]!;

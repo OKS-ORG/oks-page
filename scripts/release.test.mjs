@@ -1,5 +1,7 @@
 // The packages are ready to be published: what npm needs is in each package.json, and they can be published in an order
 // where every package comes after the ones it needs.
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { inOrder, packages } from "./release.mjs";
 
@@ -17,6 +19,18 @@ describe("the packages are ready to publish", () => {
       expect(json.publishConfig, json.name).toEqual({ access: "public" });
       expect(json.files, json.name).toContain("dist");
       expect(json.engines, json.name).toEqual({ node: ">=22" });
+    }
+  });
+
+  test("every package has a README and the licence in its own folder, so npm shows them", () => {
+    for (const { json, dir } of list) {
+      expect(existsSync(join(dir, "README.md")), `${json.name} README.md`).toBe(true);
+      expect(readFileSync(join(dir, "LICENSE"), "utf8"), `${json.name} LICENSE`).toBe(
+        readFileSync(join(dir, "..", "..", "LICENSE"), "utf8"),
+      );
+      expect(readFileSync(join(dir, "README.md"), "utf8"), `${json.name} README`).not.toContain(
+        "CMS-Docs",
+      );
     }
   });
 

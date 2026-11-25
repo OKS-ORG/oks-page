@@ -8,14 +8,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { findAddress, findTermArchive, listPages, slugOf } from "./data/entries";
 import { publicPolicy } from "./csp";
 import { getRunner, getSiteId, NO_SITE } from "./db";
-import {
-  NOT_FOUND_CACHE_HEADER,
-  PRIVATE,
-  notFoundHeaders,
-  pageHeaders,
-  visitorOf,
-} from "./headers";
+import { PRIVATE, PRIVATE_PAGE, notFoundHeaders, pageHeaders, visitorOf } from "./headers";
+import { maintenanceResponse } from "./maintenance-handler";
 import { mayPassMaintenance } from "./maintenance-gate";
+import { notFoundResponse } from "./not-found-handler";
 import { pagePath, pagingOf } from "./paging";
 import { mayPreview } from "./preview-gate";
 import { trackView } from "./stats-collect";
@@ -101,9 +97,7 @@ export async function proxy(request: NextRequest) {
   // checked for real (a made-up cookie does not pass). The admin and the API are not behind this proxy, so the owner
   // can always sign in and turn the mode off.
   if (maintenance.enabled && !(visitor === "signed-in" && (await mayPassMaintenance(request))))
-    return apply(NextResponse.rewrite(new URL("/maintenance-handler", request.url)), {
-      "x-robots-tag": "noindex",
-    });
+    return apply(maintenanceResponse(maintenance.message), { "x-robots-tag": "noindex" });
   // A preview ("/preview/<id>") is for someone with a preview link or a signed-in editor of that entry. Anyone else falls
   // through to the plain 404 below, so nobody learns that a draft exists. Never cached, never indexed, and the link is
   // not passed on to other sites in a Referer header.
@@ -200,15 +194,9 @@ export async function proxy(request: NextRequest) {
     void countRedirectHit(getRunner(), moved.id).catch(() => undefined);
     return NextResponse.redirect(to, moved.status);
   }
-  // The 404 handler sends the cache header itself (Next.js would replace one set here), so it is passed on as a request header.
+  // The 404 page, answered here with the cache header chosen for this visitor.
   const wanted = notFoundHeaders({ cdn, visitor })["cache-control"];
-  const headers = new Headers(request.headers);
-  headers.delete(NOT_FOUND_CACHE_HEADER);
-  if (wanted) headers.set(NOT_FOUND_CACHE_HEADER, wanted);
-  return apply(
-    NextResponse.rewrite(new URL("/not-found-handler", request.url), { request: { headers } }),
-    { "x-robots-tag": "noindex" },
-  );
+  return apply(notFoundResponse(wanted ?? PRIVATE_PAGE), { "x-robots-tag": "noindex" });
 }
 
 export const config = {
