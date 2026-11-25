@@ -123,7 +123,12 @@ export async function proxy(request: NextRequest) {
     return apply(NextResponse.next(), { "x-robots-tag": "noindex", "cache-control": PRIVATE });
   // A visitor's request about their personal data (spec 18, section 5) and the link in its confirmation email are routes of their
   // own. They are never cached or indexed, and the link is not passed on to other sites in a Referer header.
-  if (slug === "privacy-request" || /^privacy-request\/confirm\/[^/]+$/.test(slug))
+  // The page a client opens from a guided link (spec 11, section 8) is a route of its own, kept just as private.
+  if (
+    slug === "privacy-request" ||
+    /^privacy-request\/confirm\/[^/]+$/.test(slug) ||
+    /^collect\/[^/]+$/.test(slug)
+  )
     return apply(NextResponse.next(), {
       "x-robots-tag": "noindex, nofollow",
       "cache-control": PRIVATE,

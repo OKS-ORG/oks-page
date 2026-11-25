@@ -120,6 +120,13 @@
       "when": 1795496716669,
       "tag": "0016_right_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795577681158,
+      "tag": "0017_tan_leader",
+      "breakpoints": true
     }
   ]
 }

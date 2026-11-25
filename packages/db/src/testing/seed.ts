@@ -407,6 +407,34 @@ export async function seedEverything(db: TestDb): Promise<void> {
     count: 7,
   });
   await ins(db, "stats_seen", { site_id: site, day: "2026-11-23", hash: "a".repeat(32) });
+  await ins(db, "collect_links", {
+    id: id(903),
+    site_id: site,
+    token_hash: "c".repeat(64),
+    label: "Photos for the 🌸 page",
+    note: "Send three photos and a short text.",
+    expires_at: T2,
+    max_files: 10,
+    max_bytes: 5_000_000_000,
+    max_text: 20000,
+    disabled_at: null,
+    created_by: user,
+    created_at: T,
+  });
+  await ins(db, "collect_items", {
+    id: id(904),
+    link_id: id(903),
+    site_id: site,
+    kind: "file",
+    sender: "Chloé",
+    body: "",
+    file_name: "foto.jpg",
+    mime: "image/jpeg",
+    size_bytes: 8,
+    data: Buffer.from([0, 255, 128, 10, 13, 65, 0, 200]),
+    status: "pending",
+    created_at: T,
+  });
   await ins(db, "extension_settings", {
     extension_id: ext,
     key: "units",

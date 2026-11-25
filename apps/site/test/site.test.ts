@@ -13471,6 +13471,124 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await dan.context().close();
     await owners.close();
   });
+
+  test("AG-60 to AG-66, AG-88: an agency makes a guided link, a client sends text and a file without an account, the agency accepts them from the inbox, and a link that is turned off says so", async () => {
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    const count = async (table: string, where = "1 = 1") =>
+      Number((await db.run(`select count(*) as n from ${table} where ${where}`))[0]!["n"]);
+    const mediaBefore = await count("media");
+
+    // The agency makes a link and is shown its address once.
+    await owners.goto(site.base + "/admin/tools/collect");
+    await owners.getByRole("heading", { name: "Client content", level: 1 }).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    await owners.getByLabel(/What is it for/).fill("Photos for the About page");
+    await owners.getByLabel(/A note for the client/).fill("Send two photos of the garden.");
+    await owners.getByRole("button", { name: "Make the link" }).click();
+    const address = await owners.getByLabel("The client's link").inputValue();
+    expect(address).toMatch(new RegExp(`^${site.base}/collect/[A-Za-z0-9_-]{43}$`));
+    const token = address.split("/").pop()!;
+    // Only a hash is kept.
+    const stored = JSON.stringify(await db.run("select * from collect_links"));
+    expect(stored).not.toContain(token);
+
+    // The client opens it with no account and sends text and a picture.
+    const client = await (await browser.newContext()).newPage();
+    await client.goto(address);
+    await client.getByRole("heading", { name: "Send your content", level: 1 }).waitFor();
+    await client.getByText("Send two photos of the garden.").waitFor();
+    expect(await axeViolations(client)).toEqual([]);
+    await client.getByLabel(/Your name/).fill("Chloé");
+    await client.getByLabel(/Text for the page/).fill("We grow roses.\n\nCome and see.");
+    await client.getByLabel(/Pictures and files/).setInputFiles({
+      name: "rose.png",
+      mimeType: "image/png",
+      buffer: PNG,
+    });
+    await client.getByRole("button", { name: "Send" }).click();
+    await client.getByText(/Thank you. your text and 1 file arrived/).waitFor();
+    // It waits: nothing is in the library, nothing is published.
+    expect(await count("collect_items", "status = 'pending'")).toBe(2);
+    expect(await count("media")).toBe(mediaBefore);
+    expect(await count("entries", "title like 'Photos for the About%'")).toBe(0);
+    const response = await client.request.get(site.base + "/uploads/rose.png");
+    expect(response.status()).toBe(404);
+
+    // A file that is not a picture is refused in words.
+    await client.getByLabel(/Pictures and files/).setInputFiles({
+      name: "shell.php",
+      mimeType: "application/x-php",
+      buffer: Buffer.from("<?php echo 1; ?>"),
+    });
+    await client.getByRole("button", { name: "Send" }).click();
+    await client.getByRole("alert").filter({ hasText: "shell.php" }).waitFor();
+    expect(await count("collect_items")).toBe(2);
+
+    // The agency accepts the file into the library and the text as a draft page.
+    await owners.reload();
+    await owners.getByText("Photos for the About page").first().waitFor();
+    await owners.getByRole("button", { name: /Accept rose\.png into the library/ }).click();
+    await owners.getByText("The file is in the library.").waitFor();
+    expect(await count("media")).toBe(mediaBefore + 1);
+    await owners.getByRole("button", { name: "Accept the text as a draft page" }).click();
+    await owners.getByText("A draft page was made from the text. It is not published.").waitFor();
+    const draft = (
+      await db.run(
+        "select status from entries where title = 'Photos for the About page (from Chloé)'",
+      )
+    )[0]!;
+    expect(draft["status"]).toBe("draft");
+    expect(await axeViolations(owners)).toEqual([]);
+
+    // Turned off, the link says so, on the page and for a send.
+    await owners.getByRole("button", { name: "Turn off Photos for the About page" }).click();
+    await owners.getByText("Turned off").waitFor();
+    await client.reload();
+    await client.getByText(/This link was turned off/).waitFor();
+    const refused = await client.request.post(site.base + "/api/collect/" + token, {
+      headers: { origin: site.base },
+      multipart: { text: "hello" },
+    });
+    expect(refused.status()).toBe(410);
+    // A wrong link gets its own plain message, and the page is not indexed.
+    await client.goto(site.base + "/collect/" + "x".repeat(43));
+    await client.getByText("This link does not work.").waitFor();
+    expect(await client.locator('meta[name="robots"]').getAttribute("content")).toContain(
+      "noindex",
+    );
+    // Making links and reading the inbox need an account.
+    expect(
+      (
+        await client.request.post(site.base + "/api/admin/collect", {
+          headers: { origin: site.base },
+          data: { action: "discard", id: "x" },
+        })
+      ).status(),
+    ).toBe(401);
+
+    // At most ten tries a minute for a link.
+    await owners.getByRole("button", { name: "Turn on Photos for the About page" }).click();
+    await owners.getByText("Working").first().waitFor();
+    const codes: number[] = [];
+    for (let i = 0; i < 14; i++)
+      codes.push(
+        (
+          await client.request.post(site.base + "/api/collect/" + token, {
+            headers: { origin: site.base },
+            multipart: { text: `try ${i}` },
+          })
+        ).status(),
+      );
+    expect(codes.filter((c) => c === 429).length).toBeGreaterThanOrEqual(4);
+    expect(codes.slice(0, 3)).toEqual([200, 200, 200]);
+    await client.context().close();
+    await owners.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {

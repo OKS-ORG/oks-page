@@ -7,6 +7,7 @@
     "app/search",
     "app/preview",
     "app/privacy-request",
+    "app/collect",
     "app/sitemap.xml",
     "app/robots.txt",
     "app/feed.xml",

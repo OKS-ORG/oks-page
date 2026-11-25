@@ -120,6 +120,13 @@
       "when": 1795496715938,
       "tag": "0016_perpetual_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795577680462,
+      "tag": "0017_overconfident_silver_sable",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@ export const EXPORT_REMOVED = {
     "app/search",
     "app/preview",
     "app/privacy-request",
+    "app/collect",
     "app/sitemap.xml",
     "app/robots.txt",
     "app/feed.xml",
@@ -296,6 +297,22 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/handoff/route.ts",
       content: `export { PUT } from ${from("api-handoff")};\n`,
+    },
+    {
+      path: "app/admin/tools/collect/page.tsx",
+      content: `export { default, metadata } from ${from("tools-collect-page")};\n`,
+    },
+    {
+      path: "app/api/admin/collect/route.ts",
+      content: `export { POST } from ${from("api-collect-admin")};\n`,
+    },
+    {
+      path: "app/collect/[token]/page.tsx",
+      content: `export { default, metadata } from ${from("collect-page")};\n`,
+    },
+    {
+      path: "app/api/collect/[token]/route.ts",
+      content: `export { POST } from ${from("api-collect")};\n`,
     },
     {
       path: "app/api/admin/bundle/route.ts",

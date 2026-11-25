@@ -59,6 +59,12 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["settings.manage"],
   },
   {
+    key: "collect",
+    label: "Client content",
+    href: "/admin/tools/collect",
+    needs: ["settings.manage"],
+  },
+  {
     key: "privacy-requests",
     label: "Privacy requests",
     href: "/admin/tools/privacy",

@@ -1375,6 +1375,79 @@ export const statsSeen = pgTable(
   (t) => [primaryKey({ columns: [t.siteId, t.day, t.hash] })],
 );
 
+// Client content collection (spec 11, section 8): a guided link an agency gives a client, and what the client sends through it.
+// Only a hash of the link's token is kept. What is sent waits in `collect_items`, out of the public library, until a person of
+// the site accepts it; a file's bytes are kept here (not in the library's storage, which is public) and are emptied on accept.
+export const collectLinks = pgTable(
+  "collect_links",
+  {
+    id: text("id").primaryKey().notNull(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    label: text("label").notNull(),
+    note: text("note").notNull().default(""),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+    maxFiles: integer("max_files").notNull(),
+    maxBytes: bigint("max_bytes", { mode: "number" }).notNull(),
+    maxText: integer("max_text").notNull(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true, precision: 3, mode: "date" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_collect_links_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_collect_links_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    check("ck_collect_links_created_by_ulid", sql`length(${t.createdBy}) = 26`),
+    uniqueIndex("uq_collect_links_token").on(t.tokenHash),
+    index("ix_collect_links_site").on(t.siteId, t.createdAt),
+  ],
+);
+
+export const collectItems = pgTable(
+  "collect_items",
+  {
+    id: text("id").primaryKey().notNull(),
+    linkId: text("link_id")
+      .notNull()
+      .references(() => collectLinks.id, { onDelete: "cascade" }),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    sender: text("sender").notNull().default(""),
+    body: text("body").notNull().default(""),
+    fileName: text("file_name"),
+    mime: text("mime"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+    data: bytea("data"),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      precision: 3,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    check("ck_collect_items_id_ulid", sql`length(${t.id}) = 26`),
+    check("ck_collect_items_link_id_ulid", sql`length(${t.linkId}) = 26`),
+    check("ck_collect_items_site_id_ulid", sql`length(${t.siteId}) = 26`),
+    check("ck_collect_items_kind", sql`${t.kind} in ('text', 'file')`),
+    check("ck_collect_items_status", sql`${t.status} in ('pending', 'accepted')`),
+    index("ix_collect_items_link").on(t.linkId, t.createdAt),
+    index("ix_collect_items_site").on(t.siteId, t.status, t.createdAt),
+  ],
+);
+
 export const tableNames = [
   "users",
   "auth_sessions",
@@ -1428,4 +1501,6 @@ export const tableNames = [
   "consent_records",
   "stats_daily",
   "stats_seen",
+  "collect_links",
+  "collect_items",
 ] as const;

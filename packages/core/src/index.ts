@@ -78,3 +78,4 @@ export * from "./sftp.js";
 export * from "./github-pages.js";
 export * from "./netlify.js";
 export * from "./bundle.js";
+export * from "./collect.js";
