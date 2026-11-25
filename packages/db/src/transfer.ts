@@ -139,6 +139,51 @@ function parentsFirst(
   return [...rows].sort((a, b) => depth(a) - depth(b));
 }
 
+const metaOf = (name: string): TableMeta => {
+  const t = tablesInOrder().find((m) => m.name === name);
+  if (!t) throw new Error(`There is no table ${name}`);
+  return t;
+};
+
+/**
+ * The rows of one table as plain JSON values (the same form as a whole export), chosen by `where` (SQL after the word
+ * "where", with `?` marks for `params`), in primary-key order. For the parts of a database that a site bundle holds.
+ */
+export async function readRows(
+  db: SqlRunner,
+  table: string,
+  where = "1 = 1",
+  params: unknown[] = [],
+): Promise<Record<string, unknown>[]> {
+  const t = metaOf(table);
+  const cols = t.columns.map((c) => `"${c.name}"`).join(", ");
+  const rows = (await db.all(`select ${cols} from "${t.name}" where ${where}`, params)).map((r) =>
+    Object.fromEntries(t.columns.map((c) => [c.name, fromDb(db.dialect, c.family, r[c.name])])),
+  );
+  rows.sort((a, b) => t.primaryKey.reduce((r, k) => r || compare(a[k], b[k]), 0));
+  return rows;
+}
+
+/** Inserts rows made by `readRows` (a row that points at its own table has its parent put in first). */
+export async function writeRows(
+  db: SqlRunner,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<void> {
+  const t = metaOf(table);
+  const ordered = t.selfParent ? parentsFirst(rows, t.selfParent, t.primaryKey[0]!) : rows;
+  const names = t.columns.map((c) => `"${c.name}"`).join(", ");
+  const marks = t.columns.map(() => "?").join(", ");
+  for (const row of ordered)
+    await db.all(
+      `insert into "${t.name}" (${names}) values (${marks})`,
+      t.columns.map((c) => toDb(db.dialect, c.family, row[c.name])),
+    );
+}
+
+/** The column names of a table, in order (to check a bundle's rows have the right shape). */
+export const columnsOf = (table: string): string[] => metaOf(table).columns.map((c) => c.name);
+
 export async function importData(db: SqlRunner, dump: Dump): Promise<{ rows: number }> {
   if (dump.format !== "oks-export" || dump.version !== 1)
     throw new Error("This is not an oks export, or its version is not supported");

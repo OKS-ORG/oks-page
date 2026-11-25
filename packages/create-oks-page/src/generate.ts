@@ -298,6 +298,10 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { PUT } from ${from("api-handoff")};\n`,
     },
     {
+      path: "app/api/admin/bundle/route.ts",
+      content: `export { GET, POST } from ${from("api-bundle")};\n`,
+    },
+    {
       path: "app/admin/tools/statistics/page.tsx",
       content: `export { default, metadata } from ${from("tools-statistics-page")};\n`,
     },

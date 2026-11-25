@@ -45,7 +45,7 @@ export default async function ToolsHandoffPage() {
       title="Handoff"
       breadcrumbs={[{ label: "Tools" }, { label: "Handoff" }]}
     >
-      <HandoffScreen initial={view} />
+      <HandoffScreen initial={view} bundle={actor.can("export") && actor.can("import")} />
     </AdminFrame>
   );
 }

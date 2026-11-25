@@ -13409,6 +13409,68 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(await owners.getByLabel(/The client has a short guide/).isChecked()).toBe(false);
     await owners.close();
   });
+
+  test("AG-70, AG-87: the owner downloads the site bundle and imports it again from the handoff screen; a client may do neither", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    const pageCount = async () =>
+      Number((await db.run("select count(*) as n from entries where status <> 'trash'"))[0]!["n"]);
+    const before = await pageCount();
+    expect(before).toBeGreaterThan(0);
+    await owners.goto(site.base + "/admin/tools/handoff");
+    await owners.getByRole("heading", { name: "Site bundle", level: 2 }).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+
+    const [download] = await Promise.all([
+      owners.waitForEvent("download"),
+      owners.getByRole("link", { name: "Download the site bundle" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^site-bundle-\d{4}-\d{2}-\d{2}\.tgz$/);
+    const saved = await download.path();
+
+    // The import button waits for the file and for the tick that says it replaces what is there.
+    const button = owners.getByRole("button", { name: "Import the bundle" });
+    expect(await button.isDisabled()).toBe(true);
+    await owners.getByLabel(/Bundle file/).setInputFiles(saved);
+    expect(await button.isDisabled()).toBe(true);
+    await owners.getByLabel(/I understand this replaces/).check();
+    await button.click();
+    await owners.getByText(/^Imported: \d+ pages and posts/).waitFor();
+    expect(await pageCount()).toBe(before);
+    expect(await axeViolations(owners)).toEqual([]);
+
+    // A file that is not a bundle is refused in words and changes nothing.
+    await owners.getByLabel(/Bundle file/).setInputFiles({
+      name: "wrong.tgz",
+      mimeType: "application/gzip",
+      buffer: Buffer.from("this is not a bundle"),
+    });
+    await owners.getByLabel(/I understand this replaces/).check();
+    await button.click();
+    await owners.getByText(/is not a \.tgz file/).waitFor();
+    expect(await pageCount()).toBe(before);
+
+    // A client may neither download nor import.
+    const invited = await owners.request.post(site.base + "/api/admin/users", {
+      headers: { origin: site.base },
+      data: { name: "Dan", email: "dan@example.com", roleKey: "client", days: 1 },
+    });
+    expect(invited.status(), await invited.text()).toBe(201);
+    const dan = await (await browser.newContext()).newPage();
+    await dan.goto(String(((await invited.json()) as { link: string }).link));
+    await dan.getByLabel(/^Password/).fill("dan-has-a-long-password");
+    await dan.getByRole("button", { name: "Join" }).click();
+    await dan.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    expect((await dan.request.get(site.base + "/api/admin/bundle")).status()).toBe(403);
+    const refused = await dan.request.post(site.base + "/api/admin/bundle?confirm=replace", {
+      headers: { origin: site.base, "content-type": "application/gzip" },
+      data: readFileSync(saved!),
+    });
+    expect(refused.status()).toBe(403);
+    expect(await pageCount()).toBe(before);
+    await dan.context().close();
+    await owners.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {
@@ -14346,10 +14408,21 @@ describe.skipIf(!findBrowser())(
                 .trim(),
             ),
           ).toMatch(/^#[0-9a-f]{6}$/);
+          // A color that is still fading from the other mode would be measured half way: switch the fades off, so the
+          // check sees the colors the page ends up with.
+          await page.addStyleTag({
+            content: "*,*::before,*::after{transition:none!important;animation:none!important}",
+          });
           for (const mode of ["light", "dark"] as const) {
             await page.evaluate(
               (m) => document.documentElement.setAttribute("data-theme", m),
               mode,
+            );
+            await page.evaluate(
+              () =>
+                new Promise<void>((done) =>
+                  requestAnimationFrame(() => requestAnimationFrame(() => done())),
+                ),
             );
             expect(await axe(), `${color} ${mode} ${path}`).toEqual([]);
           }
