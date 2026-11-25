@@ -253,6 +253,7 @@ for (const { kind, open, skip } of openers) {
                   emailWorks: true,
                   privacyPage: false,
                   diskFreeBytes: 1e9,
+                  lastBackupAt: null,
                 },
                 Date.now(),
               )),

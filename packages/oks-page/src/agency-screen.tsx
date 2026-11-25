@@ -154,22 +154,34 @@ export function AgencyScreen({
                     <td>{s.last?.status ? gb(s.last.status.diskFreeBytes) : "-"}</td>
                     <td>{s.last ? when(s.last.at) : "-"}</td>
                     <td>
-                      {active ? (
-                        <>
-                          <a href={`/admin/tools/agency/report/${s.id}`}>
-                            Report for {s.name}
-                          </a>{" "}
-                        </>
-                      ) : null}
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void run({ action: "remove", id: s.id }, `${s.name} was disconnected.`)
-                        }
-                      >
-                        Disconnect {s.name}
-                      </button>
+                      <div style={{ display: "grid", gap: ".6rem", justifyItems: "start" }}>
+                        {active ? (
+                          <a href={`/admin/tools/agency/report/${s.id}`}>Report for {s.name}</a>
+                        ) : null}
+                        {active ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              void run(
+                                { action: "backup", id: s.id },
+                                `A backup of ${s.name} was made and checked.`,
+                              )
+                            }
+                          >
+                            Back up {s.name} now
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void run({ action: "remove", id: s.id }, `${s.name} was disconnected.`)
+                          }
+                        >
+                          Disconnect {s.name}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

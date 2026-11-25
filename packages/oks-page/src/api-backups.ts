@@ -2,8 +2,9 @@
 //   make     {}                  makes a backup now and checks it
 //   restore  { name, confirm }   puts the whole site back as it was at that backup (a safety backup is made first)
 //   delete   { name }            deletes a backup
+//   schedule { daily }           turns the daily backup (03:00, site time) on or off
 // GET /api/admin/backups/<name> (api-backup-file.ts) downloads one. Only people who manage the settings.
-import { deleteBackup, makeBackup, restoreBackup } from "@oks-page/core";
+import { deleteBackup, makeBackup, restoreBackup, saveDailyBackupOn } from "@oks-page/core";
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
@@ -61,6 +62,11 @@ export async function POST(request: Request) {
       const gone = await deleteBackup(ctx, actor, input["name"]);
       if (!gone.ok) return reply(gone, STATUS[gone.code]);
       return NextResponse.json({ ok: true });
+    }
+    case "schedule": {
+      const done = await saveDailyBackupOn(runner, actor, member.siteId, input["daily"]);
+      if (!done.ok) return reply(done, STATUS[done.code]);
+      return NextResponse.json({ ok: true, daily: done.daily });
     }
     default:
       return reply({ code: "invalid", message: "The request was not understood." }, 400);

@@ -388,6 +388,7 @@ for (const { kind, open, skip } of openers) {
           emailWorks: false,
           privacyPage: true,
           diskFreeBytes: 5_000_000_000,
+          lastBackupAt: T - 3_600_000,
         },
         T,
       );
@@ -395,7 +396,7 @@ for (const { kind, open, skip } of openers) {
         version: "1.2.3",
         siteName: "Anna's Garden",
         pendingUpdates: null,
-        lastBackupAt: null,
+        lastBackupAt: T - 3_600_000,
         diskFreeBytes: 5_000_000_000,
         at: T,
       });
@@ -404,7 +405,25 @@ for (const { kind, open, skip } of openers) {
         ["two-factor", true],
         ["email", false],
         ["privacy", true],
+        ["backup", true],
       ]);
+      // A backup older than two days, or none, is a check that needs a look.
+      for (const lastBackupAt of [T - 49 * 3_600_000, null]) {
+        const old = await connectorStatus(
+          db.runner,
+          siteId,
+          {
+            version: "1",
+            twoFactor: { on: 1, total: 1 },
+            emailWorks: true,
+            privacyPage: true,
+            diskFreeBytes: null,
+            lastBackupAt,
+          },
+          T,
+        );
+        expect(old.checks.find((c) => c.id === "backup")).toMatchObject({ ok: false });
+      }
       const text = JSON.stringify(status);
       expect(text).not.toContain("anna@garden.test");
       expect(text).not.toContain('Anna"');

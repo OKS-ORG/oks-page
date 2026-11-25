@@ -39,13 +39,22 @@ async function post(body: Record<string, unknown>) {
   };
 }
 
-export function BackupsScreen({ backups }: { backups: BackupInfo[] }) {
+export function BackupsScreen({
+  backups,
+  daily,
+  failure,
+}: {
+  backups: BackupInfo[];
+  daily: boolean;
+  failure: { at: number; reason: string } | null;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
   const [asking, setAsking] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
+  const [dailyOn, setDailyOn] = useState(daily);
 
   async function run(
     body: Record<string, unknown>,
@@ -90,6 +99,44 @@ export function BackupsScreen({ backups }: { backups: BackupInfo[] }) {
           {busy && !asking ? "Working…" : "Make a backup now"}
         </button>
       </p>
+
+      <section aria-labelledby="backup-daily">
+        <h2 id="backup-daily">Every day</h2>
+        <p>
+          <label style={{ display: "flex", gap: ".5rem", alignItems: "flex-start" }}>
+            <input
+              type="checkbox"
+              checked={dailyOn}
+              disabled={busy}
+              onChange={async (event) => {
+                const next = event.target.checked;
+                setDailyOn(next);
+                const r = await post({ action: "schedule", daily: next });
+                if (!r.ok) {
+                  setDailyOn(!next);
+                  setProblem(r.message);
+                } else {
+                  setNote(next ? "A backup will be made every day." : "The daily backup is off.");
+                }
+              }}
+            />
+            <span>Make a backup every day at 03:00 (the site&apos;s time)</span>
+          </label>
+        </p>
+        <p>
+          The last 14 daily backups are kept, and the newest of each of the last 6 months. Backups
+          you make yourself, the safety copies made before a restore and the ones an agency asks for
+          are kept apart: the newest 10 of each. If the disk is too full the backup is refused, the
+          site tries again an hour later, and you are told by email, at most once a day.
+        </p>
+        {failure ? (
+          <Alert
+            color="danger"
+            title="The last daily backup failed"
+            description={`${when(failure.at)}: ${failure.reason}`}
+          />
+        ) : null}
+      </section>
 
       <h2>Backups</h2>
       {backups.length === 0 ? (

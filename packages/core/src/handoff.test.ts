@@ -15,6 +15,7 @@ const can = (key: string): Actor["can"] => {
   const caps = roleOf(key).capabilities;
   return (c) => caps.includes(c);
 };
+const DAYS = 86_400_000;
 const facts: HandoffHints = {
   twoFactor: { on: 1, total: 2 },
   emailWorks: false,
@@ -205,3 +206,19 @@ for (const { kind, open, skip } of openers) {
     });
   });
 }
+
+describe("the hint for the backups item", () => {
+  test("it says whether a recent backup exists, and nothing when the site cannot say", () => {
+    const now = Date.now();
+    expect(hintOf("backups", { ...facts, backup: { lastAt: now - DAYS } })).toMatch(
+      /^Looks done: the last backup was made on \d{4}-\d{2}-\d{2}/,
+    );
+    expect(hintOf("backups", { ...facts, backup: { lastAt: now - 3 * DAYS } })).toMatch(
+      /^Not yet: the last backup is from \d{4}-\d{2}-\d{2}, more than two days ago/,
+    );
+    expect(hintOf("backups", { ...facts, backup: { lastAt: null } })).toBe(
+      "Not yet: no backup has been made.",
+    );
+    expect(hintOf("backups", facts)).toBe("");
+  });
+});

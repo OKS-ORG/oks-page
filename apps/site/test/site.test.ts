@@ -13762,6 +13762,15 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await owners.getByRole("heading", { name: "Backups", level: 1 }).waitFor();
     await owners.getByText("There is no backup yet.").waitFor();
     await owners.getByText("Keep two things safe").waitFor();
+    // The daily backup is on until it is turned off, and the choice is kept.
+    const dailyBox = owners.getByLabel(/Make a backup every day at 03:00/);
+    expect(await dailyBox.isChecked()).toBe(true);
+    await dailyBox.uncheck();
+    await owners.getByText("The daily backup is off.").waitFor();
+    await owners.reload();
+    expect(await owners.getByLabel(/Make a backup every day at 03:00/).isChecked()).toBe(false);
+    await owners.getByLabel(/Make a backup every day at 03:00/).check();
+    await owners.getByText("A backup will be made every day.").waitFor();
     expect(await axeViolations(owners)).toEqual([]);
 
     // Make one: it is checked at once and listed.
@@ -13827,6 +13836,11 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await owners.getByText(/The site was put back\./).waitFor();
     expect(await titles()).toContain("Later page");
     expect(await open(laterSlug)).toBe(200);
+
+    // The handoff checklist can see that a backup was made.
+    await owners.goto(site.base + "/admin/tools/handoff");
+    await owners.getByText(/Looks done: the last backup was made on \d{4}-\d{2}-\d{2}/).waitFor();
+    await owners.goto(site.base + "/admin/tools/backups");
 
     // Delete.
     await owners.reload();
@@ -14627,6 +14641,11 @@ describe.skipIf(!findBrowser())(
       site = await startSite("sqlite", db, {
         OKS_SECRET: "w".repeat(40),
         OKS_LICENCE_PUBLIC_KEYS: licencePublic,
+        // The daily backup is on here, and today's hour is always past, so the timer makes one at once.
+        OKS_BACKUP_DAILY: "on",
+        OKS_BACKUP_HOUR: "0",
+        OKS_BACKUP_LOOK_SECONDS: "1",
+        OKS_SCHEDULER_SECONDS: "1",
       });
       const made = await fetch(site.base + "/api/setup", {
         method: "POST",
@@ -14906,8 +14925,9 @@ describe.skipIf(!findBrowser())(
         ok: true,
         siteName: "Weber Garden",
         pendingUpdates: null,
-        lastBackupAt: null,
       });
+      // Whether the timer has made today's backup yet depends on the moment; it is looked at below.
+      expect(body).toHaveProperty("lastBackupAt");
       expect(JSON.stringify(body)).not.toContain(owner.email);
       expect((await signed("GET", target, key, { nonce: "n".repeat(24) })).status()).toBe(401); // the same nonce again
       expect(
@@ -14939,9 +14959,32 @@ describe.skipIf(!findBrowser())(
         data: "x".repeat(70_000),
       });
       expect(huge.status()).toBe(413);
-      const backup = await signed("POST", "/api/oks/v1/backup", key, { body: "{}" });
-      expect(backup.status()).toBe(501);
-      expect(((await backup.json()) as { message: string }).message).toMatch(/not built yet/);
+      // The timer made today's backup by itself, and the site says so.
+      type Said = { lastBackupAt: number | null; checks: { id: string; ok: boolean }[] };
+      const status = async () => (await (await signed("GET", target, key)).json()) as Said;
+      await expect
+        .poll(async () => (await status()).lastBackupAt, { timeout: 60_000 })
+        .not.toBeNull();
+      expect((await status()).checks.find((c) => c.id === "backup")).toMatchObject({ ok: true });
+      // A backup asked for by the dashboard is made and checked, and a second one a moment later is turned down.
+      const asked = await signed("POST", "/api/oks/v1/backup", key, { body: "{}" });
+      expect(asked.status(), await asked.text()).toBe(200);
+      const made = (await asked.json()) as {
+        ok: boolean;
+        createdAt: number;
+        size: number;
+        checkedAt: number;
+      };
+      expect(made).toMatchObject({ ok: true });
+      expect(made.size).toBeGreaterThan(1000);
+      expect(made.checkedAt).toBeGreaterThanOrEqual(made.createdAt);
+      const again = await signed("POST", "/api/oks/v1/backup", key, { body: "{}" });
+      expect(again.status()).toBe(429);
+      expect(((await again.json()) as { message: string }).message).toMatch(/Wait ten minutes/);
+      // What is not built still says so.
+      const update = await signed("POST", "/api/oks/v1/update", key, { body: "{}" });
+      expect(update.status()).toBe(501);
+      expect(((await update.json()) as { message: string }).message).toMatch(/not built yet/);
       expect((await signed("GET", "/api/oks/v1/users", key)).status()).toBe(404);
       expect((await signed("POST", "/api/oks/v1/status", key, { body: "{}" })).status()).toBe(405);
 
@@ -14993,6 +15036,13 @@ describe.skipIf(!findBrowser())(
       // Check, then read the counts.
       await page.getByRole("button", { name: "Check all sites" }).click();
       await page.getByText("All sites were asked.").waitFor();
+      // The timer's backup shows as the last backup of the site.
+      expect(
+        await page.getByRole("row", { name: /Weber Garden online/ }).textContent(),
+      ).not.toContain("None yet");
+      // The dashboard's button asks for a backup; the site made one a moment ago, so it says to wait, in its own words.
+      await page.getByRole("button", { name: "Back up Weber Garden online now" }).click();
+      await page.getByText(/Wait ten minutes before asking for another/).waitFor();
       expect(await axe()).toEqual([]);
       // The report for the client: counts, the pages read, the state of the site, and a way to print or send it.
       await page.getByRole("link", { name: "Report for Weber Garden online" }).click();

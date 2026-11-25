@@ -40,6 +40,8 @@ export async function startSite(kind: string, db: TestDb, extra: Record<string, 
     NODE_ENV: "production",
     // Backups of a test site go to a folder of their own, never into the project.
     OKS_BACKUP_DIR: mkdtempSync(join(tmpdir(), "oks-backups-")),
+    // The daily backup is off in the tests unless a test turns it on.
+    OKS_BACKUP_DAILY: "off",
     ...Object.fromEntries(
       Object.entries(extra).map(([k, v]) => [k, v.replaceAll("{port}", String(port))]),
     ),

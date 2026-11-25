@@ -4,6 +4,7 @@ import {
   clientNoticeOn,
   emailWorks,
   isSetupDone,
+  lastGoodBackup,
   listClientEdits,
   listMembers,
   loadHandoff,
@@ -17,6 +18,7 @@ import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
+import { backupContext } from "./backup-context";
 import { getRunner } from "./db";
 import { HandoffScreen } from "./handoff-screen";
 import { siteSecrets } from "./mail";
@@ -38,6 +40,7 @@ export default async function ToolsHandoffPage() {
     twoFactor: { on: admins.filter((a) => a.twoFactor).length, total: admins.length },
     emailWorks: await emailWorks(runner, member.siteId),
     privacyPage: (await loadPrivacySettings(runner, member.siteId)).pageId !== null,
+    backup: { lastAt: (await lastGoodBackup(backupContext()))?.createdAt ?? null },
   });
   // What clients changed on live pages lately; each has a link that puts the earlier version back (for people who may publish).
   const mayRestore = actor.can("content.publish_any");

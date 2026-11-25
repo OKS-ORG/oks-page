@@ -15,6 +15,7 @@ import {
   fetchSiteReport,
   listAgencySites,
   removeAgencySite,
+  requestSiteBackup,
   type AgencyContext,
 } from "./agency.js";
 import {
@@ -116,6 +117,8 @@ for (const { kind, open, skip } of openers) {
       }
     >();
     let offset = 0; // how far the dashboard's clock is from the sites'
+    let backupMode: "ok" | "soon" | "fail" = "ok"; // what a site answers when asked for a backup
+    let backedUpAt: number | null = null; // when the site last made one
     const ctx = (over: Partial<AgencyContext> = {}): AgencyContext => ({
       fetch: globalThis.fetch,
       now: () => Date.now() + offset,
@@ -155,6 +158,8 @@ for (const { kind, open, skip } of openers) {
       editor = { userId: setup.userId, can: (c) => caps("editor").includes(c) };
       farm.clear();
       offset = 0;
+      backupMode = "ok";
+      backedUpAt = null;
       server = createServer((req, res) => {
         const chunks: Buffer[] = [];
         req.on("data", (c: Buffer) => chunks.push(c));
@@ -200,6 +205,7 @@ for (const { kind, open, skip } of openers) {
                   emailWorks: true,
                   privacyPage: false,
                   diskFreeBytes: 1e9,
+                  lastBackupAt: backedUpAt,
                 },
                 Date.now(),
               )),
@@ -209,10 +215,34 @@ for (const { kind, open, skip } of openers) {
               ok: true,
               ...(await connectorReport(db.runner, siteId, Date.now(), 30)),
             });
+          if (action === "backup") {
+            if (backupMode === "soon")
+              return send(429, {
+                ok: false,
+                code: "too_soon",
+                message:
+                  "A backup was made a few minutes ago. Wait ten minutes before asking for another.",
+              });
+            if (backupMode === "fail")
+              return send(500, {
+                ok: false,
+                code: "failed",
+                message: "There is not enough free disk space for a backup.",
+              });
+            backedUpAt = Date.now();
+            return send(200, {
+              ok: true,
+              createdAt: backedUpAt,
+              size: 4321,
+              rows: 99,
+              files: 3,
+              checkedAt: backedUpAt,
+            });
+          }
           return send(501, {
             ok: false,
             code: "not_available",
-            message: "Remote backups are not built yet.",
+            message: "Remote updates are not built yet.",
           });
         });
       });
@@ -468,6 +498,77 @@ for (const { kind, open, skip } of openers) {
         expect(await removeAgencySite(db.runner, anna, siteId, one!.id)).toEqual({ ok: true });
       });
 
+      test("the agency asks a site to back up now: the site makes it, and the dashboard shows the new last backup", async () => {
+        const added = await addAgencySite(
+          db.runner,
+          anna,
+          siteId,
+          secrets,
+          { code: site(1) },
+          ctx(),
+        );
+        if (!added.ok) throw new Error(added.message);
+        expect(
+          (await listAgencySites(db.runner, anna, siteId))[0]!.last?.status?.lastBackupAt,
+        ).toBeNull();
+        const done = await requestSiteBackup(db.runner, anna, siteId, secrets, added.id, ctx());
+        if (!done.ok) throw new Error(done.message);
+        expect(done.backup).toMatchObject({ size: 4321, rows: 99, files: 3 });
+        const [site1] = await listAgencySites(db.runner, anna, siteId);
+        expect(site1!.last?.status?.lastBackupAt).toBe(done.backup.createdAt);
+        expect(site1!.last?.status?.checks.find((c) => c.id === "backup")).toMatchObject({
+          ok: true,
+        });
+      });
+
+      test("a site that says it is too soon, or has no room, is passed on in its own words; and only an agency person may ask", async () => {
+        const added = await addAgencySite(
+          db.runner,
+          anna,
+          siteId,
+          secrets,
+          { code: site(1) },
+          ctx(),
+        );
+        if (!added.ok) throw new Error(added.message);
+        backupMode = "soon";
+        expect(
+          await requestSiteBackup(db.runner, anna, siteId, secrets, added.id, ctx()),
+        ).toMatchObject({
+          ok: false,
+          message: expect.stringMatching(/Wait ten minutes/),
+        });
+        backupMode = "fail";
+        expect(
+          await requestSiteBackup(db.runner, anna, siteId, secrets, added.id, ctx()),
+        ).toMatchObject({
+          ok: false,
+          message: expect.stringMatching(/not enough free disk space/),
+        });
+        backupMode = "ok";
+        expect(
+          await requestSiteBackup(db.runner, editor, siteId, secrets, added.id, ctx()),
+        ).toMatchObject({ ok: false, code: "forbidden" });
+        expect(
+          await requestSiteBackup(
+            db.runner,
+            anna,
+            siteId,
+            secrets,
+            added.id,
+            ctx({ agency: { active: false, limit: 0 } }),
+          ),
+        ).toMatchObject({
+          ok: false,
+          code: "forbidden",
+          message: expect.stringMatching(/Agency key/),
+        });
+        expect(
+          await requestSiteBackup(db.runner, anna, siteId, secrets, newId(), ctx()),
+        ).toMatchObject({ ok: false, code: "not_found" });
+        expect(backedUpAt).toBeNull(); // none of those made a backup
+      });
+
       test("a site's page and visit counts come through the same signed request", async () => {
         await addAgencySite(db.runner, anna, siteId, secrets, { code: site(1) }, ctx());
         const day = new Date().toISOString().slice(0, 10);
@@ -487,7 +588,7 @@ for (const { kind, open, skip } of openers) {
       test("what the site cannot do yet says so, and an oversize body is never sent that far (AG-14)", async () => {
         site(1);
         const target = { url: `${base}/s1`, keyId: "key-1", secret: secretOf(1) };
-        const backup = await callSite(target, "/api/oks/v1/backup", ctx(), {
+        const backup = await callSite(target, "/api/oks/v1/update", ctx(), {
           method: "POST",
           body: {},
         });

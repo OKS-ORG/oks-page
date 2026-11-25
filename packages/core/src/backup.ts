@@ -282,6 +282,55 @@ export async function deleteBackup(
   return { ok: true };
 }
 
+// ----------------------------------------------------------------------------------------------------------------- keeping
+
+export const KEEP_DAILY = 14;
+export const KEEP_MONTHLY = 6;
+export const KEEP_OTHER = 10;
+
+const monthOf = (ms: number): string => new Date(ms).toISOString().slice(0, 7);
+
+/** The names of the backups the keeping rules let go: the daily ones past 14 (but the newest of each of 6 months), and past 10 of any other kind. */
+export function toPrune(backups: BackupInfo[]): string[] {
+  const out: string[] = [];
+  const newest = (a: BackupInfo, b: BackupInfo) =>
+    b.createdAt - a.createdAt || (a.name < b.name ? 1 : -1);
+  const daily = backups.filter((b) => b.kind === "daily").sort(newest);
+  const older = daily.slice(KEEP_DAILY);
+  const monthly = new Set<string>();
+  const months: string[] = [];
+  for (const b of older) {
+    const m = monthOf(b.createdAt);
+    if (!months.includes(m)) months.push(m);
+  }
+  // The newest backup of each of the six latest months among the older ones is kept.
+  for (const m of months.slice(0, KEEP_MONTHLY))
+    monthly.add(older.find((b) => monthOf(b.createdAt) === m)!.name);
+  for (const b of older) if (!monthly.has(b.name)) out.push(b.name);
+  for (const kind of ["manual", "safety", "remote"] as BackupKind[])
+    for (const b of backups
+      .filter((x) => x.kind === kind)
+      .sort(newest)
+      .slice(KEEP_OTHER))
+      out.push(b.name);
+  return out;
+}
+
+/** Deletes the backups the keeping rules let go. The newest backup of all is never deleted. Returns how many went. */
+export async function pruneBackups(ctx: BackupContext): Promise<number> {
+  const all = await listBackupFiles(ctx);
+  const keepAlways = all[0]?.name;
+  let gone = 0;
+  for (const name of toPrune(all)) {
+    if (name === keepAlways) continue;
+    const file = path.join(ctx.dir, name);
+    await rm(file, { force: true });
+    await rm(`${file}.json`, { force: true });
+    gone++;
+  }
+  return gone;
+}
+
 // ------------------------------------------------------------------------------------------------------------------ making
 
 /**
@@ -374,6 +423,8 @@ export async function runBackup(
       checkedAt: now(),
     };
     await writeFile(sidecarOf(file), JSON.stringify(side), { mode: 0o600 });
+    // What the keeping rules let go is deleted now (a failure to delete never fails the backup).
+    await pruneBackups(ctx).catch(() => undefined);
     return {
       ok: true,
       info: {

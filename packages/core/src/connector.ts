@@ -295,6 +295,8 @@ export interface ConnectorFacts {
   privacyPage: boolean;
   /** Free disk space where the site keeps its files, or null when this server cannot tell. */
   diskFreeBytes: number | null;
+  /** When the newest backup that passed its check was made, or null when there is none. */
+  lastBackupAt: number | null;
 }
 
 export interface ConnectorStatus {
@@ -302,7 +304,7 @@ export interface ConnectorStatus {
   siteName: string;
   /** What the dashboard may know about updates: this site does not check for them yet, so the count is unknown. */
   pendingUpdates: number | null;
-  /** When the last backup was made, or null: backups are not built yet. */
+  /** When the newest backup that passed its check was made, or null when there is none. */
   lastBackupAt: number | null;
   diskFreeBytes: number | null;
   checks: { id: string; label: string; ok: boolean }[];
@@ -321,7 +323,7 @@ export async function connectorStatus(
     version: facts.version,
     siteName: String(site[0]?.["name"] ?? ""),
     pendingUpdates: null,
-    lastBackupAt: null,
+    lastBackupAt: facts.lastBackupAt,
     diskFreeBytes: facts.diskFreeBytes,
     checks: [
       { id: "database", label: "The database answers", ok: true },
@@ -332,6 +334,11 @@ export async function connectorStatus(
       },
       { id: "email", label: "Email is set up", ok: facts.emailWorks },
       { id: "privacy", label: "A privacy page is chosen", ok: facts.privacyPage },
+      {
+        id: "backup",
+        label: "A backup was made in the last two days",
+        ok: facts.lastBackupAt !== null && now - facts.lastBackupAt <= 48 * 60 * 60 * 1000,
+      },
     ],
     at: now,
   };

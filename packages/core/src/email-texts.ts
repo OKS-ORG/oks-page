@@ -275,6 +275,25 @@ export const EMAIL_TEXTS: EmailTextDefinition[] = [
     },
   },
   {
+    key: "backup-failed",
+    title: "A backup could not be made",
+    security: false,
+    placeholders: ["name", "site", "reason", "link"],
+    required: [],
+    subject: "The backup of {site} failed",
+    body: [
+      "Hello {name},",
+      "The daily backup of {site} could not be made. The reason: {reason}",
+      "The site tries again in an hour, and you get at most one of these emails a day. Until a backup works, the newest one is the last good copy.",
+      "[Open the backups]({link})",
+    ].join("\n\n"),
+    sample: {
+      ...SAMPLE_COMMON,
+      reason: "There is not enough free disk space for a backup.",
+      link: "https://example.com/admin/tools/backups",
+    },
+  },
+  {
     key: "client-edit",
     title: "A client changed a live page",
     security: false,

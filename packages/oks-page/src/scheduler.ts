@@ -10,10 +10,13 @@ import {
   purgeEditingNotices,
   purgeTrash,
   queueEmail,
+  runDailyBackup,
   runKeeping,
+  sendBackupFailedEmails,
   runDailyDomainCheck,
   type MayPublish,
 } from "@oks-page/core";
+import { backupContext } from "./backup-context";
 import { getRunner, getSiteId } from "./db";
 import { expireTags } from "./expire-tags";
 import { kickEmailJobs, runEmailJobs, siteSecrets } from "./mail";
@@ -35,6 +38,50 @@ const mayPublish: MayPublish = async ({ siteId, userId, type, authorId }) => {
     (caps.can("content.publish_own", type) && authorId === userId)
   );
 };
+
+/** The timer looks whether the daily backup is due every 5 minutes (OKS_BACKUP_LOOK_SECONDS changes it, for tests). */
+let lastBackupLook = 0;
+let backingUp = false;
+
+/**
+ * Every few minutes: is today's backup due? (Every day at 03:00 in the site's time zone; a server that was off then makes it when it
+ * starts.) OKS_BACKUP_DAILY=off switches the timer off for the whole server; OKS_BACKUP_HOUR changes the hour (for tests).
+ */
+async function backupUpkeep(now: () => number): Promise<void> {
+  if (process.env["OKS_BACKUP_DAILY"] === "off" || backingUp) return;
+  if (
+    now() - lastBackupLook < (Number(process.env["OKS_BACKUP_LOOK_SECONDS"]) || 300) * SECOND &&
+    lastBackupLook !== 0
+  )
+    return;
+  lastBackupLook = now();
+  backingUp = true;
+  try {
+    const runner = getRunner();
+    const siteId = await getSiteId();
+    const general = await loadGeneralSettings(runner, siteId);
+    const hour = Number(process.env["OKS_BACKUP_HOUR"]);
+    await runDailyBackup(runner, backupContext(), siteId, {
+      zone: general.timeZone,
+      ...(Number.isInteger(hour) && hour >= 0 && hour <= 23 ? { hour } : {}),
+      now,
+      notify: async (reason) => {
+        const sent = await sendBackupFailedEmails(runner, siteId, siteSecrets(), {
+          reason,
+          siteName: general.siteName,
+          link: `${process.env["OKS_SITE_URL"] ?? ""}/admin/tools/backups`,
+        });
+        if (sent > 0) kickEmailJobs();
+      },
+    });
+  } catch (error) {
+    // A site that is not set up yet has nothing to back up.
+    if (!(error instanceof Error && /has no site yet/.test(error.message)))
+      console.error("[oks] The daily backup could not run:", error);
+  } finally {
+    backingUp = false;
+  }
+}
 
 let lastPurge = 0;
 let lastKeeping = 0;
@@ -79,6 +126,8 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
   await emailUpkeep(now).catch((error: unknown) =>
     console.error("[oks] The email checks could not run:", error),
   );
+  // The daily backup. It runs apart from the rest of this round, so a long backup never holds the round up.
+  void backupUpkeep(now);
   const result = await publishDue(getRunner(), mayPublish, now);
   for (const entry of [...result.published, ...result.blocked, ...result.held])
     await expireTags(entry.siteId, entry.id, entry.slug);

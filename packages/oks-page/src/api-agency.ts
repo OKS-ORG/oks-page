@@ -2,6 +2,7 @@
 //   add     { code, name? }  connects a client site with the connection code made on it
 //   check   {}               asks every connected site for its status, all at once, within a time budget
 //   remove  { id }           disconnects a site
+//   backup  { id }           asks a client site to make a backup now
 //   report  { id, days? }    fetches one site's page and visit counts (7, 30 or 90 days)
 //   email-report { id, days?, to, note? }  sends the client's report by email from this site
 // For people who manage the settings. Adding, checking and reports need an Agency key; removing never does.
@@ -16,6 +17,7 @@ import {
   loadGeneralSettings,
   loadWhiteLabel,
   removeAgencySite,
+  requestSiteBackup,
 } from "@oks-page/core";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
@@ -79,6 +81,11 @@ export async function POST(request: Request) {
       const done = await removeAgencySite(runner, actor, member.siteId, id);
       if (!done.ok) return reply(done, STATUS[done.code]);
       return NextResponse.json({ ok: true });
+    }
+    case "backup": {
+      const done = await requestSiteBackup(runner, actor, member.siteId, siteSecrets(), id, ctx);
+      if (!done.ok) return reply(done, STATUS[done.code]);
+      return NextResponse.json({ ok: true, backup: done.backup });
     }
     case "report": {
       const days = input["days"] === undefined ? 30 : Number(input["days"]);

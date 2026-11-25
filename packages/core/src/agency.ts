@@ -105,7 +105,7 @@ export function cleanStatus(data: unknown): ConnectorStatus | null {
       label: text(obj(c)["label"], 120),
       ok: obj(c)["ok"] === true,
     })),
-    at: count(d["at"]),
+    at: orNull(d["at"]) ?? 0,
   };
 }
 
@@ -450,6 +450,56 @@ export async function checkAgencySites(
   const merged = current.map((s) => (results.has(s.id) ? { ...s, last: results.get(s.id)! } : s));
   await save(runner, siteId, merged);
   return { ok: true, sites: merged.map(view) };
+}
+
+/** How long a client site may take to make and check a backup (the dashboard waits this long for the answer). */
+export const BACKUP_WAIT_MS = 180_000;
+
+/**
+ * Asks a connected site to make a backup now (the connector's `backup` action: the site makes it and checks it, and answers when it
+ * is done). The site's state is asked for again afterwards, so the dashboard shows the new "last backup" at once.
+ */
+export async function requestSiteBackup(
+  runner: SqlRunner,
+  actor: Actor,
+  siteId: string,
+  secrets: SiteSecrets,
+  id: string,
+  ctx: AgencyContext,
+): Promise<
+  { ok: true; backup: { createdAt: number; size: number; rows: number; files: number } } | Fail
+> {
+  if (!actor.can("settings.manage")) return fail("forbidden", "You may not back up client sites.");
+  if (!ctx.agency.active)
+    return fail("forbidden", "Backing up client sites needs an Agency key that is still valid.");
+  const opened = await openAgencySite(runner, siteId, secrets, id);
+  if (!opened.ok) return fail(opened.code, opened.message);
+  const made = await callSite<unknown>(
+    opened,
+    "/api/oks/v1/backup",
+    { ...ctx, timeoutMs: Math.max(ctx.timeoutMs, BACKUP_WAIT_MS) },
+    { method: "POST", body: {} },
+  );
+  if (!made.ok) return fail("invalid", made.message);
+  const d = obj(made.data);
+  const backup = {
+    createdAt: orNull(d["createdAt"]) ?? 0,
+    size: count(d["size"]),
+    rows: count(d["rows"]),
+    files: count(d["files"]),
+  };
+  // The site's state now shows the new backup. If it cannot be asked, the backup is still made.
+  const asked = await callSite<unknown>(opened, "/api/oks/v1/status", ctx);
+  const status = asked.ok ? cleanStatus(asked.data) : null;
+  if (status) {
+    const sites = await stored(runner, siteId);
+    await save(
+      runner,
+      siteId,
+      sites.map((s) => (s.id === id ? { ...s, last: { at: ctx.now(), ok: true, status } } : s)),
+    );
+  }
+  return { ok: true, backup };
 }
 
 export const REPORT_DAYS = [7, 30, 90] as const;

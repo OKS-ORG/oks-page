@@ -354,6 +354,48 @@ export async function sendReviewWaitingEmails(
 }
 
 /**
+ * The daily backup failed: the people who manage the settings get an email with the reason, at most one a day each. Returns how many
+ * emails were queued; nothing is queued while email is not set up.
+ */
+export async function sendBackupFailedEmails(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: { reason: string; siteName: string; link: string },
+  now: () => number = Date.now,
+): Promise<number> {
+  const people = (await membersWith(runner, siteId, "settings.manage", "")).slice(
+    0,
+    REVIEW_EMAIL_RECIPIENTS,
+  );
+  let queued = 0;
+  for (const p of people) {
+    const recent = await runner.all(
+      `select count(*) as n from "email_log" where "site_id" = ? and "email_key" = 'backup-failed'
+        and lower("to_address") = ? and "created_at" >= ?`,
+      [siteId, p.email.trim().toLowerCase(), new Date(now() - 24 * 60 * 60 * 1000)],
+    );
+    if (Number(recent[0]?.["n"] ?? 0) > 0) continue;
+    const result = await sendText(
+      runner,
+      siteId,
+      secrets,
+      "backup-failed",
+      p.email,
+      {
+        name: p.name || p.email,
+        site: input.siteName,
+        reason: input.reason.slice(0, 300),
+        link: input.link,
+      },
+      now,
+    );
+    if (result.sent) queued += 1;
+  }
+  return queued;
+}
+
+/**
  * A client changed a live page: the people who change the design (except the client) get an email with a link to the page and a link
  * to put the earlier version back. Returns how many emails were queued; nothing is queued while email is not set up.
  */

@@ -70,6 +70,8 @@ export const HANDOFF_ITEMS: HandoffItem[] = [
 
 /** What the site knows that bears on an item, so the screen can say "this looks done" (the person still marks it). */
 export interface HandoffHints {
+  /** The newest backup that passed its check, when it was made (null: none). Left out when the site cannot say. */
+  backup?: { lastAt: number | null };
   twoFactor: { on: number; total: number };
   emailWorks: boolean;
   privacyPage: boolean;
@@ -107,6 +109,14 @@ export function hintOf(id: string, facts: HandoffHints): string {
   }
   if (id === "email")
     return facts.emailWorks ? "Looks done: email is set up." : "Not yet: email is not set up.";
+  if (id === "backups" && facts.backup) {
+    const at = facts.backup.lastAt;
+    if (at === null) return "Not yet: no backup has been made.";
+    const day = new Date(at).toISOString().slice(0, 10);
+    return Date.now() - at > 48 * 60 * 60 * 1000
+      ? `Not yet: the last backup is from ${day}, more than two days ago.`
+      : `Looks done: the last backup was made on ${day} and tried in a copy. Also try a restore on another copy of the site.`;
+  }
   if (id === "privacy")
     return facts.privacyPage
       ? "Looks done: a privacy page is chosen."
