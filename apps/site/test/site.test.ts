@@ -14579,5 +14579,183 @@ describe.skipIf(!findBrowser())(
       expect(await page.getByRole("link", { name: "Help" }).count()).toBe(0);
       await page.close();
     });
+
+    test("AG-01 to AG-15: a site makes a connection code, answers only signed requests, and the agency dashboard connects it, checks it and reads its counts", async () => {
+      const { signRequest } = await import("@oks-page/core");
+      const page = await browser.newPage();
+      await page.goto(site.base + "/admin/login");
+      await page.getByLabel("Email").fill(owner.email);
+      await page.getByLabel(/^Password/).fill(owner.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      const axe = async () => {
+        await page.addScriptTag({ content: (await import("axe-core")).default.source });
+        return page.evaluate(async () => {
+          const result = await (
+            window as unknown as {
+              axe: { run: () => Promise<{ violations: { id: string }[] }> };
+            }
+          ).axe.run();
+          return result.violations.map((v) => v.id);
+        });
+      };
+      const signed = (
+        method: string,
+        target: string,
+        code: { keyId: string; secret: string },
+        over: { body?: string; nonce?: string; now?: number } = {},
+      ) => {
+        const headers = signRequest({
+          method,
+          target,
+          ...(over.body !== undefined ? { body: over.body } : {}),
+          keyId: code.keyId,
+          secret: code.secret,
+          now: over.now ?? Date.now(),
+          ...(over.nonce ? { nonce: over.nonce } : {}),
+        });
+        return page.request.fetch(site.base + target, {
+          method,
+          headers: { ...headers },
+          ...(over.body !== undefined ? { data: over.body } : {}),
+          maxRedirects: 0,
+        });
+      };
+
+      // No key yet: the connection is off, and nothing is answered.
+      const off = await page.request.get(site.base + "/api/oks/v1/status");
+      expect(off.status()).toBe(404);
+
+      // The site makes a code, shown once.
+      await page.goto(site.base + "/admin/tools/connector");
+      await page.getByRole("heading", { name: "Connection", level: 1 }).waitFor();
+      expect(await axe()).toEqual([]);
+      await page.getByRole("button", { name: "Make a connection code" }).click();
+      const code = await page.getByLabel("The connection code").inputValue();
+      expect(code).toMatch(/^OKSC1\.[A-Za-z0-9_-]+$/);
+      const parsed = JSON.parse(Buffer.from(code.split(".")[1]!, "base64url").toString()) as {
+        url: string;
+        key: string;
+        secret: string;
+      };
+      expect(parsed.url).toBe(site.base);
+      await page.getByRole("row", { name: new RegExp(parsed.key) }).waitFor();
+      // The database holds the sealed secret only.
+      expect(
+        JSON.stringify(await db.run("select value from settings where key = 'connector'")),
+      ).not.toContain(parsed.secret);
+      const key = { keyId: parsed.key, secret: parsed.secret };
+
+      // Only signed requests are answered, and each only once.
+      const target = "/api/oks/v1/status";
+      const good = await signed("GET", target, key, { nonce: "n".repeat(24) });
+      expect(good.status()).toBe(200);
+      const body = (await good.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        ok: true,
+        siteName: "Weber Garden",
+        pendingUpdates: null,
+        lastBackupAt: null,
+      });
+      expect(JSON.stringify(body)).not.toContain(owner.email);
+      expect((await signed("GET", target, key, { nonce: "n".repeat(24) })).status()).toBe(401); // the same nonce again
+      expect(
+        (
+          await signed("GET", target, { ...key, secret: Buffer.alloc(32, 1).toString("base64url") })
+        ).status(),
+      ).toBe(401);
+      expect((await signed("GET", target, { ...key, keyId: "nokey" })).status()).toBe(401);
+      expect((await page.request.get(site.base + target)).status()).toBe(401); // no signature at all
+      const old = await signed("GET", target, key, { now: Date.now() - 10 * 60 * 1000 });
+      expect(old.status()).toBe(401);
+      expect(((await old.json()) as { code: string }).code).toBe("clock");
+      // A signed address is the one that answers: the same signature on another query is refused.
+      const withQuery = signRequest({
+        method: "GET",
+        target: "/api/oks/v1/report?days=7",
+        keyId: key.keyId,
+        secret: key.secret,
+        now: Date.now(),
+      });
+      const tampered = await page.request.get(site.base + "/api/oks/v1/report?days=90", {
+        headers: { ...withQuery },
+      });
+      expect(tampered.status()).toBe(401);
+      expect((await signed("GET", "/api/oks/v1/report?days=7", key)).status()).toBe(200);
+      // A body over 64 KB is refused before it is read; what is not built says so, after the signature; the rest is 404.
+      const huge = await page.request.post(site.base + "/api/oks/v1/backup", {
+        headers: { "content-type": "application/json" },
+        data: "x".repeat(70_000),
+      });
+      expect(huge.status()).toBe(413);
+      const backup = await signed("POST", "/api/oks/v1/backup", key, { body: "{}" });
+      expect(backup.status()).toBe(501);
+      expect(((await backup.json()) as { message: string }).message).toMatch(/not built yet/);
+      expect((await signed("GET", "/api/oks/v1/users", key)).status()).toBe(404);
+      expect((await signed("POST", "/api/oks/v1/status", key, { body: "{}" })).status()).toBe(405);
+
+      // Without an Agency key the dashboard says so and connects nothing.
+      await page.goto(site.base + "/admin/tools/agency");
+      await page.getByRole("heading", { name: "Agency dashboard", level: 1 }).waitFor();
+      await page.getByText("The dashboard needs an Agency key").waitFor();
+      expect(await page.getByRole("button", { name: "Connect the site" }).isDisabled()).toBe(true);
+      const refused = await page.request.post(site.base + "/api/admin/agency", {
+        headers: { origin: site.base },
+        data: { action: "add", code },
+      });
+      expect(refused.status()).toBe(403);
+
+      // With an Agency key it connects the site (this site is its own client), checks it and reads its counts.
+      const agencyKey = signedLicence({
+        id: "agency-2",
+        kind: "normal",
+        covers: ["agency"],
+        sites: 1,
+        updatesUntil: "2099-12-31",
+        maxMajor: null,
+        issued: "2026-11-26",
+      });
+      const added = await page.request.post(site.base + "/api/admin/licences", {
+        headers: { origin: site.base },
+        data: { key: agencyKey },
+      });
+      expect(added.status(), await added.text()).toBeLessThan(300);
+      await page.goto(site.base + "/admin/tools/agency");
+      await page.getByText("Your Agency key covers 1 site; 0 connected.").waitFor();
+      await page.getByLabel(/The connection code/).fill("not a code");
+      await page.getByRole("button", { name: "Connect the site" }).click();
+      await page.getByText("This is not a connection code.").waitFor();
+      await page.getByLabel(/The connection code/).fill(code);
+      await page.getByLabel(/A name for it/).fill("Weber Garden online");
+      await page.getByRole("button", { name: "Connect the site" }).click();
+      await page.getByText("The site is connected.").waitFor();
+      await page
+        .getByRole("row", { name: /Weber Garden online/ })
+        .getByText(/Reachable\. Version/)
+        .waitFor();
+      await page.getByText("Your Agency key covers 1 site; 1 connected.").waitFor();
+      expect(await axe()).toEqual([]);
+      // A second site does not fit under a key for one.
+      await page.getByLabel(/The connection code/).fill(code);
+      await page.getByRole("button", { name: "Connect the site" }).click();
+      await page.getByText(/covers 1 site, and 1 is connected/).waitFor();
+      // Check, then read the counts.
+      await page.getByRole("button", { name: "Check all sites" }).click();
+      await page.getByText("All sites were asked.").waitFor();
+      await page.getByRole("button", { name: "Counts for Weber Garden online" }).click();
+      await page.getByText(/page views, .* visitors, .* published pages/).waitFor();
+      expect(await axe()).toEqual([]);
+      // A key that the site removed stops working, and the dashboard says so in words.
+      await page.goto(site.base + "/admin/tools/connector");
+      await page.getByRole("button", { name: `Remove key ${parsed.key}` }).click();
+      await page.getByText(/No key\. The connection is off/).waitFor();
+      await page.goto(site.base + "/admin/tools/agency");
+      await page.getByRole("button", { name: "Check all sites" }).click();
+      await page.getByText(/no connection switched on/).waitFor();
+      // Disconnecting works.
+      await page.getByRole("button", { name: "Disconnect Weber Garden online" }).click();
+      await page.getByText("No site is connected yet.").waitFor();
+      await page.close();
+    });
   },
 );
