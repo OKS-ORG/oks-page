@@ -354,6 +354,50 @@ export async function sendReviewWaitingEmails(
 }
 
 /**
+ * A client changed a live page: the people who change the design (except the client) get an email with a link to the page and a link
+ * to put the earlier version back. Returns how many emails were queued; nothing is queued while email is not set up.
+ */
+export async function sendClientEditEmails(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: {
+    title: string;
+    client: string;
+    clientId: string;
+    siteName: string;
+    link: string;
+    restoreLink: string;
+  },
+  now: () => number = Date.now,
+): Promise<number> {
+  const people = (await membersWith(runner, siteId, "themes.manage", ""))
+    .filter((p) => p.userId !== input.clientId)
+    .slice(0, REVIEW_EMAIL_RECIPIENTS);
+  let queued = 0;
+  for (const p of people) {
+    const result = await sendText(
+      runner,
+      siteId,
+      secrets,
+      "client-edit",
+      p.email,
+      {
+        name: p.name || p.email,
+        site: input.siteName,
+        title: input.title,
+        client: input.client,
+        link: input.link,
+        restore: input.restoreLink,
+      },
+      now,
+    );
+    if (result.sent) queued += 1;
+  }
+  return queued;
+}
+
+/**
  * A comment is waiting: everyone who may moderate comments gets an email, but only one an hour each, with the number
  * waiting, so a flood of comments does not flood the inbox. Returns how many emails were queued.
  */

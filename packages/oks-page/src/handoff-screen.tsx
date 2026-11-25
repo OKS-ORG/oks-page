@@ -5,7 +5,26 @@ import type { HandoffView } from "@oks-page/core";
 import { Alert } from "oks-ui";
 import { useState } from "react";
 
-export function HandoffScreen({ initial, bundle }: { initial: HandoffView; bundle: boolean }) {
+export interface ClientChange {
+  entryId: string;
+  title: string;
+  client: string;
+  at: number;
+  restored: boolean;
+  restoreHref: string | null;
+}
+
+export function HandoffScreen({
+  initial,
+  bundle,
+  edits,
+  noticeOn,
+}: {
+  initial: HandoffView;
+  bundle: boolean;
+  edits: ClientChange[];
+  noticeOn: boolean;
+}) {
   const [done, setDone] = useState<string[]>(initial.items.filter((i) => i.done).map((i) => i.id));
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -86,8 +105,78 @@ export function HandoffScreen({ initial, bundle }: { initial: HandoffView; bundl
         ))}
       </ul>
       <p role="status">{note}</p>
+      <ClientChangesSection edits={edits} noticeOn={noticeOn} />
       {bundle ? <BundleSection /> : null}
     </>
+  );
+}
+
+/** What a client changed on live pages: the email notice and the latest changes, each with a way back. */
+function ClientChangesSection({ edits, noticeOn }: { edits: ClientChange[]; noticeOn: boolean }) {
+  const [on, setOn] = useState(noticeOn);
+  const [problem, setProblem] = useState("");
+
+  async function change(next: boolean) {
+    setProblem("");
+    const before = on;
+    setOn(next);
+    const response = await fetch("/api/admin/client-notice", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!response.ok) {
+      setOn(before);
+      setProblem("The setting could not be saved.");
+    }
+  }
+
+  return (
+    <section
+      aria-labelledby="client-changes-title"
+      style={{ maxInlineSize: "46rem", marginBlockStart: "2rem" }}
+    >
+      <h2 id="client-changes-title">Changes by clients to live pages</h2>
+      <p>
+        When someone with the Client role changes a page that is already live, the change goes live
+        at once. You are told, and you can put the earlier version back with one click.
+      </p>
+      {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
+      <p>
+        <label style={{ display: "flex", gap: ".5rem", alignItems: "flex-start" }}>
+          <input
+            type="checkbox"
+            checked={on}
+            onChange={(event) => void change(event.target.checked)}
+          />
+          <span>
+            Email me when a client changes a live page (at most one email for a page in half an
+            hour)
+          </span>
+        </label>
+      </p>
+      {edits.length === 0 ? (
+        <p>No client has changed a live page yet.</p>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: ".6rem" }}>
+          {edits.map((e, i) => (
+            <li key={`${e.entryId}-${e.at}-${i}`}>
+              <strong>{e.title}</strong> by {e.client || "a client"} on{" "}
+              {new Date(e.at).toISOString().replace("T", " ").slice(0, 16)} UTC.{" "}
+              {e.restored ? (
+                "The earlier version was put back."
+              ) : e.restoreHref ? (
+                <a href={e.restoreHref}>
+                  See what changed and put the earlier version back ({e.title})
+                </a>
+              ) : (
+                "There is no earlier version to put back."
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

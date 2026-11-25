@@ -71,6 +71,9 @@ export default async function EntryEditPage({ params }: { params: Promise<{ id: 
         blocks={entry.blocks as unknown as EntryEditScreenProps["blocks"]}
         savedSections={savedSections}
         canPublish={canPublish}
+        liveEdit={
+          !canPublish && entry.status === "published" && actor.can("content.edit_live", entry.type)
+        }
         canTrash={
           actor.can("content.delete_any", entry.type) ||
           (actor.can("content.delete_own", entry.type) && entry.authorId === actor.userId)

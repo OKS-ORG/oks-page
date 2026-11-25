@@ -4,9 +4,11 @@
 import { hooksFor } from "./plugin-hooks";
 import {
   deleteForever,
+  ensureRestorePoint,
   loadGeneralSettings,
   mayPublishAnyway,
   publishProblems,
+  recordClientEdit,
   recordPublishOverride,
   restoreEntry,
   saveContent,
@@ -54,11 +56,26 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   }
   const runner = getRunner();
   const before = (
-    await runner.all(`select "slug", "status", "type_key", "title" from "entries" where "id" = ?`, [
-      id,
-    ])
+    await runner.all(
+      `select "slug", "status", "type_key", "title", "revision" from "entries" where "id" = ?`,
+      [id],
+    )
   )[0];
   const actor = await actorOf(member);
+  // A client's change to a page that is already live goes live at once (D60). The page as it is now is kept as a copy to go
+  // back to, before the save, so the designer can undo it with one click.
+  const clientLive =
+    before?.["status"] === "published" &&
+    actor.can("content.edit_live") &&
+    !(actor.can("content.publish_any") || actor.can("content.publish_own"));
+  let restoreCopy: string | null = null;
+  if (clientLive) {
+    try {
+      restoreCopy = await ensureRestorePoint(runner, member.siteId, id);
+    } catch (error) {
+      console.error("[oks] The copy before a client's change could not be kept:", error);
+    }
+  }
   // Going live (published or scheduled) checks what a reader would miss. An administrator may go on anyway: the problems
   // are written to the audit log once the page is saved.
   const live = (status: unknown) => status === "published" || status === "scheduled";
@@ -107,6 +124,35 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   if (!result.ok) return reply(result, STATUS_OF[result.code]);
   if (setAside.length > 0) await recordPublishOverride(runner, actor, member.siteId, id, setAside);
   refreshEntry(id, result.slug, String(before?.["slug"] ?? result.slug));
+  // A client changed a live page: the line in the log, and the email to the designers. A failure here never stops the save.
+  if (clientLive && Number(result.revision) !== Number(before?.["revision"])) {
+    try {
+      const typeKey = String(before?.["type_key"] ?? "");
+      const where =
+        typeKey === "post" ? "posts" : typeKey === "page" ? "pages" : `content/${typeKey}`;
+      const origin = siteOrigin(request);
+      const noticed = await recordClientEdit(
+        runner,
+        siteSecrets(),
+        {
+          entryId: id,
+          typeKey,
+          title: String(input["title"] ?? before?.["title"] ?? ""),
+          clientName: member.user.name,
+          clientId: member.user.id,
+          copyId: restoreCopy,
+          revisionAfter: Number(result.revision),
+          link: `${origin}/admin/${where}/${id}`,
+          siteName: (await loadGeneralSettings(runner, member.siteId)).siteName,
+          origin,
+        },
+        member.siteId,
+      );
+      if (noticed.notified > 0) kickEmailJobs();
+    } catch (error) {
+      console.error("[oks] The notice of a client's change could not be sent:", error);
+    }
+  }
   // Handed in for review: the people who may publish it are told. A failure here never stops the save.
   if (result.status === "pending" && before?.["status"] !== "pending") {
     try {

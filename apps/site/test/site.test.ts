@@ -13589,6 +13589,135 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await client.context().close();
     await owners.close();
   });
+
+  test("D60, AG-52: a client changes a live page and it goes live at once; the owner sees the change, looks at it and puts the earlier version back with one click", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    const jsonHeaders = { origin: site.base };
+    // A live page by the owner.
+    const made = await owners.request.post(site.base + "/api/admin/entries", {
+      headers: jsonHeaders,
+      data: { type: "page", title: "Our garden" },
+    });
+    const page = (await made.json()) as { id: string; slug: string; revision: number };
+    const slugPart = page.slug.split("/").pop();
+    const write = (text: string) => [
+      {
+        id: "garden-1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text, styles: {} }],
+        children: [],
+      },
+    ];
+    const published = await owners.request.put(site.base + `/api/admin/entries/${page.id}`, {
+      headers: jsonHeaders,
+      data: {
+        title: "Our garden",
+        slugPart,
+        status: "published",
+        blocks: write("We grow roses."),
+        revision: page.revision,
+      },
+    });
+    expect(published.status(), await published.text()).toBe(200);
+    const live = async () =>
+      (await (await fetch(site.base + "/" + page.slug)).text()).replace(/<[^>]+>/g, " ");
+    expect(await live()).toContain("We grow roses.");
+
+    // The client joins.
+    const invited = await owners.request.post(site.base + "/api/admin/users", {
+      headers: jsonHeaders,
+      data: { name: "Eli", email: "eli@example.com", roleKey: "client", days: 1 },
+    });
+    expect(invited.status(), await invited.text()).toBe(201);
+    const eli = await (await browser.newContext()).newPage();
+    await eli.goto(String(((await invited.json()) as { link: string }).link));
+    await eli.getByLabel(/^Password/).fill("eli-has-a-long-password");
+    await eli.getByRole("button", { name: "Join" }).click();
+    await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+
+    // The editor tells the client the page is live and has no status to choose.
+    await eli.goto(site.base + `/admin/pages/${page.id}`);
+    await eli.getByText("This page is live.").waitFor();
+    expect(await eli.getByRole("radio", { name: /Draft \(only you see it\)/ }).count()).toBe(0);
+    // Taking it offline, handing it in, scheduling it: refused by the server.
+    const current = async () =>
+      Number(
+        (await db.run("select revision from entries where id = ?", [page.id]))[0]!["revision"],
+      );
+    const save = async (status: string, text: string) =>
+      eli.request.put(site.base + `/api/admin/entries/${page.id}`, {
+        headers: jsonHeaders,
+        data: {
+          title: "Our garden",
+          slugPart,
+          status,
+          blocks: write(text),
+          revision: await current(),
+          ...(status === "scheduled"
+            ? { scheduledAt: new Date(Date.now() + 86_400_000).toISOString() }
+            : {}),
+        },
+      });
+    for (const status of ["draft", "pending", "scheduled"]) {
+      const refused = await save(status, "We sell cars now.");
+      expect(refused.status(), status).toBe(403);
+    }
+    expect(await live()).toContain("We grow roses.");
+    // Saving it as live works, and is on the site at once.
+    const changed = await save("published", "We sell cars now.");
+    expect(changed.status(), await changed.text()).toBe(200);
+    expect(await live()).toContain("We sell cars now.");
+    expect(await live()).not.toContain("We grow roses.");
+
+    // The owner sees it on the Handoff screen, with a way back.
+    await owners.goto(site.base + "/admin/tools/handoff");
+    await owners
+      .getByRole("heading", { name: "Changes by clients to live pages", level: 2 })
+      .waitFor();
+    await owners.getByText(/Our garden.* by Eli on/).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    const link = owners.getByRole("link", {
+      name: /See what changed and put the earlier version back/,
+    });
+    const href = (await link.getAttribute("href"))!;
+    expect(href).toMatch(/^\/admin\/restore\/[A-Za-z0-9_-]{40,}$/);
+    // The notice can be turned off and on.
+    await owners.getByLabel(/Email me when a client changes a live page/).uncheck();
+    await expect
+      .poll(async () =>
+        String(
+          (await db.run("select value from settings where key = 'client_edit_notice'"))[0]?.[
+            "value"
+          ] ?? "",
+        ),
+      )
+      .toContain("false");
+    await owners.getByLabel(/Email me when a client changes a live page/).check();
+
+    // A client cannot use the link; the owner sees what changed and nothing changes by looking.
+    await eli.goto(site.base + href);
+    await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    await owners.goto(site.base + href);
+    await owners.getByRole("heading", { name: "Put the earlier version back", level: 1 }).waitFor();
+    await owners.getByText(/Removed:.*We grow roses\./).waitFor();
+    await owners.getByText(/Added:.*We sell cars now\./).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    expect(await live()).toContain("We sell cars now.");
+    // One click puts it back, and the page stays live.
+    await owners.getByRole("button", { name: "Put the earlier version back" }).click();
+    await owners.getByText(/The earlier version is back, and the page is still live/).waitFor();
+    expect(await live()).toContain("We grow roses.");
+    expect(await live()).not.toContain("We sell cars now.");
+    expect(
+      String((await db.run("select status from entries where id = ?", [page.id]))[0]!["status"]),
+    ).toBe("published");
+    await owners.goto(site.base + "/admin/tools/handoff");
+    await owners.getByText("The earlier version was put back.").waitFor();
+    await eli.context().close();
+    await owners.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {

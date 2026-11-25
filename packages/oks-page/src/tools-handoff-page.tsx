@@ -1,11 +1,14 @@
 // Tools > Handoff (spec 11, section 9): the checklist for giving a site to a client. For a signed-in member who manages the
 // site's settings.
 import {
+  clientNoticeOn,
   emailWorks,
   isSetupDone,
+  listClientEdits,
   listMembers,
   loadHandoff,
   loadPrivacySettings,
+  makeRestoreToken,
 } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -16,6 +19,7 @@ import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { getRunner } from "./db";
 import { HandoffScreen } from "./handoff-screen";
+import { siteSecrets } from "./mail";
 
 export const metadata: Metadata = { title: "Handoff", robots: { index: false } };
 
@@ -35,6 +39,19 @@ export default async function ToolsHandoffPage() {
     emailWorks: await emailWorks(runner, member.siteId),
     privacyPage: (await loadPrivacySettings(runner, member.siteId)).pageId !== null,
   });
+  // What clients changed on live pages lately; each has a link that puts the earlier version back (for people who may publish).
+  const mayRestore = actor.can("content.publish_any");
+  const edits = (await listClientEdits(runner, actor, member.siteId, 10)).map((e) => ({
+    entryId: e.entryId,
+    title: e.title,
+    client: e.client,
+    at: e.at,
+    restored: e.restored,
+    restoreHref:
+      mayRestore && e.copyId && !e.restored
+        ? `/admin/restore/${makeRestoreToken(siteSecrets(), { entryId: e.entryId, copyId: e.copyId, revisionAfter: e.revisionAfter })}`
+        : null,
+  }));
   return (
     <AdminFrame
       nav={navFor((c) => actor.can(c))}
@@ -45,7 +62,12 @@ export default async function ToolsHandoffPage() {
       title="Handoff"
       breadcrumbs={[{ label: "Tools" }, { label: "Handoff" }]}
     >
-      <HandoffScreen initial={view} bundle={actor.can("export") && actor.can("import")} />
+      <HandoffScreen
+        initial={view}
+        bundle={actor.can("export") && actor.can("import")}
+        edits={edits}
+        noticeOn={await clientNoticeOn(runner, member.siteId)}
+      />
     </AdminFrame>
   );
 }

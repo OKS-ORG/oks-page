@@ -39,6 +39,8 @@ export interface EntryEditScreenProps {
   /** The saved sections that page content can hold. */
   savedSections?: InsertableSection[];
   canPublish: boolean;
+  /** The page is live and this person may change it but not publish or unpublish: it stays live, and saving is final. */
+  liveEdit?: boolean;
   canTrash: boolean;
   /** Which editor this entry opens in (spec 06, section 13). */
   editor?: "writing" | "layout";
@@ -410,7 +412,12 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
         value={slugPart}
         onChange={setSlugPart}
       />
-      {props.canPublish ? (
+      {props.liveEdit ? (
+        <p>
+          <strong>This page is live.</strong> When you save, your changes go live at once, and the
+          people who look after the site are told. They can put the earlier version back.
+        </p>
+      ) : props.canPublish ? (
         <RadioGroupField
           name="status"
           label="Status"

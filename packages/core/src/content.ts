@@ -445,7 +445,18 @@ export async function saveContent(
   const mayPublish =
     actor.can("content.publish_any", type) ||
     (actor.can("content.publish_own", type) && authorId === actor.userId);
-  if (input.status !== "draft" && input.status !== "pending" && !mayPublish)
+  // A page that is live and stays live may be saved by someone who may edit live pages but not publish (the Client, D60).
+  const staysLive =
+    input.status === "published" &&
+    String(row["status"]) === "published" &&
+    actor.can("content.edit_live", type);
+  // Taking a live page offline is a move that needs the right to publish (spec 02, section 7), so a person who may only edit it
+  // cannot make it a draft, or hand it in for review, and so lose it from the site.
+  if (String(row["status"]) === "published" && input.status !== "published" && !mayPublish)
+    return fail("forbidden", "Only someone who may publish can take a live page offline.", {
+      field: "status",
+    });
+  if (input.status !== "draft" && input.status !== "pending" && !mayPublish && !staysLive)
     return fail("forbidden", "You may not publish this.", { field: "status" });
   let scheduledAt: Date | null = null;
   if (input.status === "scheduled") {

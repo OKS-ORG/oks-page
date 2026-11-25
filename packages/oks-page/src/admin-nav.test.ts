@@ -27,8 +27,6 @@ describe("the menu for each default role", () => {
       "collect",
       "connector",
       "agency",
-      "connector",
-      "agency",
       "privacy-requests",
       "settings",
     ]);
@@ -59,5 +57,14 @@ describe("the menu for each default role", () => {
   });
   test("a person with no capabilities only has Home", () => {
     expect(navFor(() => false).map((i) => i.key)).toEqual(["home"]);
+  });
+});
+
+describe("the menu has no repeats", () => {
+  test("every entry has its own key and its own address (an administrator sees them all)", () => {
+    const caps = DEFAULT_ROLES.find((r) => r.key === "administrator")!.capabilities;
+    const items = navFor((c) => caps.includes(c));
+    expect(new Set(items.map((i) => i.key)).size).toBe(items.length);
+    expect(new Set(items.map((i) => i.href)).size).toBe(items.length);
   });
 });

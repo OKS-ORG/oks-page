@@ -63,6 +63,12 @@ describe("the project", () => {
   const options = (over = {}) =>
     complete({ dir: join(base, "My Site"), yes: true, ...over }, "pnpm/10.28.0");
 
+  test("no file is listed twice in a project", () => {
+    const paths = projectFiles(options(), "x".repeat(40)).map((f) => f.path);
+    const twice = paths.filter((path, i) => paths.indexOf(path) !== i);
+    expect(twice).toEqual([]);
+  });
+
   test("every file of a project is written, with a package name made from the folder", () => {
     const made = generateProject(options());
     expect(made.files).toEqual(

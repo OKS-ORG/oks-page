@@ -319,24 +319,16 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET, POST } from ${from("api-connector")};\n`,
     },
     {
-      path: "app/admin/tools/connector/page.tsx",
-      content: `export { default, metadata } from ${from("tools-connector-page")};\n`,
+      path: "app/admin/restore/[token]/page.tsx",
+      content: `export { default, metadata } from ${from("restore-page")};\n`,
     },
     {
-      path: "app/admin/tools/agency/page.tsx",
-      content: `export { default, metadata } from ${from("tools-agency-page")};\n`,
+      path: "app/api/admin/restore/route.ts",
+      content: `export { POST } from ${from("api-restore")};\n`,
     },
     {
-      path: "app/api/admin/connector/route.ts",
-      content: `export { POST } from ${from("api-connector-admin")};\n`,
-    },
-    {
-      path: "app/api/admin/agency/route.ts",
-      content: `export { POST } from ${from("api-agency")};\n`,
-    },
-    {
-      path: "app/api/oks/v1/[action]/route.ts",
-      content: `export { GET, POST } from ${from("api-connector")};\n`,
+      path: "app/api/admin/client-notice/route.ts",
+      content: `export { PUT } from ${from("api-client-notice")};\n`,
     },
     {
       path: "app/admin/tools/collect/page.tsx",

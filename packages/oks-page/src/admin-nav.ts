@@ -77,18 +77,6 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["settings.manage"],
   },
   {
-    key: "connector",
-    label: "Connection",
-    href: "/admin/tools/connector",
-    needs: ["settings.manage"],
-  },
-  {
-    key: "agency",
-    label: "Agency dashboard",
-    href: "/admin/tools/agency",
-    needs: ["settings.manage"],
-  },
-  {
     key: "privacy-requests",
     label: "Privacy requests",
     href: "/admin/tools/privacy",
