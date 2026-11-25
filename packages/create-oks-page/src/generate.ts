@@ -36,7 +36,7 @@ export const EXPORT_REMOVED = {
   ],
   replaced: { "app/[[...slug]]/page.tsx": "export/page.tsx" },
 };
-const NEXT = "16.4.2";
+const NEXT = "16.4.6";
 const REACT = "19.3.1";
 
 export class FolderNotEmptyError extends Error {}

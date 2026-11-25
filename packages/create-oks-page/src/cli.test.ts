@@ -97,7 +97,7 @@ describe("the project", () => {
     const pkg = JSON.parse(readFileSync(join(made.dir, "package.json"), "utf8"));
     expect(pkg.name).toBe("my-site");
     expect(pkg.dependencies[PRODUCT]).toMatch(/^\^\d/);
-    expect(pkg.dependencies.next).toBe("16.4.2");
+    expect(pkg.dependencies.next).toBe("16.4.6");
     // pnpm 10 must be allowed to build the SQLite driver.
     expect(pkg.pnpm.onlyBuiltDependencies).toEqual(["better-sqlite3"]);
   });

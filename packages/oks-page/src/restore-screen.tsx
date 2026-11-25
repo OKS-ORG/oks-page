@@ -37,7 +37,10 @@ export function RestoreScreen({ token, view }: { token: string; view: ClientEdit
     <>
       <h2>{view.title}</h2>
       <p>
-        A client changed this live page. Below is what the client did to the text: a line marked <strong>Removed</strong> was taken out, and a line marked <strong>Added</strong> was put in. Putting the earlier version back undoes all of it.</p>
+        A client changed this live page. Below is what the client did to the text: a line marked{" "}
+        <strong>Removed</strong> was taken out, and a line marked <strong>Added</strong> was put in.
+        Putting the earlier version back undoes all of it.
+      </p>
       {view.savedSince ? (
         <Alert
           color="warning"
