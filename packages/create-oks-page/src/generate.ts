@@ -113,7 +113,8 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     },
     {
       path: ".gitignore",
-      content: "node_modules\n.next\n.env\ndata\nuploads\n.oks\nnext-env.d.ts\n*.tsbuildinfo\n",
+      content:
+        "node_modules\n.next\n.env\ndata\nuploads\nbackups\n.oks\nnext-env.d.ts\n*.tsbuildinfo\n",
     },
     {
       path: "README.md",
@@ -297,6 +298,18 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
     {
       path: "app/api/admin/handoff/route.ts",
       content: `export { PUT } from ${from("api-handoff")};\n`,
+    },
+    {
+      path: "app/admin/tools/backups/page.tsx",
+      content: `export { default, metadata } from ${from("tools-backups-page")};\n`,
+    },
+    {
+      path: "app/api/admin/backups/route.ts",
+      content: `export { POST } from ${from("api-backups")};\n`,
+    },
+    {
+      path: "app/api/admin/backups/[name]/route.ts",
+      content: `export { GET } from ${from("api-backup-file")};\n`,
     },
     {
       path: "app/admin/tools/connector/page.tsx",

@@ -25,6 +25,7 @@ describe("the menu for each default role", () => {
       "statistics",
       "handoff",
       "collect",
+      "backups",
       "connector",
       "agency",
       "privacy-requests",

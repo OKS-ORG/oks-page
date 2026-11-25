@@ -83,3 +83,4 @@ export * from "./connector.js";
 export * from "./agency.js";
 export * from "./client-edits.js";
 export * from "./reports.js";
+export * from "./backup.js";

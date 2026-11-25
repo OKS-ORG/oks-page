@@ -7,6 +7,7 @@
 // the same. Compare dumps as data, not as text.)
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { is } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import * as pgSchema from "./schema/pg.js";
 import type { SqlRunner } from "./runner.js";
 
@@ -111,9 +112,30 @@ const toDb = (dialect: SqlRunner["dialect"], family: Family, v: unknown): unknow
 
 const compare = (a: unknown, b: unknown) => (a === b ? 0 : (a as string) < (b as string) ? -1 : 1);
 
-export async function exportData(db: SqlRunner): Promise<Dump> {
+/**
+ * Tables whose rows are of the moment, not of the site: who is signed in, one-time codes, rate counts, queued jobs, cache
+ * tags and edit locks. A backup leaves them out, and putting a backup back drops them (except the sessions of people who are
+ * still there afterwards).
+ */
+export const VOLATILE_TABLES = [
+  "auth_sessions",
+  "auth_verifications",
+  "rate_limits",
+  "jobs",
+  "cache_tags",
+  "entry_locks",
+];
+
+/** A short fingerprint of the tables and columns this version has. A backup can be put back only where it is the same. */
+export function dataShape(): string {
+  const shape = tablesInOrder().map((t) => [t.name, t.columns.map((c) => `${c.name}:${c.family}`)]);
+  return createHash("sha256").update(JSON.stringify(shape)).digest("hex");
+}
+
+export async function exportData(db: SqlRunner, options: { skip?: string[] } = {}): Promise<Dump> {
   const dump: Dump = { format: "oks-export", version: 1, tables: {} };
   for (const t of tablesInOrder()) {
+    if (options.skip?.includes(t.name)) continue;
     const cols = t.columns.map((c) => `"${c.name}"`).join(", ");
     const rows = (await db.all(`select ${cols} from "${t.name}"`)).map((r) =>
       Object.fromEntries(t.columns.map((c) => [c.name, fromDb(db.dialect, c.family, r[c.name])])),
@@ -211,6 +233,49 @@ export async function importData(db: SqlRunner, dump: Dump): Promise<{ rows: num
         total++;
       }
     }
+    return { rows: total };
+  });
+}
+
+/**
+ * Puts a dump in place of everything in the database, in one step: all rows go, the dump's rows come, and if anything fails the
+ * database is as it was. Tables in `VOLATILE_TABLES` are emptied and not filled, except that the sessions of people who are still
+ * there afterwards are kept (so the person who restores stays signed in).
+ */
+export async function replaceData(
+  db: SqlRunner,
+  dump: Dump,
+  options: { keepSessions: boolean },
+): Promise<{ rows: number }> {
+  if (dump.format !== "oks-export" || dump.version !== 1)
+    throw new Error("This is not an oks export, or its version is not supported");
+  const tables = tablesInOrder();
+  const unknown = Object.keys(dump.tables).filter((n) => !tables.some((t) => t.name === n));
+  if (unknown.length)
+    throw new Error(`The export has tables this version does not know: ${unknown.join(", ")}`);
+  return db.transaction(async (tx) => {
+    const sessions = options.keepSessions ? await readRows(tx, "auth_sessions") : [];
+    for (const t of [...tables].reverse()) await tx.all(`delete from "${t.name}"`);
+    let total = 0;
+    for (const t of tables) {
+      let rows = dump.tables[t.name] ?? [];
+      if (t.selfParent) rows = parentsFirst(rows, t.selfParent, t.primaryKey[0]!);
+      const names = t.columns.map((c) => `"${c.name}"`).join(", ");
+      const marks = t.columns.map(() => "?").join(", ");
+      for (const row of rows) {
+        await tx.all(
+          `insert into "${t.name}" (${names}) values (${marks})`,
+          t.columns.map((c) => toDb(tx.dialect, c.family, row[c.name])),
+        );
+        total++;
+      }
+    }
+    const people = new Set((dump.tables["users"] ?? []).map((u) => u["id"]));
+    await writeRows(
+      tx,
+      "auth_sessions",
+      sessions.filter((r) => people.has(r["user_id"])),
+    );
     return { rows: total };
   });
 }

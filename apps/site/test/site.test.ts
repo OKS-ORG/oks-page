@@ -13718,6 +13718,128 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await eli.context().close();
     await owners.close();
   });
+
+  test("UP-20 to UP-24: the owner makes a backup, downloads it, changes the site, puts the site back from the backup and undoes that with the safety copy", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    const jsonHeaders = { origin: site.base };
+    const para = (text: string) => [
+      {
+        id: "bk-1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text, styles: {} }],
+        children: [],
+      },
+    ];
+    const addPage = async (title: string, text: string) => {
+      const made = await owners.request.post(site.base + "/api/admin/entries", {
+        headers: jsonHeaders,
+        data: { type: "page", title },
+      });
+      const p = (await made.json()) as { id: string; slug: string; revision: number };
+      const saved = await owners.request.put(site.base + `/api/admin/entries/${p.id}`, {
+        headers: jsonHeaders,
+        data: {
+          title,
+          slugPart: p.slug.split("/").pop(),
+          status: "published",
+          blocks: para(text),
+          revision: p.revision,
+        },
+      });
+      expect(saved.status(), await saved.text()).toBe(200);
+      return p.slug;
+    };
+    const open = async (slug: string) => (await fetch(site.base + "/" + slug)).status;
+    const titles = async () =>
+      (await db.run("select title from entries where status = 'published' order by title")).map(
+        (r) => String(r["title"]),
+      );
+
+    const keptSlug = await addPage("Kept page", "This page is in the backup.");
+    await owners.goto(site.base + "/admin/tools/backups");
+    await owners.getByRole("heading", { name: "Backups", level: 1 }).waitFor();
+    await owners.getByText("There is no backup yet.").waitFor();
+    await owners.getByText("Keep two things safe").waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+
+    // Make one: it is checked at once and listed.
+    await owners.getByRole("button", { name: "Make a backup now" }).click();
+    await owners.getByText("The backup was made and checked.").waitFor();
+    await owners.getByText("Checked: every file matches and it opens in a copy").waitFor();
+    await owners.getByText("Made by a person").waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    const name = (await owners.getByRole("link", { name: /^Download manual-/ }).textContent())!
+      .replace("Download ", "")
+      .trim();
+    expect(name).toMatch(/^manual-\d{8}-\d{6}-[0-9a-f]{6}\.tgz$/);
+
+    // Download: a gzip file; and only a signed-in person with the right gets it.
+    const [download] = await Promise.all([
+      owners.waitForEvent("download"),
+      owners.getByRole("link", { name: `Download ${name}` }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe(name);
+    const bytes = readFileSync((await download.path())!);
+    expect([bytes[0], bytes[1]]).toEqual([0x1f, 0x8b]);
+    expect((await fetch(site.base + `/api/admin/backups/${name}`)).status).toBe(401);
+    expect(
+      (await owners.request.get(site.base + "/api/admin/backups/..%2F..%2Fetc%2Fpasswd")).status(),
+    ).toBe(404);
+    expect((await owners.request.get(site.base + "/api/admin/backups/nothing.tgz")).status()).toBe(
+      404,
+    );
+
+    // The site moves on.
+    const laterSlug = await addPage("Later page", "This page is not in the backup.");
+    expect(await open(laterSlug)).toBe(200);
+    expect(await titles()).toContain("Later page");
+
+    // Put the site back: it asks for a tick, makes a safety copy, and the later page is gone from the site.
+    await owners.reload();
+    await owners.getByRole("button", { name: `Restore ${name}` }).click();
+    await owners.getByRole("heading", { name: "Put the whole site back", level: 2 }).waitFor();
+    const go = owners.getByRole("button", { name: "Put the site back" });
+    expect(await go.isDisabled()).toBe(true);
+    await owners.getByLabel(/I understand this replaces the site as it is now/).check();
+    await go.click();
+    await owners
+      .getByText(/The site was put back\. The site as it was before is kept as safety-/)
+      .waitFor();
+    expect(await titles()).not.toContain("Later page");
+    expect(await titles()).toContain("Kept page");
+    expect(await open(laterSlug)).toBe(404);
+    expect(await open(keptSlug)).toBe(200);
+    // The owner is still signed in, and the list shows the safety copy.
+    await owners.reload();
+    await owners.getByRole("heading", { name: "Backups", level: 1 }).waitFor();
+    await owners.getByText("Safety copy before a restore").waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+
+    // Undo: the safety copy brings the later page back.
+    const safety = (await owners.getByRole("link", { name: /^Download safety-/ }).textContent())!
+      .replace("Download ", "")
+      .trim();
+    await owners.getByRole("button", { name: `Restore ${safety}` }).click();
+    await owners.getByLabel(/I understand this replaces the site as it is now/).check();
+    await owners.getByRole("button", { name: "Put the site back" }).click();
+    await owners.getByText(/The site was put back\./).waitFor();
+    expect(await titles()).toContain("Later page");
+    expect(await open(laterSlug)).toBe(200);
+
+    // Delete.
+    await owners.reload();
+    await owners.getByRole("button", { name: `Delete ${name}` }).click();
+    await owners.getByText("The backup was deleted.").waitFor();
+    // The list is made again a moment after the message.
+    await expect
+      .poll(() => owners.getByRole("link", { name: `Download ${name}` }).count(), {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    await owners.close();
+  });
 });
 
 describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, () => {

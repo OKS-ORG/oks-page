@@ -1,7 +1,9 @@
 // Reading a .tgz (a gzip-compressed tar) in memory, without writing a single file (spec 05, section 3.1). Nothing is trusted:
 // the unpacked size is capped while it is unzipped (so a small file that grows huge is stopped), every header is checked,
 // and every kind of entry that is not a plain file or a folder is reported as such, so the caller can refuse it.
-import { gunzipSync, gzipSync } from "node:zlib";
+import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
+import { once } from "node:events";
+import { createGunzip, createGzip, gunzipSync, gzipSync, type Gzip } from "node:zlib";
 
 export interface TarEntry {
   /** The path as written in the archive, with a leading "./" taken off. */
@@ -143,4 +145,153 @@ export function writeTarGz(files: { path: string; data: Buffer }[]): Buffer {
   }
   parts.push(Buffer.alloc(BLOCK * 2));
   return gzipSync(Buffer.concat(parts));
+}
+
+// ------------------------------------------------------------------------------------------- big archives, one file at a time
+
+/** The pieces of one entry, in order: a pax header when the path is long, the header, the data, and the padding. */
+function entryParts(path: string, data: Buffer): Buffer[] {
+  const parts: Buffer[] = [];
+  if (Buffer.byteLength(path) > 100) {
+    const body = ` path=${path}\n`;
+    let length = Buffer.byteLength(body) + 1;
+    while (Buffer.byteLength(`${length}${body}`) !== length)
+      length = Buffer.byteLength(`${length}${body}`);
+    const pax = Buffer.from(`${length}${body}`);
+    parts.push(header("PaxHeader", pax.length, "x"), padded(pax));
+  }
+  parts.push(
+    header(path, data.length, "0"),
+    data,
+    Buffer.alloc((BLOCK - (data.length % BLOCK)) % BLOCK),
+  );
+  return parts;
+}
+
+/**
+ * Writes a .tgz to a file one entry at a time, so a site with gigabytes of pictures never holds them all in memory. Only one
+ * entry's data is in memory at once, and it waits when the disk is slower than the writer.
+ */
+export class TarGzFileWriter {
+  private readonly gzip: Gzip = createGzip();
+  private readonly out: WriteStream;
+  private readonly finished: Promise<void>;
+
+  constructor(path: string) {
+    this.out = createWriteStream(path, { mode: 0o600 });
+    this.gzip.pipe(this.out);
+    this.finished = new Promise<void>((resolve, reject) => {
+      this.out.on("finish", resolve);
+      this.out.on("error", reject);
+      this.gzip.on("error", reject);
+    });
+    // A failure while nothing is waiting for it is reported by finish() or add(), not as an unhandled error.
+    this.finished.catch(() => undefined);
+  }
+
+  private async push(chunk: Buffer): Promise<void> {
+    if (chunk.length === 0) return;
+    if (!this.gzip.write(chunk)) await Promise.race([once(this.gzip, "drain"), this.finished]);
+  }
+
+  async add(path: string, data: Buffer): Promise<void> {
+    for (const part of entryParts(path, data)) await this.push(part);
+  }
+
+  /** Closes the archive. Resolves when everything is on the disk. */
+  async finish(): Promise<void> {
+    await this.push(Buffer.alloc(BLOCK * 2));
+    this.gzip.end();
+    await this.finished;
+  }
+
+  /** Stops writing (a failure): the file is left for the caller to delete. */
+  abort(): void {
+    this.gzip.destroy();
+    this.out.destroy();
+  }
+}
+
+/** The most one entry of a big archive may hold (it is read into memory whole). */
+export const BIG_ENTRY_MAX_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Reads a .tgz file entry by entry. Throws an Error with a plain message when the file is damaged, cut short or holds an entry
+ * that is too big. Only plain files and folders are given; a link or device is an error. Paths are as written in the archive.
+ */
+export async function* readTarGzFile(
+  path: string,
+  maxEntryBytes: number = BIG_ENTRY_MAX_BYTES,
+): AsyncGenerator<{ path: string; data: Buffer }> {
+  const input = createReadStream(path).pipe(createGunzip());
+  const chunks = input[Symbol.asyncIterator]();
+  let held: Buffer[] = [];
+  let have = 0;
+  const take = async (n: number): Promise<Buffer | null> => {
+    while (have < n) {
+      let next: IteratorResult<Buffer>;
+      try {
+        next = await chunks.next();
+      } catch {
+        throw new Error("The file is damaged and cannot be unzipped.");
+      }
+      if (next.done) return have === 0 && n > 0 ? null : fail("The archive is cut short.");
+      held.push(next.value);
+      have += next.value.length;
+    }
+    const all = held.length === 1 ? held[0]! : Buffer.concat(held, have);
+    const out = all.subarray(0, n);
+    const rest = all.subarray(n);
+    held = rest.length > 0 ? [rest] : [];
+    have = rest.length;
+    return out;
+  };
+  const fail = (message: string): never => {
+    throw new Error(message);
+  };
+  try {
+    let nextPath: string | null = null;
+    for (;;) {
+      const head = await take(BLOCK);
+      if (head === null || head.every((byte) => byte === 0)) return;
+      let sum = 0;
+      for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 32 : head[i]!;
+      if (sum !== Number.parseInt(text(head, 148, 8).trim(), 8))
+        fail("The archive is damaged (a header does not add up).");
+      if ((head[124]! & 0x80) !== 0)
+        fail("The archive has a file size in a form that is not supported.");
+      const size = Number.parseInt(text(head, 124, 12).trim() || "0", 8);
+      if (!Number.isInteger(size) || size < 0)
+        fail("The archive is damaged (a file size is not a number).");
+      if (size > maxEntryBytes) fail("A file in the archive is too big.");
+      const data =
+        size === 0 ? Buffer.alloc(0) : ((await take(size)) ?? fail("The archive is cut short."));
+      const pad = (BLOCK - (size % BLOCK)) % BLOCK;
+      if (pad > 0) await take(pad);
+      const type = String.fromCharCode(head[156] || 48);
+      if (type === "g" || type === "K") continue;
+      if (type === "x") {
+        nextPath = paxPath(data) ?? nextPath;
+        continue;
+      }
+      if (type === "L") {
+        nextPath = text(data, 0, data.length);
+        continue;
+      }
+      let entry = nextPath;
+      nextPath = null;
+      if (entry === null) {
+        const name = text(head, 0, 100);
+        const prefix = text(head, 345, 155);
+        entry = prefix && text(head, 257, 5) === "ustar" ? `${prefix}/${name}` : name;
+      }
+      if (entry.startsWith("./")) entry = entry.slice(2);
+      if (type === "5") continue; // a folder
+      if (type !== "0") fail("The archive holds a link or a special file, which is not allowed.");
+      if (entry === "" || entry === ".") continue;
+      yield { path: entry, data: Buffer.from(data) };
+    }
+  } finally {
+    input.destroy();
+  }
 }

@@ -1,7 +1,8 @@
 // Shared by the site tests: building the app, starting it, and putting data in the database.
 import type { TestDb } from "@oks-page/db/testing";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
@@ -37,6 +38,8 @@ export async function startSite(kind: string, db: TestDb, extra: Record<string, 
     OKS_VIDEO_COVERS: "off",
     PORT: String(port),
     NODE_ENV: "production",
+    // Backups of a test site go to a folder of their own, never into the project.
+    OKS_BACKUP_DIR: mkdtempSync(join(tmpdir(), "oks-backups-")),
     ...Object.fromEntries(
       Object.entries(extra).map(([k, v]) => [k, v.replaceAll("{port}", String(port))]),
     ),
