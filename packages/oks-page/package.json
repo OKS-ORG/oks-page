@@ -1,6 +1,6 @@
 {
   "name": "oks-page",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "The site, the admin and the API of oks-page as one installable package: a project re-exports its pages from here",
   "type": "module",
   "files": [

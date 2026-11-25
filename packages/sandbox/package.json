@@ -1,6 +1,6 @@
 {
   "name": "@oks-page/sandbox",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "SandboxRunner interface and the workerd adapter",
   "type": "module",
   "main": "./dist/index.js",

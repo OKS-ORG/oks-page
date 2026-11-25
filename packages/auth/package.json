@@ -1,6 +1,6 @@
 {
   "name": "@oks-page/auth",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Login, sessions, roles and capabilities",
   "type": "module",
   "main": "./dist/index.js",

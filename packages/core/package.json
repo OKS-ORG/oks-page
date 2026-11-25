@@ -1,6 +1,6 @@
 {
   "name": "@oks-page/core",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Content engine: types, entries, revisions, taxonomies, menus, settings, hooks, permissions, jobs",
   "type": "module",
   "main": "./dist/index.js",
