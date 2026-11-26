@@ -1,6 +1,6 @@
 {
   "name": "@oks-page/admin",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "The admin app (React, oks-ui)",
   "type": "module",
   "main": "./dist/index.js",
