@@ -10,7 +10,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./shell.css": "./src/shell.css"
+    "./shell.css": "./src/shell.css",
+    "./base.css": "./src/base.css"
   },
   "dependencies": {
     "@oks-page/content-safety": "workspace:*",
@@ -28,7 +29,10 @@
   },
   "files": [
     "dist",
-    "src/shell.css"
+    "src/shell.css",
+    "src/base.css",
+    "src/scene.svg",
+    "src/logo.svg"
   ],
   "license": "MIT",
   "repository": {

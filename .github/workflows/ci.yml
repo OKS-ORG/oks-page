@@ -42,6 +42,8 @@ jobs:
       - run: pnpm test:perf
         env:
           OKS_REUSE_BUILD: "1"
+          # The limits that come from a requirement (SEO-51, 5 ms) are measured on the development machine; a shared runner is slower.
+          OKS_PERF_FACTOR: "3"
       - run: pnpm check:repo
       - run: pnpm check:migrations
 

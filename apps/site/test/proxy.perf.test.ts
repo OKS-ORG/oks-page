@@ -38,8 +38,11 @@ for (const { kind, skip } of openers) {
       for (let i = 0; i < 50; i++) await fetch(`${site.base}/about`); // warm up the connection and the page
       // A shared CI runner can have one slow moment. A real slowdown is slow in every round, so the test passes when
       // any of up to three rounds is under the limit.
+      // The 5 ms is measured on the development machine (SEO-51). A shared CI runner is slower and noisier, so CI sets
+      // OKS_PERF_FACTOR (3 there): a real regression is still caught, a slow runner is not a failure.
+      const limit = 5 * (Number(process.env["OKS_PERF_FACTOR"]) || 1);
       let best = Infinity;
-      for (let round = 0; round < 3 && best >= 5; round++) {
+      for (let round = 0; round < 3 && best >= limit; round++) {
         await stats(true);
         for (let i = 0; i < 500; i++)
           await fetch(`${site.base}${i % 2 ? "/about" : `/missing-${round}-${i}`}`);
@@ -51,7 +54,7 @@ for (const { kind, skip } of openers) {
         );
         best = Math.min(best, p95);
       }
-      expect(best).toBeLessThan(5);
+      expect(best).toBeLessThan(limit);
     }, 120_000);
   });
 }

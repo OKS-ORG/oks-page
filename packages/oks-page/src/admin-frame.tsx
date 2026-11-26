@@ -2,10 +2,12 @@
 // The admin shell around a screen: the menu, the footer, who is signed in and Sign out.
 import { Shell } from "@oks-page/admin";
 import "@oks-page/admin/shell.css";
+import "@oks-page/admin/base.css";
 import { Button, type CommandPaletteItem } from "oks-ui";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useAdminBrand } from "./admin-brand-context";
 import type { NavItem } from "./admin-nav";
+import { navIcon } from "./nav-icons";
 
 async function signOut() {
   await fetch("/api/auth/sign-out", {
@@ -99,7 +101,10 @@ export function AdminFrame({
   const onSearch = useCallback(searchEntries, []);
   return (
     <Shell
-      nav={nav}
+      nav={nav.map((n) => {
+        const icon = navIcon(n.key);
+        return icon ? { ...n, icon } : n;
+      })}
       selectedKey={selectedKey}
       title={title}
       {...(breadcrumbs ? { breadcrumbs } : {})}
