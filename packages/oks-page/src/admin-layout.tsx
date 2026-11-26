@@ -8,6 +8,7 @@ import { AdminBrandProvider, NO_BRAND, type AdminBrandValue } from "./admin-bran
 import { getRunner, getSiteId } from "./db";
 import { licencePublicKeys } from "./licence-keys";
 import { mediaContext } from "./uploads";
+import { UpdateBanner } from "./update-banner";
 
 async function loadBrand(): Promise<AdminBrandValue> {
   try {
@@ -40,5 +41,10 @@ async function loadBrand(): Promise<AdminBrandValue> {
 }
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  return <AdminBrandProvider brand={await loadBrand()}>{children}</AdminBrandProvider>;
+  return (
+    <AdminBrandProvider brand={await loadBrand()}>
+      <UpdateBanner />
+      {children}
+    </AdminBrandProvider>
+  );
 }

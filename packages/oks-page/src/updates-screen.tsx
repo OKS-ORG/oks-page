@@ -87,6 +87,13 @@ export function UpdatesScreen({ view, hasServer }: { view: UpdateView; hasServer
       />
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
       <p role="status">{note}</p>
+      {view.urgentFailure ? (
+        <p>The last look at the urgent list did not work: {view.urgentFailure}</p>
+      ) : view.urgentCheckedAt !== null ? (
+        <p>
+          The urgent list (security warnings only) was last looked at {when(view.urgentCheckedAt)}.
+        </p>
+      ) : null}
 
       <p>
         <label style={{ display: "flex", gap: ".5rem", alignItems: "flex-start" }}>

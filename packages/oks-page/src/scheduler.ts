@@ -12,10 +12,13 @@ import {
   queueEmail,
   runDailyBackup,
   loadUpdateState,
+  notifyCoreWarnings,
   runKeeping,
   runUpdateCheck,
+  runUrgentCheck,
   sendBackupFailedEmails,
   updateCheckDue,
+  urgentCheckDue,
   runDailyDomainCheck,
   type MayPublish,
 } from "@oks-page/core";
@@ -27,7 +30,7 @@ import { purgePendingFiles } from "./plugin-files";
 import { purgePrivacyRequests, sendPrivacyReminders } from "./privacy-visitor";
 import { runPluginJobs } from "./plugin-jobs";
 import { pluginHost } from "./plugin-runtime";
-import { updateUrl, userAgent } from "./updates-context";
+import { coreVersion, updateUrl, urgentUpdateUrl, userAgent } from "./updates-context";
 
 const SECOND = 1000;
 const PURGE_EVERY = 60 * 60 * SECOND;
@@ -87,19 +90,40 @@ async function backupUpkeep(now: () => number): Promise<void> {
   }
 }
 
-/** Once a day (spec 14, section 4): the site looks at the list of updates. The timer asks every 10 minutes whether a look is due. */
+/**
+ * Once a day (spec 14, section 4): the site looks at the list of updates; every hour at the small urgent list. The timer asks every
+ * 10 minutes whether a look is due. After that, the people who manage the settings are emailed about a new high or critical
+ * warning for the core (once for each).
+ */
 let lastUpdateLook = 0;
 let lookingForUpdates = false;
 async function updateUpkeep(now: () => number): Promise<void> {
   const url = updateUrl();
-  if (!url || lookingForUpdates || now() - lastUpdateLook < 10 * 60 * SECOND) return;
+  const urgent = urgentUpdateUrl();
+  if ((!url && !urgent) || lookingForUpdates || now() - lastUpdateLook < 10 * 60 * SECOND) return;
   lastUpdateLook = now();
   lookingForUpdates = true;
   try {
     const runner = getRunner();
     const siteId = await getSiteId();
-    if (updateCheckDue(await loadUpdateState(runner, siteId), now()))
+    const state = await loadUpdateState(runner, siteId);
+    if (url && updateCheckDue(state, now()))
       await runUpdateCheck(runner, siteId, { url, now, userAgent: userAgent() });
+    if (urgent && urgentCheckDue(state, now()))
+      await runUrgentCheck(runner, siteId, { url: urgent, now, userAgent: userAgent() });
+    const general = await loadGeneralSettings(runner, siteId);
+    const sent = await notifyCoreWarnings(
+      runner,
+      siteId,
+      siteSecrets(),
+      {
+        core: coreVersion(),
+        siteName: general.siteName,
+        link: `${process.env["OKS_SITE_URL"] ?? ""}/admin/tools/updates`,
+      },
+      now,
+    );
+    if (sent > 0) kickEmailJobs();
   } catch (error) {
     // A site that is not set up yet has nothing to check.
     if (!(error instanceof Error && /has no site yet/.test(error.message)))

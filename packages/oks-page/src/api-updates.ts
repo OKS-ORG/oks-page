@@ -1,13 +1,13 @@
 // /api/admin/updates (spec 14, part 1): POST { action } for the update checks. Only people who manage the settings.
 //   switch { on }   turns the update checks on or off
 //   check  {}       looks at the list now
-import { runUpdateCheck, saveUpdateChecksOn } from "@oks-page/core";
+import { runUpdateCheck, runUrgentCheck, saveUpdateChecksOn } from "@oks-page/core";
 import { NextResponse } from "next/server";
 import { actorOf } from "./admin-actor";
 import { signedInMember } from "./admin-session";
 import { isSameOrigin, reply } from "./api-entries";
 import { getRunner } from "./db";
-import { updateUrl, userAgent } from "./updates-context";
+import { updateUrl, urgentUpdateUrl, userAgent } from "./updates-context";
 
 const STATUS = { forbidden: 403, invalid: 400 } as const;
 
@@ -37,6 +37,17 @@ export async function POST(request: Request) {
         url: updateUrl(),
         userAgent: userAgent(),
       });
+      // The urgent list too, when the site has an address for it; a refusal of it is told only when the main list was fine.
+      const urgent = urgentUpdateUrl();
+      if (urgent) {
+        const second = await runUrgentCheck(runner, member.siteId, {
+          url: urgent,
+          userAgent: userAgent(),
+        });
+        if (second.status === "failed" || second.status === "refused")
+          if (outcome.status !== "failed" && outcome.status !== "refused")
+            return NextResponse.json({ ok: true, outcome: second });
+      }
       return NextResponse.json({ ok: true, outcome });
     }
     default:

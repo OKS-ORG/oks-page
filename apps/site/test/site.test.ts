@@ -13861,6 +13861,13 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await owners.goto(site.base + "/admin/tools/updates");
     await owners.getByRole("heading", { name: "Updates", level: 1 }).waitFor();
     await owners.getByText("No list of updates has been received yet.", { exact: false }).waitFor();
+    // No list was believed, so there is no red notice on this or any other admin page.
+    expect(await owners.locator("[data-update-banner]").count()).toBe(0);
+    await owners.goto(site.base + "/admin");
+    await owners.getByRole("heading", { level: 1 }).first().waitFor();
+    expect(await owners.locator("[data-update-banner]").count()).toBe(0);
+    await owners.goto(site.base + "/admin/tools/updates");
+    await owners.getByRole("heading", { name: "Updates", level: 1 }).waitFor();
     // The menu has the entry once.
     expect(await owners.getByRole("link", { name: "Updates", exact: true }).count()).toBe(1);
     const box = owners.getByLabel(/Look for updates and security warnings once a day/);

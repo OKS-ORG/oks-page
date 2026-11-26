@@ -396,6 +396,55 @@ export async function sendBackupFailedEmails(
 }
 
 /**
+ * A security warning names the core the site runs (spec 14, section 6): the people who manage the settings get an email, which they
+ * cannot turn off. It is sent once for each warning (the caller remembers which ones). Returns how many emails were queued; nothing is
+ * queued while email is not set up.
+ */
+export async function sendUpdateWarningEmails(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: {
+    siteName: string;
+    severity: string;
+    summary: string;
+    version: string;
+    fixed: string;
+    link: string;
+    advisory: string;
+  },
+  now: () => number = Date.now,
+): Promise<number> {
+  const people = (await membersWith(runner, siteId, "settings.manage", "")).slice(
+    0,
+    REVIEW_EMAIL_RECIPIENTS,
+  );
+  let queued = 0;
+  for (const p of people) {
+    const result = await sendText(
+      runner,
+      siteId,
+      secrets,
+      "update-warning",
+      p.email,
+      {
+        name: p.name || p.email,
+        site: input.siteName,
+        severity: input.severity,
+        summary: input.summary.slice(0, 500),
+        version: input.version,
+        fixed: input.fixed,
+        link: input.link,
+        advisory: input.advisory,
+      },
+      now,
+    );
+    if (result.sent) queued += 1;
+  }
+  return queued;
+}
+
+/**
  * A client changed a live page: the people who change the design (except the client) get an email with a link to the page and a link
  * to put the earlier version back. Returns how many emails were queued; nothing is queued while email is not set up.
  */

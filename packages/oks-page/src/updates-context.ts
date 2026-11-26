@@ -7,6 +7,10 @@ import { listPlugins } from "./plugin-admin";
 export const updateUrl = (): string | undefined =>
   process.env["OKS_UPDATE_URL"]?.trim() || undefined;
 
+/** The address of the small urgent list (security warnings only), looked at every hour. OKS_UPDATE_URGENT_URL; none until we publish one. */
+export const urgentUpdateUrl = (): string | undefined =>
+  process.env["OKS_UPDATE_URGENT_URL"]?.trim() || undefined;
+
 /** What the request says about the sender: the product name, nothing else. */
 export const userAgent = (): string => process.env["OKS_PRODUCT"]?.trim() || "oks";
 

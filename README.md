@@ -1,6 +1,8 @@
 # oks-page
 
-A WordPress alternative built with Next.js. You write pages and posts in a block editor, keep pictures in a library, choose a theme, add plugins that run in a sandbox, and publish from one admin. It runs on your own server with SQLite (nothing to set up) or PostgreSQL.
+A modern, open-source content management system built with Next.js, on your own server.
+
+You write pages and posts in a block editor, keep pictures and files in a media library, choose a theme, and publish from one admin. You add features with plugins that run in a sandbox, so a plugin can only do what you allowed it to do. It runs with SQLite (nothing to set up) or PostgreSQL, and your content stays yours: you can export it or back it up whenever you like. It is free, under the MIT licence.
 
 **Status: public beta (0.1.0-beta).** It works and is tested, but it is young. An outside security review has not been done yet, so think before you put a site on it that must hold secrets or be perfectly safe, and keep your backups (the admin makes one every day).
 

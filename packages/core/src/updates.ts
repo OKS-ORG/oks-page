@@ -4,6 +4,8 @@
 // update-list.ts; this file is the fetching, the keeping and the comparing.
 import type { SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
+import { sendUpdateWarningEmails } from "./emails.js";
+import type { SiteSecrets } from "./secret-box.js";
 import {
   UPDATE_PUBLIC_KEYS,
   mayReplaceList,
@@ -18,6 +20,8 @@ export const UPDATES_SETTINGS_KEY = "updates_settings";
 export const UPDATES_STATE_KEY = "updates_state";
 /** The site looks once a day; the admin screen asks again when the last look is older than this. */
 export const UPDATE_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
+/** The small urgent list (security warnings only) is looked at every hour. */
+export const URGENT_CHECK_EVERY_MS = 60 * 60 * 1000;
 const MAX_LIST_BYTES = 2 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -225,17 +229,33 @@ export interface UpdateState {
   triedAt: number | null;
   /** What went wrong at the last look, until a look works again. */
   failure: string;
+  /** The same four things for the small urgent list (security warnings only), which is looked at every hour. */
+  urgentToken: string | null;
+  urgentCheckedAt: number | null;
+  urgentTriedAt: number | null;
+  urgentFailure: string;
+  /** The ids of the core warnings the administrators were already emailed about. */
+  warned: string[];
 }
 
 const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+const text = (x: unknown): string => (typeof x === "string" ? x : "");
+const token = (x: unknown): string | null => (typeof x === "string" ? x : null);
 
 export async function loadUpdateState(runner: SqlRunner, siteId: string): Promise<UpdateState> {
   const v = await read(runner, siteId, UPDATES_STATE_KEY);
   return {
-    token: typeof v["token"] === "string" ? v["token"] : null,
+    token: token(v["token"]),
     checkedAt: num(v["checkedAt"]),
     triedAt: num(v["triedAt"]),
-    failure: typeof v["failure"] === "string" ? v["failure"] : "",
+    failure: text(v["failure"]),
+    urgentToken: token(v["urgentToken"]),
+    urgentCheckedAt: num(v["urgentCheckedAt"]),
+    urgentTriedAt: num(v["urgentTriedAt"]),
+    urgentFailure: text(v["urgentFailure"]),
+    warned: Array.isArray(v["warned"])
+      ? (v["warned"] as unknown[]).filter((x): x is string => typeof x === "string").slice(-500)
+      : [],
   };
 }
 
@@ -250,6 +270,16 @@ export function heldList(
 ): UpdateList | null {
   if (state.token === null) return null;
   const read = readUpdateList(state.token, keys);
+  return read.ok ? read.list : null;
+}
+
+/** The urgent list the site holds, believed again in the same way. */
+export function heldUrgentList(
+  state: UpdateState,
+  keys: readonly string[] = UPDATE_PUBLIC_KEYS,
+): UpdateList | null {
+  if (state.urgentToken === null) return null;
+  const read = readUpdateList(state.urgentToken, keys);
   return read.ok ? read.list : null;
 }
 
@@ -271,23 +301,33 @@ export interface CheckOptions {
   now?: () => number;
 }
 
-/** Looks at the list once: fetch it, believe it or refuse it, keep it, and note how it went. Never throws. */
-export async function runUpdateCheck(
+/**
+ * Looks at one list once: fetch it, believe it or refuse it, keep it, and note how it went. Never throws. The main list and the
+ * urgent list are kept apart, each with its own sequence number, so neither can push the other back (UP-03).
+ */
+async function look(
   runner: SqlRunner,
   siteId: string,
   options: CheckOptions,
+  which: "main" | "urgent",
 ): Promise<CheckOutcome> {
   if (!(await updateChecksOn(runner, siteId))) return { status: "off" };
   const url = options.url?.trim();
   if (!url) return { status: "no_server" };
   const now = options.now ?? Date.now;
   const keys = options.keys ?? UPDATE_PUBLIC_KEYS;
-  const state = await loadUpdateState(runner, siteId);
+  // The state is read again when it is written, so a look of the other list that ended in the meantime is not lost.
+  const note = async (patch: (state: UpdateState) => UpdateState): Promise<void> =>
+    saveState(runner, siteId, patch(await loadUpdateState(runner, siteId)));
   const fail = async (status: "refused" | "failed", reason: string): Promise<CheckOutcome> => {
-    await saveState(runner, siteId, { ...state, triedAt: now(), failure: reason });
+    await note((s) =>
+      which === "main"
+        ? { ...s, triedAt: now(), failure: reason }
+        : { ...s, urgentTriedAt: now(), urgentFailure: reason },
+    );
     return { status, reason };
   };
-  let text: string;
+  let body: string;
   try {
     if (new URL(url).protocol !== "https:")
       return await fail("failed", "The update address must be https.");
@@ -301,30 +341,84 @@ export async function runUpdateCheck(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) return await fail("failed", `The update server answered ${response.status}.`);
-    text = await response.text();
+    body = await response.text();
   } catch {
     return await fail("failed", "The update server could not be reached.");
   }
-  if (text.length > MAX_LIST_BYTES) return await fail("refused", "The list is far too large.");
-  const read = readUpdateList(text, keys);
+  if (body.length > MAX_LIST_BYTES) return await fail("refused", "The list is far too large.");
+  const read = readUpdateList(body, keys);
   if (!read.ok) return await fail("refused", read.reason);
-  const held = heldList(state, keys);
+  const state = await loadUpdateState(runner, siteId);
+  const held = which === "main" ? heldList(state, keys) : heldUrgentList(state, keys);
   if (!mayReplaceList(held, read.list))
     return await fail("refused", "This list is older than the one the site already has.");
   const same = held !== null && held.seq === read.list.seq;
-  await saveState(runner, siteId, {
-    token: text.trim(),
-    checkedAt: now(),
-    triedAt: now(),
-    failure: "",
-  });
+  await note((s) =>
+    which === "main"
+      ? { ...s, token: body.trim(), checkedAt: now(), triedAt: now(), failure: "" }
+      : {
+          ...s,
+          urgentToken: body.trim(),
+          urgentCheckedAt: now(),
+          urgentTriedAt: now(),
+          urgentFailure: "",
+        },
+  );
   return { status: same ? "same" : "new", seq: read.list.seq };
 }
 
-/** True when a look is due: checks are on, there is an address, and the last good look is more than a day old (spec 14, section 4). */
+/** Looks at the main list (once a day). */
+export function runUpdateCheck(
+  runner: SqlRunner,
+  siteId: string,
+  options: CheckOptions,
+): Promise<CheckOutcome> {
+  return look(runner, siteId, options, "main");
+}
+
+/** Looks at the small urgent list (every hour): the same rules, with a list of its own. */
+export function runUrgentCheck(
+  runner: SqlRunner,
+  siteId: string,
+  options: CheckOptions,
+): Promise<CheckOutcome> {
+  return look(runner, siteId, options, "urgent");
+}
+
+/** True when a look at the main list is due: the last look, good or bad, is more than a day old (spec 14, section 4). */
 export function updateCheckDue(state: UpdateState, now: number): boolean {
   const last = Math.max(state.checkedAt ?? 0, state.triedAt ?? 0);
   return now - last >= UPDATE_CHECK_EVERY_MS;
+}
+
+/** True when a look at the urgent list is due: the last one is more than an hour old. */
+export function urgentCheckDue(state: UpdateState, now: number): boolean {
+  const last = Math.max(state.urgentCheckedAt ?? 0, state.urgentTriedAt ?? 0);
+  return now - last >= URGENT_CHECK_EVERY_MS;
+}
+
+// ---- both lists together ----
+
+/** The warnings of both lists, once each: when both name the same id, the urgent list's wording is used. */
+function allWarnings(main: UpdateList | null, urgent: UpdateList | null): SecurityWarning[] {
+  const byId = new Map<string, SecurityWarning>();
+  for (const w of main?.warnings ?? []) byId.set(w.id, w);
+  for (const w of urgent?.warnings ?? []) byId.set(w.id, w);
+  return [...byId.values()];
+}
+
+/** One list to compare with: the main list with the urgent list's warnings added (an urgent list alone says nothing else). */
+function combined(main: UpdateList | null, urgent: UpdateList | null): UpdateList | null {
+  if (main === null && urgent === null) return null;
+  const base: UpdateList = main ?? {
+    v: 1,
+    seq: 0,
+    issued: urgent!.issued,
+    core: {},
+    items: [],
+    warnings: [],
+  };
+  return { ...base, warnings: allWarnings(main, urgent) };
 }
 
 // ---- what the Updates screen shows ----
@@ -344,6 +438,9 @@ export interface UpdateView {
   /** The sequence number and date of the newest list that was believed. */
   seq: number | null;
   issued: string | null;
+  /** The urgent list: when it was last looked at well, and what went wrong at the last look. */
+  urgentCheckedAt: number | null;
+  urgentFailure: string;
   comparison: Comparison | null;
 }
 
@@ -355,13 +452,16 @@ export async function loadUpdateView(
 ): Promise<UpdateView> {
   const on = await updateChecksOn(runner, siteId);
   const state = await loadUpdateState(runner, siteId);
-  const list = heldList(state, options.keys ?? UPDATE_PUBLIC_KEYS);
+  const keys = options.keys ?? UPDATE_PUBLIC_KEYS;
+  const list = heldList(state, keys);
+  const urgent = heldUrgentList(state, keys);
   const now = options.now ?? Date.now;
   let health: UpdateHealth = "ok";
   if (!on) health = "off";
   else if (list === null) health = state.failure !== "" ? "failing" : "no_server";
   else if (state.failure !== "") health = "failing";
   else if (updateListStale(list, new Date(now()))) health = "stale";
+  const both = combined(list, urgent);
   return {
     on,
     health,
@@ -369,6 +469,90 @@ export async function loadUpdateView(
     checkedAt: state.checkedAt,
     seq: list?.seq ?? null,
     issued: list?.issued ?? null,
-    comparison: list ? compareUpdates(list, installed) : null,
+    urgentCheckedAt: state.urgentCheckedAt,
+    urgentFailure: state.urgentFailure,
+    comparison: both ? compareUpdates(both, installed) : null,
   };
+}
+
+// ---- the red notice and the email about the core (spec 14, section 6) ----
+
+export interface UpdateAlerts {
+  /** The security warnings that name the version of the core this site runs, worst first. */
+  coreWarnings: SecurityWarning[];
+  /** When the site's major version no longer gets security fixes: the newest version to update to. */
+  unsupportedLatest: string | null;
+}
+
+/** What the red notice on every admin page says. Nothing while the checks are off or no list was believed. */
+export async function loadUpdateAlerts(
+  runner: SqlRunner,
+  siteId: string,
+  core: string,
+  options: { keys?: readonly string[] } = {},
+): Promise<UpdateAlerts> {
+  const none: UpdateAlerts = { coreWarnings: [], unsupportedLatest: null };
+  if (!(await updateChecksOn(runner, siteId))) return none;
+  const state = await loadUpdateState(runner, siteId);
+  const keys = options.keys ?? UPDATE_PUBLIC_KEYS;
+  const list = heldList(state, keys);
+  const both = combined(list, heldUrgentList(state, keys));
+  if (both === null) return none;
+  const result = compareUpdates(both, { core, items: [] });
+  const versions = Object.values(both.core);
+  return {
+    coreWarnings: result.warnings.filter((w) => w.affects === "core"),
+    unsupportedLatest:
+      list !== null && !result.core.supported && versions.length > 0
+        ? versions.reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b))
+        : null,
+  };
+}
+
+/** The severities that are also sent by email (the red notice is shown for every severity). */
+export const EMAILED_SEVERITIES = ["high", "critical"];
+
+/**
+ * Emails the people who manage the settings about each high or critical core warning once (the ids are remembered). Called after a look.
+ * Returns how many emails were queued. Never throws for a site whose email is not set up: the red notice is still there.
+ */
+export async function notifyCoreWarnings(
+  runner: SqlRunner,
+  siteId: string,
+  secrets: SiteSecrets,
+  input: { core: string; siteName: string; link: string; keys?: readonly string[] },
+  now: () => number = Date.now,
+): Promise<number> {
+  const alerts = await loadUpdateAlerts(runner, siteId, input.core, {
+    ...(input.keys ? { keys: input.keys } : {}),
+  });
+  const state = await loadUpdateState(runner, siteId);
+  const fresh = alerts.coreWarnings.filter(
+    (w) => EMAILED_SEVERITIES.includes(w.severity) && !state.warned.includes(w.id),
+  );
+  if (fresh.length === 0) return 0;
+  let queued = 0;
+  for (const w of fresh)
+    queued += await sendUpdateWarningEmails(
+      runner,
+      siteId,
+      secrets,
+      {
+        siteName: input.siteName,
+        severity: w.severity,
+        summary: w.summary,
+        version: input.core,
+        fixed: w.fixed,
+        link: input.link,
+        advisory: w.link,
+      },
+      now,
+    );
+  // Remembered even when no email could be queued: the red notice stays, and a site whose email is set up later is not flooded.
+  const latest = await loadUpdateState(runner, siteId);
+  await saveState(runner, siteId, {
+    ...latest,
+    warned: [...latest.warned, ...fresh.map((w) => w.id)].slice(-500),
+  });
+  return queued;
 }
