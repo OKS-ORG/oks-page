@@ -10,6 +10,7 @@ import {
   purgeEditingNotices,
   purgeTrash,
   queueEmail,
+  recordHeartbeat,
   runDailyBackup,
   loadUpdateState,
   notifyCoreWarnings,
@@ -169,6 +170,10 @@ async function emailUpkeep(now: () => number): Promise<void> {
 
 /** One round: publish what is due, refresh its pages, and now and then empty the old trash. */
 export async function runScheduledWork(now: () => number = Date.now): Promise<void> {
+  // Site health reads this note to tell whether the job runner is alive (a site that is not set up yet has nothing to note).
+  await getSiteId()
+    .then((siteId) => recordHeartbeat(getRunner(), siteId, now()))
+    .catch(() => undefined);
   // Queued emails and their retries (spec 13, section 7); it never stops the rest of the round.
   await runEmailJobs().catch((error: unknown) =>
     console.error("[oks] The email queue could not run:", error),

@@ -1,5 +1,5 @@
 // /admin: the dashboard ("Home"). Only a signed-in member of the site sees it; anyone else is sent to sign in.
-import { isSetupDone } from "@oks-page/core";
+import { healthLine, isSetupDone } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -8,6 +8,7 @@ import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { AdminDashboard } from "./admin-dashboard";
 import { loadDashboard } from "./dashboard-data";
+import { currentHealth } from "./health-context";
 import { getRunner } from "./db";
 
 export const metadata: Metadata = { title: "Home", robots: { index: false } };
@@ -18,12 +19,19 @@ export default async function AdminPage() {
   const me = await signedInMember();
   if (!me) redirect("/admin/login");
   const actor = await actorOf(me);
+  // A short line about the site's health, for people who manage the settings (never allowed to stop the page from opening).
+  const health = actor.can("settings.manage")
+    ? await currentHealth(getRunner(), me.siteId, { probe: false })
+        .then((report) => healthLine(report.summary))
+        .catch(() => null)
+    : null;
   return (
     <AdminDashboard
       user={me.user}
       nav={navFor((c) => actor.can(c))}
       data={await loadDashboard(me.siteId)}
       canManageSettings={actor.can("settings.manage")}
+      healthLine={health}
       product={process.env["OKS_PRODUCT"] ?? ""}
       version={process.env["OKS_VERSION"] ?? ""}
     />

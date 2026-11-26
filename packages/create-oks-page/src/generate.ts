@@ -320,6 +320,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { POST } from ${from("api-updates")};\n`,
     },
     {
+      path: "app/admin/tools/health/page.tsx",
+      content: `export { default, metadata } from ${from("tools-health-page")};\n`,
+    },
+    {
+      path: "app/api/admin/health/route.ts",
+      content: `export { POST } from ${from("api-health")};\n`,
+    },
+    {
       path: "app/admin/tools/connector/page.tsx",
       content: `export { default, metadata } from ${from("tools-connector-page")};\n`,
     },

@@ -14,6 +14,8 @@ export interface AdminDashboardProps {
   version: string;
   /** True for people who may manage the settings (they get the "Set up email" note). */
   canManageSettings?: boolean;
+  /** "Healthy" or "3 things need attention" (Site health), for people who manage the settings. */
+  healthLine?: string | null;
 }
 
 export function AdminDashboard({
@@ -23,6 +25,7 @@ export function AdminDashboard({
   product,
   version,
   canManageSettings = false,
+  healthLine = null,
 }: AdminDashboardProps) {
   return (
     <AdminFrame
@@ -55,6 +58,16 @@ export function AdminDashboard({
           {data.blockedStyles.length === 1 ? "it" : "them"}.{" "}
           <a href="/admin/settings/security">Open the security settings</a>
         </p>
+      ) : null}
+      {canManageSettings && healthLine ? (
+        <Card>
+          <CardHeader>Site health</CardHeader>
+          <CardBody>
+            <p data-health-line="">
+              {healthLine}. <a href="/admin/tools/health">Open Site health</a>
+            </p>
+          </CardBody>
+        </Card>
       ) : null}
       <Card>
         <CardHeader>{data.siteName}</CardHeader>

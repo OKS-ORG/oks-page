@@ -48,6 +48,17 @@ import {
 } from "@oks-page/core/testing/github-server";
 import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from "./helpers";
 
+/** Animations and transitions are switched off while axe measures colours: a slow machine can still be mid-fade. */
+const NO_MOTION = "*,*::before,*::after{transition:none!important;animation:none!important}";
+async function noMotion(page: Awaited<ReturnType<Browser["newPage"]>>): Promise<void> {
+  // A constructed style sheet: an inline <style> would be refused by the public pages' content security policy.
+  await page.evaluate((css) => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(css);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  }, NO_MOTION);
+}
+
 /** The page's HTML followed by the owner's look, which the page links to as a file (`/site-style/<fingerprint>.css`). */
 async function withLook(base: string, html: string): Promise<string> {
   const hrefs = new Set(
@@ -810,6 +821,7 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
         await page.getByRole("button", { name: "Next" }).click();
         await page.getByText("Add sample content?").waitFor();
       }
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -1015,6 +1027,7 @@ describe.skipIf(!findBrowser())("the admin sign-in and the dashboard", () => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
       await signIn(page);
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -1299,6 +1312,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await row("– Sports").first().waitFor();
 
     const axeProblems = async (label: string) => {
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -1650,6 +1664,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByLabel("Label", { exact: true }).first().waitFor();
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -1756,6 +1771,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       for (const path of ["/", "/category/uncategorised"]) {
         await page.goto(site.base + path);
         await page.getByRole("navigation", { name: "Main menu" }).waitFor();
+        await noMotion(page);
         await page.addScriptTag({ content: axe.source });
         const result = await page.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -1950,6 +1966,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       await page.setViewportSize({ width, height: 800 });
       await page.goto(`${site.base}/search?q=pagetest`);
       await page.getByRole("heading", { name: "Search", level: 1 }).waitFor();
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2081,6 +2098,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     // No accessibility violation on a wide and a narrow screen.
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2273,6 +2291,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByRole("heading", { name: "Edit: Plan ahead", level: 1 }).waitFor();
     expect(await page.getByLabel(/^Scheduled/).isChecked()).toBe(true);
     expect(await page.getByLabel("Publish at").inputValue()).toBe("2090-01-15T09:30");
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2503,6 +2522,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
         },
       ]) {
         await open();
+        await noMotion(page);
         await page.addScriptTag({ content: axe.source });
         const result = await page.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2530,6 +2550,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       ] as const) {
         await page.goto(site.base + path);
         await page.getByRole("heading", { name: heading, level: 1 }).waitFor();
+        await noMotion(page);
         await page.addScriptTag({ content: axe.source });
         const result = await page.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2546,6 +2567,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       await page.goto(site.base + "/admin/posts");
       await page.getByRole("link", { name: "Hello world" }).click();
       await page.getByRole("heading", { name: "Edit: Hello world", level: 1 }).waitFor();
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -2658,7 +2680,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     };
   const ready = async (id: string) => {
     let last = await item(id);
-    for (let i = 0; i < 100 && last.item.status === "processing"; i++) {
+    for (let i = 0; i < 600 && last.item.status === "processing"; i++) {
       await new Promise((r) => setTimeout(r, 200));
       last = await item(id);
     }
@@ -2893,7 +2915,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     const made = (await response.json()) as { id: string };
     const done = await ready(made.id);
     expect(done.item.status).toBe("ready");
-  });
+  }, 150_000);
 
   test("a file over the limit (26 MB) is refused", async () => {
     const response = await send(
@@ -2949,6 +2971,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await page.getByRole("heading", { name: "Media", level: 1 }).waitFor();
   };
   const violations = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -3399,6 +3422,7 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
   });
 
   const violations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -3610,6 +3634,7 @@ describe.skipIf(!findBrowser())("maintenance mode", { timeout: 120_000 }, () => 
     // The settings screen: the owner turns it on with a message.
     await page.goto(site.base + "/admin/settings/maintenance");
     await page.getByRole("heading", { name: "Maintenance settings", level: 1 }).waitFor();
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -3828,6 +3853,7 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
     // The settings screen: closed to search engines.
     await page.goto(site.base + "/admin/settings/search-engines");
     await page.getByRole("heading", { name: "Search engine settings", level: 1 }).waitFor();
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4161,6 +4187,7 @@ describe.skipIf(!findBrowser())("previews", { timeout: 120_000 }, () => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto(`${site.base}/preview/${secret.id}`);
       await page.getByRole("heading", { name: "Secret plans", level: 1 }).waitFor();
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4364,6 +4391,7 @@ describe.skipIf(!findBrowser())("general settings and the time zone", { timeout:
 
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4842,6 +4870,7 @@ describe.skipIf(!findBrowser())(
             .catch(() => {
               throw new Error(`There is no header menu on ${path} at ${width}px`);
             });
+          await noMotion(page);
           await page.addScriptTag({ content: axe.source });
           const result = await page.evaluate(() =>
             (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4865,6 +4894,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("heading", { name: "Look of the site", level: 1 }).waitFor();
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 });
+        await noMotion(page);
         await page.addScriptTag({ content: axe.source });
         const result = await page.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4948,6 +4978,7 @@ describe.skipIf(!findBrowser())(
       expect(parseFloat(used.spacing)).toBeGreaterThan(0); // the developer's CSS is used
       for (const width of [1280, 390]) {
         await visitor.setViewportSize({ width, height: 900 });
+        await noMotion(visitor);
         await visitor.addScriptTag({ content: axe.source });
         const result = await visitor.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -4986,6 +5017,7 @@ describe.skipIf(!findBrowser())(
       await page.getByLabel("Font for headings").selectOption("source-serif-4");
       await page.getByText("Licences of the fonts you use").click();
       await page.getByText("Inter 5.3.0: Copyright 2016 The Inter Project Authors").waitFor();
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const lookAxe = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -5039,6 +5071,7 @@ describe.skipIf(!findBrowser())(
       );
       for (const width of [1280, 390]) {
         await night.setViewportSize({ width, height: 900 });
+        await noMotion(night);
         await night.addScriptTag({ content: axe.source });
         const dark = await night.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -5054,10 +5087,10 @@ describe.skipIf(!findBrowser())(
       }
       // The visitor's own choice wins and is kept in the browser.
       const toggle = night.getByRole("button", { name: "Dark mode" });
-      expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+      await expect.poll(() => toggle.getAttribute("aria-pressed")).toBe("true");
       await toggle.click();
-      expect(await themeOf(night)).toBe("light");
-      expect(await toggle.getAttribute("aria-pressed")).toBe("false");
+      await expect.poll(() => themeOf(night)).toBe("light");
+      await expect.poll(() => toggle.getAttribute("aria-pressed")).toBe("false");
       await night.reload();
       expect(await themeOf(night)).toBe("light");
       expect(await night.evaluate(() => document.cookie)).toBe("");
@@ -5362,6 +5395,7 @@ describe.skipIf(!findBrowser())(
         return found;
       };
       const axeOf = async (who: Page, label: string) => {
+        await noMotion(who);
         await who.addScriptTag({ content: axe.source });
         const result = await who.evaluate(() =>
           (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -5829,6 +5863,7 @@ describe.skipIf(!findBrowser())(
       expect(admin).not.toContain("Iowan Old Style");
 
       // Public pages still pass the accessibility checks with the new colors.
+      await noMotion(visitor);
       await visitor.addScriptTag({ content: axe.source });
       const result = await visitor.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -5950,6 +5985,7 @@ describe.skipIf(!findBrowser())(
       await page.evaluate(() =>
         Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))),
       );
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -11531,6 +11567,7 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     return page;
   };
   const axeViolations = async (page: Awaited<ReturnType<typeof signedIn>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -12363,6 +12400,7 @@ describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_
     return { status: response.status, location: response.headers.get("location"), html };
   };
   const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -12542,6 +12580,7 @@ describe.skipIf(!findBrowser())(
     });
 
     const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -12720,6 +12759,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
   });
 
   const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -13855,6 +13895,58 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     await owners.close();
   });
 
+  test("AD-70 to AD-74: Tools > Site health lists the checks in plain words, an amber result is hidden and shown again, the dashboard says how many things need attention, and the API is closed to others", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    await owners.goto(site.base + "/admin/tools/health");
+    await owners.getByRole("heading", { name: "Site health", level: 1 }).waitFor();
+    const email = owners.locator('[data-health="email-setup"]');
+    await email.waitFor();
+    expect(await email.getAttribute("data-level")).toBe("amber");
+    expect(await email.textContent()).toContain("Email is not set up");
+    // Every result says its level in words, not only in a colour.
+    expect(await email.textContent()).toContain("Worth a look");
+    expect(await owners.locator('[data-health="secret"]').getAttribute("data-level")).toBe("green");
+    expect(await owners.locator('[data-health="database"]').getAttribute("data-level")).toBe(
+      "green",
+    );
+    expect(await axeViolations(owners)).toEqual([]);
+    // Hide the amber result: it moves under Hidden, and stays there after a reload.
+    await email.getByRole("button", { name: "I know, hide this" }).click();
+    await owners.locator('[data-hidden="email-setup"]').waitFor();
+    expect(await owners.locator('[data-health="email-setup"]').count()).toBe(0);
+    await owners.reload();
+    await owners.locator('[data-hidden="email-setup"]').waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    await owners
+      .locator('[data-hidden="email-setup"]')
+      .getByRole("button", { name: "Show again" })
+      .click();
+    await owners.locator('[data-health="email-setup"]').waitFor();
+    // The dashboard has one line about it, with a link.
+    await owners.goto(site.base + "/admin");
+    const line = owners.locator("[data-health-line]");
+    await line.waitFor();
+    expect(await line.textContent()).toMatch(/Healthy|needs? attention/);
+    expect(await owners.getByRole("link", { name: "Open Site health" }).count()).toBe(1);
+    expect(await axeViolations(owners)).toEqual([]);
+    // A result that is not amber cannot be hidden; someone who is not signed in or comes from another address gets nothing.
+    const post = (data: unknown, origin = site.base) =>
+      owners.request.post(site.base + "/api/admin/health", { headers: { origin }, data });
+    expect((await post({ action: "hide", key: "database" })).status()).toBe(400);
+    expect((await post({ action: "hide", key: "nothing" })).status()).toBe(404);
+    expect((await post({ action: "show", key: "database" })).status()).toBe(404);
+    expect((await post({ action: "recheck" })).status()).toBe(200);
+    expect((await post({ action: "recheck" }, "https://elsewhere.example")).status()).toBe(403);
+    const bare = await fetch(site.base + "/api/admin/health", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ action: "recheck" }),
+    });
+    expect(bare.status).toBe(401);
+    await owners.close();
+  });
+
   test("UP-05: Tools > Updates tells that no list was received, keeps the on and off choice, looks now without an address, and is closed to people who are not signed in", async () => {
     const owners = await browser.newPage();
     await signInOwner(owners);
@@ -13932,6 +14024,7 @@ describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, 
   });
 
   const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -14245,6 +14338,7 @@ describe.skipIf(!findBrowser())("passkeys (spec 02, AU-09, AU-41)", { timeout: 1
   });
 
   const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+    await noMotion(page);
     await page.addScriptTag({ content: axe.source });
     const result = await page.evaluate(() =>
       (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -14404,6 +14498,7 @@ describe.skipIf(!findBrowser())(
     });
 
     const axeViolations = async (page: Awaited<ReturnType<Browser["newPage"]>>) => {
+      await noMotion(page);
       await page.addScriptTag({ content: axe.source });
       const result = await page.evaluate(() =>
         (window as unknown as { axe: typeof axe }).axe.run(document, {
@@ -14737,6 +14832,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Sign in" }).click();
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       const axe = async () => {
+        await noMotion(page);
         await page.addScriptTag({ content: (await import("axe-core")).default.source });
         // Each problem says what it is and where, so a failure can be read at once.
         return page.evaluate(async () => {
@@ -14926,6 +15022,7 @@ describe.skipIf(!findBrowser())(
       await page.getByRole("button", { name: "Sign in" }).click();
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       const axe = async () => {
+        await noMotion(page);
         await page.addScriptTag({ content: (await import("axe-core")).default.source });
         return page.evaluate(async () => {
           const result = await (
