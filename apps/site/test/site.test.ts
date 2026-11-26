@@ -50,6 +50,15 @@ import { buildExport, buildSite, findBrowser, seed, siteDir, startSite } from ".
 
 /** Animations and transitions are switched off while axe measures colours: a slow machine can still be mid-fade. */
 const NO_MOTION = "*,*::before,*::after{transition:none!important;animation:none!important}";
+/** A click before the page's scripts have taken over is lost (the page is only HTML until then): wait for React to attach to a button or option. */
+async function interactive(page: Awaited<ReturnType<Browser["newPage"]>>): Promise<void> {
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("button, [role=option]")].some((el) =>
+      Object.keys(el).some((k) => k.startsWith("__reactProps$")),
+    ),
+  );
+}
+
 async function noMotion(page: Awaited<ReturnType<Browser["newPage"]>>): Promise<void> {
   // A constructed style sheet: an inline <style> would be refused by the public pages' content security policy.
   await page.evaluate((css) => {
@@ -2969,6 +2978,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
   const openLibrary = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
     await page.goto(site.base + "/admin/media");
     await page.getByRole("heading", { name: "Media", level: 1 }).waitFor();
+    await interactive(page);
   };
   const violations = async (page: Awaited<ReturnType<typeof ownerPage>>) => {
     await noMotion(page);
