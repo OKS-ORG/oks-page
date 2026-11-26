@@ -13,13 +13,27 @@ const V2 = "/sys/fs/cgroup";
 // processes, never inside the leaf: a leaf has no controller for its own children.
 let v2Base = "";
 
+// Why the last detection found no way to cap memory, in words, so that a machine that cannot do it says so in the test log.
+let reason = "";
+export function memoryLimitReason(): string {
+  return reason;
+}
+
 export function detectMemoryLimit(): MemoryLimitSupport {
-  if (process.platform !== "linux" || (process.getuid?.() ?? 1) !== 0) return "none";
+  if (process.platform !== "linux") {
+    reason = `the platform is ${process.platform}, not linux`;
+    return "none";
+  }
+  if ((process.getuid?.() ?? 1) !== 0) {
+    reason = "the process is not root";
+    return "none";
+  }
   try {
     if (existsSync(join(V2, "cgroup.controllers"))) return v2Ready() ? "cgroup-v2" : "none";
     if (existsSync(join(V1, "cgroup.procs")) && writable(V1)) return "cgroup-v1";
-  } catch {
-    /* fall through */
+    reason = "no writable cgroup v1 memory folder and no cgroup v2 controllers file";
+  } catch (error) {
+    reason = `detection failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   return "none";
 }
@@ -46,8 +60,11 @@ function v2Ready(): boolean {
         .find((l) => l.startsWith("0::"))
         ?.slice(3) ?? "/";
     const base = join(V2, own);
-    if (!readFileSync(join(base, "cgroup.controllers"), "utf8").split(/\s+/).includes("memory"))
+    const controllers = readFileSync(join(base, "cgroup.controllers"), "utf8").trim();
+    if (!controllers.split(/\s+/).includes("memory")) {
+      reason = `cgroup v2: the group ${base} offers the controllers "${controllers}", without memory`;
       return false;
+    }
     const holder = join(base, "oks-host");
     mkdirSync(holder, { recursive: true });
     // A group that hands out a controller may hold no processes itself: move every process in it (this one, the shell
@@ -64,7 +81,8 @@ function v2Ready(): boolean {
     writeFileSync(join(base, "cgroup.subtree_control"), "+memory");
     v2Base = base;
     return true;
-  } catch {
+  } catch (error) {
+    reason = `cgroup v2: setting up the group failed: ${error instanceof Error ? error.message : String(error)}`;
     return false;
   }
 }

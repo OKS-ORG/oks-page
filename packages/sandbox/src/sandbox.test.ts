@@ -9,6 +9,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { memoryLimitReason } from "./cgroup.js";
 import { SandboxHost } from "./host.js";
 import { developerMessage, ownerSentence, permissionWords } from "./permission-text.js";
 import { isBlockedAddress } from "./safe-fetch.js";
@@ -219,7 +220,7 @@ for (const { kind, open, skip } of openers) {
     )(
       "PL-10 a memory hog is killed by the memory cap (128 MB) and counted as a failure",
       async () => {
-        expect(host.memoryLimit).not.toBe("none");
+        expect(host.memoryLimit, `no memory cap here: ${memoryLimitReason()}`).not.toBe("none");
         const started = Date.now();
         const r = await hook("hog", "content:beforeSave", entry({ title: "HOG" }));
         console.log(

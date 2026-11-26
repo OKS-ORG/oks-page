@@ -59,6 +59,49 @@ async function interactive(page: Awaited<ReturnType<Browser["newPage"]>>): Promi
   );
 }
 
+type TestPage = Awaited<ReturnType<Browser["newPage"]>>;
+
+/**
+ * After a page goes to an admin address it waits, up to 10 seconds and without failing, until React has taken over the page: a click
+ * made before that is lost on a slow machine (the page is only HTML until then). Public pages are not touched.
+ */
+function settleAfterGoto(page: TestPage): TestPage {
+  const goto = page.goto.bind(page);
+  page.goto = (async (url: string, options?: Parameters<TestPage["goto"]>[1]) => {
+    const response = await goto(url, options);
+    if (new URL(page.url()).pathname.startsWith("/admin"))
+      await page
+        .waitForFunction(
+          () =>
+            [...document.querySelectorAll("button, input, a, [role=option]")].some((el) =>
+              Object.keys(el).some((k) => k.startsWith("__reactProps$")),
+            ),
+          undefined,
+          { timeout: 10_000 },
+        )
+        .catch(() => undefined);
+    return response;
+  }) as TestPage["goto"];
+  return page;
+}
+
+/** The test browser: every page and every page of every context it makes follows the rule above. */
+async function launchBrowser(): Promise<Browser> {
+  const browser = await chromium.launch({ executablePath: findBrowser()! });
+  const newPage = browser.newPage.bind(browser);
+  browser.newPage = (async (...args: Parameters<Browser["newPage"]>) =>
+    settleAfterGoto(await newPage(...args))) as Browser["newPage"];
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = (async (...args: Parameters<Browser["newContext"]>) => {
+    const context = await newContext(...args);
+    const contextPage = context.newPage.bind(context);
+    context.newPage = (async () =>
+      settleAfterGoto(await contextPage())) as BrowserContext["newPage"];
+    return context;
+  }) as Browser["newContext"];
+  return browser;
+}
+
 async function noMotion(page: Awaited<ReturnType<Browser["newPage"]>>): Promise<void> {
   // A constructed style sheet: an inline <style> would be refused by the public pages' content security policy.
   await page.evaluate((css) => {
@@ -758,7 +801,7 @@ for (const { kind, skip } of openers) {
         });
         await new Promise<void>((r) => files.listen(0, "127.0.0.1", r));
         const staticBase = `http://127.0.0.1:${(files.address() as { port: number }).port}`;
-        const browser = await chromium.launch({ executablePath: findBrowser()! });
+        const browser = await launchBrowser();
         try {
           for (const width of [375, 768, 1280]) {
             const page = await browser.newPage({ viewport: { width, height: 800 } });
@@ -798,7 +841,7 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
   beforeAll(async () => {
     db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-wizard-")), "site.sqlite"));
     site = await startSite("sqlite", db, { OKS_SECRET: "s".repeat(40) });
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 600_000);
 
   afterAll(async () => {
@@ -976,7 +1019,7 @@ describe.skipIf(!findBrowser())("the admin sign-in and the dashboard", () => {
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -1128,7 +1171,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -2646,7 +2689,7 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
     const signIn = async (who: typeof owner) => {
       const page = await browser.newPage();
       await page.goto(site.base + "/admin/login");
@@ -3422,7 +3465,7 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -3613,7 +3656,7 @@ describe.skipIf(!findBrowser())("maintenance mode", { timeout: 120_000 }, () => 
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -3745,7 +3788,7 @@ describe.skipIf(!findBrowser())("sitemap and robots.txt", { timeout: 120_000 }, 
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -4051,7 +4094,7 @@ describe.skipIf(!findBrowser())("previews", { timeout: 120_000 }, () => {
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -4329,7 +4372,7 @@ describe.skipIf(!findBrowser())("general settings and the time zone", { timeout:
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -4562,7 +4605,7 @@ describe.skipIf(!findBrowser())(
         // The pictures the owner uploads go to a temporary folder, never into the project.
         OKS_UPLOADS_DIR: mkdtempSync(join(tmpdir(), "oks-journey-uploads-")),
       });
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
       page = await browser.newPage();
     }, 600_000);
 
@@ -5749,7 +5792,7 @@ describe.skipIf(!findBrowser())(
         "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
         [siteId, caraId, role, new Date()],
       );
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
     }, 300_000);
 
     afterAll(async () => {
@@ -11539,7 +11582,7 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
       "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
       [siteId, caraId, role, new Date()],
     );
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -12395,7 +12438,7 @@ describe.skipIf(!findBrowser())("reading and language settings", { timeout: 150_
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -12580,7 +12623,7 @@ describe.skipIf(!findBrowser())(
         }),
       });
       expect(made.status).toBe(200);
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
     }, 300_000);
 
     afterAll(async () => {
@@ -12759,7 +12802,7 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -13970,7 +14013,8 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(await owners.locator("[data-update-banner]").count()).toBe(0);
     await owners.goto(site.base + "/admin/tools/updates");
     await owners.getByRole("heading", { name: "Updates", level: 1 }).waitFor();
-    // The menu has the entry once.
+    // The menu has the entry once (it appears a moment after the page).
+    await owners.getByRole("link", { name: "Updates", exact: true }).waitFor();
     expect(await owners.getByRole("link", { name: "Updates", exact: true }).count()).toBe(1);
     const box = owners.getByLabel(/Look for updates and security warnings once a day/);
     expect(await box.isChecked()).toBe(true);
@@ -14024,7 +14068,7 @@ describe.skipIf(!findBrowser())("site search statistics", { timeout: 150_000 }, 
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -14230,7 +14274,7 @@ describe.skipIf(!findBrowser() || !s3Test)(
         }),
       });
       expect(made.status).toBe(200);
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
     }, 300_000);
 
     afterAll(async () => {
@@ -14338,7 +14382,7 @@ describe.skipIf(!findBrowser())("passkeys (spec 02, AU-09, AU-41)", { timeout: 1
       }),
     });
     expect(made.status).toBe(200);
-    browser = await chromium.launch({ executablePath: findBrowser()! });
+    browser = await launchBrowser();
   }, 300_000);
 
   afterAll(async () => {
@@ -14498,7 +14542,7 @@ describe.skipIf(!findBrowser())(
         }),
       });
       expect(made.status).toBe(200);
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
     }, 300_000);
 
     afterAll(async () => {
@@ -14825,7 +14869,7 @@ describe.skipIf(!findBrowser())(
         body: JSON.stringify({ siteName: "Weber Garden", admin: { name: "Anna", ...owner } }),
       });
       expect(made.status).toBe(200);
-      browser = await chromium.launch({ executablePath: findBrowser()! });
+      browser = await launchBrowser();
     }, 300_000);
 
     afterAll(async () => {
