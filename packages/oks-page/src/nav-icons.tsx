@@ -26,8 +26,7 @@ const PATHS: Record<string, string> = {
     "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   agency: "M4 8h16v11H4zM9 8V5h6v3M4 13h16",
   "privacy-requests": "M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z",
-  settings:
-    "M4 7h10 M18 7h2 M4 17h2 M10 17h10 M14 5v4 M6 15v4",
+  settings: "M4 7h10 M18 7h2 M4 17h2 M10 17h10 M14 5v4 M6 15v4",
 };
 
 /** The icon of a menu entry, or undefined (the menu then shows the first letter). */

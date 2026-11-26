@@ -49,7 +49,15 @@
   --adm-cap: #46506b;
   --adm-shadow: 0 1px 2px rgba(20, 30, 80, 0.05), 0 6px 18px rgba(20, 30, 80, 0.05);
   --adm-glass: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.32));
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color: var(--adm-ink);
@@ -464,7 +472,14 @@ main nav ul li a[aria-current="page"] {
 }
 
 /* ---- controls ---- */
-main input:not([class]):not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]),
+main
+  input:not([class]):not(
+    [type="checkbox"],
+    [type="radio"],
+    [type="file"],
+    [type="range"],
+    [type="color"]
+  ),
 main select:not([class]),
 main textarea:not([class]) {
   font: inherit;
