@@ -289,8 +289,8 @@ body:has(.oks-admin) {
 .oks-shell-body > main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 28px;
+  gap: 24px;
+  padding: 32px;
 }
 .oks-shell-body > main > * {
   margin-block: 0;
@@ -396,11 +396,11 @@ main [role="note"] {
   border: 1px solid var(--adm-line);
   border-radius: 10px;
   box-shadow: var(--adm-shadow);
-  padding: 20px 24px;
+  padding: 24px 28px;
 }
 .oks-shell-body > main > form > * + *,
 .oks-shell-body > main > section > * + * {
-  margin-top: 14px;
+  margin-top: 20px;
 }
 .oks-shell-body > main > section > table {
   margin-inline: -24px;
@@ -717,9 +717,9 @@ main li[data-health][data-level="grey"] {
 /* ---- pages without the frame (sign in, setup, password reset, invitation, restore): the logo, then one glass card ---- */
 .oks-admin > main {
   position: relative;
-  width: min(100% - 32px, 540px);
+  width: min(100% - 32px, 640px);
   margin: clamp(96px, 16vh, 150px) auto 48px;
-  padding: 28px 32px;
+  padding: 36px 40px;
   background: rgba(255, 255, 255, 0.8);
   -webkit-backdrop-filter: blur(26px) saturate(165%);
   backdrop-filter: blur(26px) saturate(165%);
@@ -758,11 +758,12 @@ main li[data-health][data-level="grey"] {
   font-weight: 600;
   letter-spacing: -0.3px;
   line-height: 1.25;
+  margin-bottom: 8px;
 }
 .oks-admin > main form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 22px;
 }
 .oks-admin > main .oksTextField,
 .oks-admin > main .oksTextArea {
@@ -784,4 +785,135 @@ main li[data-health][data-level="grey"] {
   .oks-admin > main::before {
     top: 36px;
   }
+}
+
+/* ================= spacing: one rhythm for every screen (4, 8, 12, 16, 20, 24, 32) =================
+   A label sits 8 px above its field; fields are 20 px apart; a help text is 6 px under its field and then clear of the next
+   one; a group of choices is spaced both ways; a section is 24 px from the next; a button is 24 px from the last field. */
+.oks-admin
+  :is(
+    .oksTextField,
+    .oksTextArea,
+    .oksSelectField,
+    .oksRadioGroupField,
+    .oksCheckboxGroupField,
+    .oksSwitchField,
+    .oksFileField
+  ) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+.oks-admin
+  :is(
+    .oksTextField,
+    .oksTextArea,
+    .oksSelectField,
+    .oksRadioGroupField,
+    .oksCheckboxGroupField,
+    .oksSwitchField,
+    .oksFileField
+  ):first-child {
+  margin-top: 0;
+}
+.oks-admin
+  :is(
+    .oksTextFieldDescription,
+    .oksSelectFieldDescription,
+    .oksRadioGroupFieldDescription,
+    .oksCheckboxGroupFieldDescription,
+    .oksSwitchFieldDescription
+  ) {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--adm-muted);
+}
+/* The choices of a radio or checkbox group: side by side with room, and wrapping to the next line with room. */
+.oks-admin :is(.oksRadioGroupFieldControl, .oksCheckboxGroupFieldControl) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding-top: 4px;
+}
+/* The wizard (a stepped form): the steps on top, air under them, the buttons apart from the fields. */
+.oks-admin .oksSteppedFormHeader {
+  margin-bottom: 28px;
+}
+.oks-admin .oksSteppedFormContent {
+  display: flex;
+  flex-direction: column;
+}
+.oks-admin .oksSteppedFormActions,
+.oks-admin .oksSteppedFormFooter {
+  margin-top: 32px;
+}
+
+/* Plain pairs of a label and a control (a label, a line break and a select) become a block with a gap. */
+main form > div:not([class]),
+main form > p:not([class]) {
+  margin-top: 20px;
+}
+main form > div:not([class]):first-child {
+  margin-top: 0;
+}
+main form div:not([class]) > br {
+  display: none;
+}
+main form div:not([class]) > label {
+  display: block;
+  margin-bottom: 8px;
+}
+main fieldset {
+  margin-top: 20px;
+}
+main fieldset:first-child {
+  margin-top: 0;
+}
+main legend {
+  margin-bottom: 10px;
+}
+main fieldset label {
+  padding: 4px 0;
+}
+/* Help text under a field (a small paragraph in a form) keeps clear of what follows. */
+main form p {
+  margin-top: 8px;
+}
+main form p + :is(div, fieldset, label, p, h2, h3) {
+  margin-top: 20px;
+}
+/* The button that ends a form: 24 px from the last field. */
+main form > .oksButton,
+main form > button,
+main form > div > .oksButton:only-child {
+  margin-top: 24px;
+}
+main > section > h2 + p,
+main > form > h2 + p {
+  margin-top: 6px;
+}
+main > section > h2,
+main > form > h2 {
+  margin-bottom: 4px;
+}
+main h2:not(:first-child) {
+  margin-top: 12px;
+}
+
+/* The line under the title (who is signed in) belongs to the title: it sits close under it. */
+.oks-shell-body > main > h1 + p {
+  margin-top: -14px;
+}
+/* Small controls side by side (a label and a select, then another): a row with room, wrapping when it must. */
+main form > div:not([class]):not(:has(> br)):has(> select, > input) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+main form > div:not([class]):not(:has(> br)) > label {
+  display: inline-block;
+  margin-bottom: 0;
 }
