@@ -71,6 +71,12 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
     needs: ["settings.manage"],
   },
   {
+    key: "updates",
+    label: "Updates",
+    href: "/admin/tools/updates",
+    needs: ["settings.manage"],
+  },
+  {
     key: "connector",
     label: "Connection",
     href: "/admin/tools/connector",

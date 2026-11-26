@@ -11,8 +11,11 @@ import {
   purgeTrash,
   queueEmail,
   runDailyBackup,
+  loadUpdateState,
   runKeeping,
+  runUpdateCheck,
   sendBackupFailedEmails,
+  updateCheckDue,
   runDailyDomainCheck,
   type MayPublish,
 } from "@oks-page/core";
@@ -24,6 +27,7 @@ import { purgePendingFiles } from "./plugin-files";
 import { purgePrivacyRequests, sendPrivacyReminders } from "./privacy-visitor";
 import { runPluginJobs } from "./plugin-jobs";
 import { pluginHost } from "./plugin-runtime";
+import { updateUrl, userAgent } from "./updates-context";
 
 const SECOND = 1000;
 const PURGE_EVERY = 60 * 60 * SECOND;
@@ -83,6 +87,28 @@ async function backupUpkeep(now: () => number): Promise<void> {
   }
 }
 
+/** Once a day (spec 14, section 4): the site looks at the list of updates. The timer asks every 10 minutes whether a look is due. */
+let lastUpdateLook = 0;
+let lookingForUpdates = false;
+async function updateUpkeep(now: () => number): Promise<void> {
+  const url = updateUrl();
+  if (!url || lookingForUpdates || now() - lastUpdateLook < 10 * 60 * SECOND) return;
+  lastUpdateLook = now();
+  lookingForUpdates = true;
+  try {
+    const runner = getRunner();
+    const siteId = await getSiteId();
+    if (updateCheckDue(await loadUpdateState(runner, siteId), now()))
+      await runUpdateCheck(runner, siteId, { url, now, userAgent: userAgent() });
+  } catch (error) {
+    // A site that is not set up yet has nothing to check.
+    if (!(error instanceof Error && /has no site yet/.test(error.message)))
+      console.error("[oks] The update check could not run:", error);
+  } finally {
+    lookingForUpdates = false;
+  }
+}
+
 let lastPurge = 0;
 let lastKeeping = 0;
 let lastEmailUpkeep = 0;
@@ -128,6 +154,7 @@ export async function runScheduledWork(now: () => number = Date.now): Promise<vo
   );
   // The daily backup. It runs apart from the rest of this round, so a long backup never holds the round up.
   void backupUpkeep(now);
+  void updateUpkeep(now);
   const result = await publishDue(getRunner(), mayPublish, now);
   for (const entry of [...result.published, ...result.blocked, ...result.held])
     await expireTags(entry.siteId, entry.id, entry.slug);

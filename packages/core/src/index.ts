@@ -14,6 +14,7 @@ export * from "./security.js";
 export * from "./style-reports.js";
 export * from "./licence.js";
 export * from "./update-list.js";
+export * from "./updates.js";
 export * from "./taxonomies.js";
 export * from "./entry-terms.js";
 export * from "./menus.js";

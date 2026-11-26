@@ -49,4 +49,4 @@ git push --force-with-lease
 - Keep it small and about one thing.
 - Run the checks before you push: `pnpm lint`, `pnpm format`, `pnpm typecheck`, `pnpm test` and `pnpm check:repo`.
 - Say in the description what changed and why, in plain words, and what you did not test.
-- Be kind. We follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+- Be kind. Our [code of conduct](CODE_OF_CONDUCT.md) is adapted from the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).

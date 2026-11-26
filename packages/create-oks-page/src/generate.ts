@@ -312,6 +312,14 @@ export function projectFiles(options: InstallOptions, secret: string): ProjectFi
       content: `export { GET } from ${from("api-backup-file")};\n`,
     },
     {
+      path: "app/admin/tools/updates/page.tsx",
+      content: `export { default, metadata } from ${from("tools-updates-page")};\n`,
+    },
+    {
+      path: "app/api/admin/updates/route.ts",
+      content: `export { POST } from ${from("api-updates")};\n`,
+    },
+    {
       path: "app/admin/tools/connector/page.tsx",
       content: `export { default, metadata } from ${from("tools-connector-page")};\n`,
     },

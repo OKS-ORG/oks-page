@@ -37,6 +37,7 @@ Updating the software from the admin (today you update the packages and rebuild)
 - A problem or a question: open an issue.
 - A security problem: please report it in private, as [SECURITY.md](SECURITY.md) says. Do not open a public issue.
 - A change: read [CONTRIBUTING.md](CONTRIBUTING.md). Every commit needs a `Signed-off-by` line.
+- How we treat each other: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Licence
 

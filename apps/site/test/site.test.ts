@@ -8643,7 +8643,9 @@ describe.skipIf(!findBrowser())(
           .getByRole("button", { name: "Mark as read" })
           .click();
         await page.getByText("Done: Mark as read.").waitFor();
-        expect(await rows.filter({ hasText: "Hello from Anna" }).count()).toBe(0);
+        await expect
+          .poll(async () => await rows.filter({ hasText: "Hello from Anna" }).count())
+          .toBe(0);
         await page.getByRole("button", { name: "Read", exact: true }).click();
         await page.getByRole("row", { name: /Hello from Anna/ }).waitFor();
         await page.getByRole("button", { name: "Spam" }).click();
@@ -13850,6 +13852,46 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
         timeout: 15_000,
       })
       .toBe(0);
+    await owners.close();
+  });
+
+  test("UP-05: Tools > Updates tells that no list was received, keeps the on and off choice, looks now without an address, and is closed to people who are not signed in", async () => {
+    const owners = await browser.newPage();
+    await signInOwner(owners);
+    await owners.goto(site.base + "/admin/tools/updates");
+    await owners.getByRole("heading", { name: "Updates", level: 1 }).waitFor();
+    await owners.getByText("No list of updates has been received yet.", { exact: false }).waitFor();
+    // The menu has the entry once.
+    expect(await owners.getByRole("link", { name: "Updates", exact: true }).count()).toBe(1);
+    const box = owners.getByLabel(/Look for updates and security warnings once a day/);
+    expect(await box.isChecked()).toBe(true);
+    // No address is set on this site: looking now says so and fetches nothing.
+    await owners.getByRole("button", { name: "Look now" }).click();
+    await owners.getByText("This site has no address to look at yet", { exact: false }).waitFor();
+    expect(await axeViolations(owners)).toEqual([]);
+    // Off: kept after a reload, the button is disabled and the banner says so.
+    await box.uncheck();
+    await owners.getByText("Update checks are off.", { exact: true }).waitFor();
+    await owners.reload();
+    expect(
+      await owners.getByLabel(/Look for updates and security warnings once a day/).isChecked(),
+    ).toBe(false);
+    expect(await owners.getByRole("button", { name: "Look now" }).isDisabled()).toBe(true);
+    expect(await axeViolations(owners)).toEqual([]);
+    await owners.getByLabel(/Look for updates and security warnings once a day/).check();
+    await owners.getByText("Update checks are on.", { exact: true }).waitFor();
+    // Someone who is not signed in gets nothing, and a request from another address is refused.
+    const bare = await fetch(site.base + "/api/admin/updates", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ action: "check" }),
+    });
+    expect(bare.status).toBe(401);
+    const foreign = await owners.request.post(site.base + "/api/admin/updates", {
+      headers: { origin: "https://elsewhere.example" },
+      data: { action: "check" },
+    });
+    expect(foreign.status()).toBe(403);
     await owners.close();
   });
 });
