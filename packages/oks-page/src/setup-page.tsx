@@ -12,11 +12,13 @@ export default async function SetupPage() {
   const done = await isSetupDone(getRunner());
   return (
     <main>
-      <h1>Set up your site</h1>
       {done ? (
-        <p>
-          This site is already set up. <a href="/">View the site</a>.
-        </p>
+        <>
+          <h1>Set up your site</h1>
+          <p>
+            This site is already set up. <a href="/">View the site</a>.
+          </p>
+        </>
       ) : (
         <SetupWizard />
       )}

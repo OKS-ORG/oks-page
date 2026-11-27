@@ -8,6 +8,7 @@ const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
 const io: Io = {
   interactive,
+  color: interactive && !process.env["NO_COLOR"],
   out: (text) => console.log(text),
   ask: async (question) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });

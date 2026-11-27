@@ -75,13 +75,13 @@ describe.skipIf(!findBrowser())("a site made by the installer", () => {
     const page = await browser.newPage();
     await page.goto(base + "/admin/setup");
     await page.getByLabel("Site name").fill("Made by the installer");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Your name").fill("Anna");
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("a-long-password");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Finish setup" }).click();
-    await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
+    await page.getByRole("heading", { name: "Your site is ready" }).waitFor();
 
     for (const [path, text] of [
       ["/", "This is your home page"],

@@ -1338,3 +1338,269 @@ main .oks-list-tabs > a[aria-current="page"] {
   font-size: 15px;
   padding: 0 12px;
 }
+
+/* ---- The setup wizard (step 5): a bar of steps, a kicker, the title and its line, choice cards, and Back and Continue at the foot. ---- */
+.oks-admin > main .oks-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.oks-admin > main .oks-wizard > * {
+  margin: 0;
+}
+.oks-wizard-bar {
+  display: flex;
+  gap: 8px;
+}
+.oks-wizard-bar > span {
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--adm-line);
+}
+.oks-wizard-bar > span[data-on="true"] {
+  background: var(--adm-a1);
+}
+.oks-wizard-kicker {
+  color: var(--adm-on-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.oks-admin > main .oks-wizard h1 {
+  margin: -18px 0 0;
+  font-family: var(--adm-font-heading);
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: var(--adm-heading-weight);
+  letter-spacing: -0.01em;
+}
+.oks-wizard-line {
+  margin-top: -18px;
+  color: var(--adm-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.oks-choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.oks-choices > legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.oks-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.oks-choice-grid[data-columns="4"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 560px) {
+  .oks-choice-grid[data-columns="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .oks-choice-grid[data-columns="2"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.oks-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 16px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  cursor: pointer;
+}
+.oks-choice:hover {
+  background: var(--adm-row-hover);
+}
+.oks-choice[data-checked="true"] {
+  padding: 15px;
+  border: 2px solid var(--adm-a1);
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+}
+.oks-choice:has(input:focus-visible) {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: 2px;
+}
+/* The real radio button stays for the keyboard and screen readers; the card is what is seen. */
+.oks-choice > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.oks-choice > svg {
+  margin-bottom: 12px;
+}
+.oks-choice-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+.oks-choice-note,
+.oks-choice-help {
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.oks-choice[data-checked="true"] .oks-choice-note,
+.oks-choice[data-checked="true"] .oks-choice-help {
+  color: inherit;
+}
+.oks-choice-help {
+  margin-top: 8px;
+}
+.oks-strength {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.oks-strength > span {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--adm-line);
+}
+.oks-strength[data-level="1"] > span:nth-child(-n + 1) {
+  background: var(--adm-err-fg);
+}
+.oks-strength[data-level="2"] > span:nth-child(-n + 2) {
+  background: var(--adm-warn-fg);
+}
+.oks-strength[data-level="3"] > span:nth-child(-n + 3),
+.oks-strength[data-level="4"] > span:nth-child(-n + 4) {
+  background: var(--adm-ok-fg);
+}
+.oks-strength-word {
+  margin-top: 6px;
+  min-height: 18px;
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.oks-wizard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--adm-line);
+}
+.oks-text-button,
+.oks-main-button {
+  box-sizing: border-box;
+  border: 0;
+  border-radius: var(--adm-radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.oks-text-button {
+  min-height: 40px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--adm-link);
+  font-size: 14px;
+}
+.oks-text-button:hover {
+  background: var(--adm-row-hover);
+}
+.oks-main-button {
+  min-height: 44px;
+  padding: 0 24px;
+  background: var(--adm-a1);
+  color: var(--adm-on-accent);
+  font-size: 15px;
+}
+.oks-main-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.oks-main-button:disabled {
+  background: var(--adm-line);
+  color: var(--adm-muted);
+  cursor: default;
+}
+.oks-text-button:focus-visible,
+.oks-main-button:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: 2px;
+}
+.oks-next-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.oks-next-rows a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  text-decoration: none;
+}
+.oks-next-rows a:hover {
+  background: var(--adm-row-hover);
+}
+.oks-next-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.oks-next-note {
+  color: var(--adm-muted);
+  font-size: 12px;
+}
+.oks-wizard-privacy {
+  color: var(--adm-ok-fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* The cards read from the left; the fields of a step are 20 px apart; a group whose question is already the title has no second label. */
+.oks-choice {
+  align-items: flex-start;
+  text-align: start;
+}
+.oks-admin .oks-wizard form {
+  gap: 20px;
+}
+.oks-admin .oks-wizard form > * {
+  margin-top: 0;
+}
+.oks-choices-quiet > legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* The logo above the entry card turns light when the system asks for dark and the person has not chosen light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .oks-admin > main::before {
+    filter: invert(1) hue-rotate(180deg) brightness(1.1);
+  }
+}

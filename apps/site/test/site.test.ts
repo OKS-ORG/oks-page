@@ -859,19 +859,19 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
   test("the wizard has no accessibility violations on its three steps", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 800 } });
     await page.goto(site.base + "/admin/setup");
-    await page.getByRole("heading", { name: "Set up your site", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Tell us about your site", level: 1 }).waitFor();
     for (const step of ["first", "second", "third"]) {
       if (step === "second") {
         await page.getByLabel("Site name").fill("My Site");
-        await page.getByRole("button", { name: "Next" }).click();
+        await page.getByRole("button", { name: "Continue" }).click();
         await page.getByLabel("Your name").waitFor();
       }
       if (step === "third") {
         await page.getByLabel("Your name").fill("Anna");
         await page.getByLabel("Email").fill("anna@example.com");
         await page.getByLabel(/^Password/).fill("a-long-password");
-        await page.getByRole("button", { name: "Next" }).click();
-        await page.getByText("Add sample content?").waitFor();
+        await page.getByRole("button", { name: "Continue" }).click();
+        await page.getByText("Add some starter content?").waitFor();
       }
       await noMotion(page);
       await page.addScriptTag({ content: axe.source });
@@ -894,11 +894,11 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     const page = await browser.newPage();
     await page.goto(site.base + "/admin/setup");
     await page.getByLabel("Site name").fill("My Site");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Your name").fill("Anna");
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("short");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Finish setup" }).click();
     await page
       .getByText(/at least 10 characters/i)
@@ -916,13 +916,13 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.goto(site.base + "/admin/setup");
     await page.getByLabel("Site name").fill("Anna's Garden");
     await page.getByLabel("Tagline").fill("Plants and notes");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Your name").fill("Anna");
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("a-long-password");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Finish setup" }).click();
-    await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
+    await page.getByRole("heading", { name: "Your site is ready" }).waitFor();
     expect(await page.getByText("signed in as anna@example.com").count()).toBe(1);
     // Two-factor is recommended here, and can be skipped (it never blocks the owner).
     await page.getByText("Recommended:").waitFor();
@@ -4676,13 +4676,13 @@ describe.skipIf(!findBrowser())(
       await page.waitForURL("**/admin/setup");
       await page.getByLabel("Site name").fill("Maple Street Bakery");
       await page.getByLabel("Tagline").fill("Bread, baked slowly");
-      await page.getByRole("button", { name: "Next" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByLabel("Your name").fill("Mira");
       await page.getByLabel("Email").fill(owner.email);
       await page.getByLabel(/^Password/).fill(owner.password);
-      await page.getByRole("button", { name: "Next" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Finish setup" }).click();
-      await page.getByRole("heading", { name: "Your site is set up" }).waitFor();
+      await page.getByRole("heading", { name: "Your site is ready" }).waitFor();
       await page.getByRole("link", { name: "Skip for now: open the dashboard" }).click();
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       await page.getByText("Maple Street Bakery").first().waitFor();

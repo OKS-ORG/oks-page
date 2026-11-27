@@ -223,6 +223,14 @@ describe("the command", () => {
     expect(t.ran).toEqual([["pnpm", "install"]]);
     expect(existsSync(join(base, "site", "package.json"))).toBe(true);
     expect(t.out.join("\n")).toContain("http://localhost:3000/admin/setup");
+    // The words of the design: a title, what was chosen, a tick for each thing done, then what to do next.
+    const said = t.out.join("\n");
+    expect(said).toContain("create a new site");
+    expect(said).toContain("◇ Database        SQLite");
+    expect(said).toContain("✓ Wrote .env with a new secret key");
+    expect(said).toContain("✓ Installed everything with pnpm");
+    expect(said).toContain("Next:\n   cd ");
+    expect(said).not.toContain("\x1b[");
   });
 
   test("--no-install writes the files and tells the person to install", async () => {

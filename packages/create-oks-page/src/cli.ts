@@ -24,6 +24,8 @@ export interface Io {
   /** Asks one question; resolves to the answer, or "" when the person only pressed Enter. */
   ask(question: string): Promise<string>;
   interactive: boolean;
+  /** Draw the words in colour (a terminal that shows it, and NO_COLOR not set). */
+  color?: boolean;
   /** Runs the install command; returns true when it succeeded. */
   run(command: string, args: string[], cwd: string): boolean;
 }
@@ -58,6 +60,26 @@ export async function main(argv: string[], io: Io, userAgent?: string): Promise<
     io.out(`${error.message}\n\n${USAGE}`);
     return 2;
   }
+  // The words of the design: a title, what was chosen, then a tick for each thing done, then what to do next.
+  const paint = (code: string, text: string) => (io.color ? `\x1b[${code}m${text}\x1b[0m` : text);
+  const dim = (text: string) => paint("90", text);
+  const bold = (text: string) => paint("1", text);
+  const ok = (text: string) => paint("32", `✓ ${text}`);
+  const choice = (label: string, value: string) => dim(`◇ ${label.padEnd(15)} ${value}`);
+  io.out(
+    [
+      "",
+      bold(`${PRODUCT}  ·  create a new site`),
+      "",
+      choice("Folder", options.dir),
+      choice("Database", options.database === "postgres" ? "PostgreSQL" : "SQLite"),
+      choice("Media storage", "This computer (./uploads)"),
+      ...(io.interactive
+        ? ["", dim("Tip: every question has a flag, for example --db sqlite --yes")]
+        : []),
+      "",
+    ].join("\n"),
+  );
   let made: { dir: string; files: string[] };
   try {
     made = generateProject(options);
@@ -66,19 +88,21 @@ export async function main(argv: string[], io: Io, userAgent?: string): Promise<
     io.out(error.message);
     return 1;
   }
-  io.out(`Created ${made.dir} (${made.files.length} files, with a new secret key in .env).`);
+  io.out(ok(`Created ${made.dir} (${made.files.length} files)`));
+  io.out(ok("Wrote .env with a new secret key"));
   if (options.install) {
-    io.out(`Installing dependencies with ${options.packageManager}…`);
+    io.out(dim(`Installing everything with ${options.packageManager}…`));
     if (!io.run(options.packageManager, ["install"], made.dir)) {
       io.out(
         `The install did not finish. Run "${options.packageManager} install" in ${made.dir} when you can.`,
       );
       return 1;
     }
+    io.out(ok(`Installed everything with ${options.packageManager}`));
   }
   const run = options.packageManager === "npm" ? "npm run dev" : `${options.packageManager} dev`;
   io.out(
-    `\nNext:\n  cd ${options.dir}\n${options.install ? "" : `  ${options.packageManager} install\n`}  ${run}\nThen open http://localhost:3000/admin/setup to finish the setup.`,
+    `\n${bold("Next:")}\n   cd ${options.dir}\n${options.install ? "" : `   ${options.packageManager} install\n`}   ${run}\n\nThen open http://localhost:3000/admin/setup to finish the setup.`,
   );
   return 0;
 }
