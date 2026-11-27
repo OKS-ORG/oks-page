@@ -1797,3 +1797,128 @@ main .oks-list-tabs > a[aria-current="page"] {
 :root:root .oks-admin[data-mode="dark"] > main::before {
   filter: invert(1) hue-rotate(180deg) brightness(1.1);
 }
+
+/* ---- Step 8, the lists: Users, Comments and Media take the same line, tabs, search and card as the Pages list. ---- */
+.oks-link-button {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 20px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-link);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.oks-link-button:hover {
+  background: var(--adm-row-hover);
+}
+.oks-switch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+}
+.oks-switch-card > small {
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.oks-status-line {
+  min-height: 20px;
+  margin: 0;
+  color: var(--adm-ok-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+.oks-comments {
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+  background: var(--adm-card);
+  box-shadow: var(--adm-shadow);
+}
+.oks-comment {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 12px;
+}
+.oks-comment + .oks-comment {
+  border-top: 1px solid var(--adm-line);
+}
+.oks-comment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.oks-comment-body > p {
+  max-width: none;
+  margin: 0;
+}
+.oks-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.oks-comment-text {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.oks-comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+.oks-chip[data-status="scheduled"] {
+  background: var(--adm-info-bg);
+  color: var(--adm-info-fg);
+}
+/* A section that holds its own cards (a list with tabs, a table) is not a card itself. */
+.oks-shell-body > main > section.oks-bare {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.oks-shell-body > main > section.oks-bare > * + * {
+  margin-top: 20px;
+}
+/* The media library: the search box is one field (the label draws it, the input inside has no edge of its own), and the chosen filter takes the accent. */
+.oks-admin .oksMediaLibrarySearch {
+  min-height: 44px;
+  background: var(--adm-card);
+  border-color: var(--adm-control);
+}
+:root:root .oks-admin .oksMediaLibrarySearch > input {
+  height: auto;
+  min-height: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+  color: var(--adm-ink);
+}
+.oks-admin .oksMediaLibraryFilter {
+  border-color: var(--adm-control);
+  color: var(--adm-ink);
+}
+.oks-admin .oksMediaLibraryFilter[aria-pressed="true"] {
+  border-color: var(--adm-a1);
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+  font-weight: 700;
+}

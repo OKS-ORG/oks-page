@@ -1,5 +1,6 @@
 "use client";
-// Comments: the on / off switch (for people who manage the settings) and the list to approve, mark as spam, or trash.
+// Comments: the on / off switch (for people who manage the settings) and the list to approve, mark as spam, or trash. Drawn as
+// the design shows: a line under the title, tabs with their counts, and a card with one block for each comment.
 import type { CommentStatus, ListedComment } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useState } from "react";
@@ -10,6 +11,13 @@ const TABS: { status: CommentStatus; label: string }[] = [
   { status: "spam", label: "Spam" },
   { status: "trash", label: "Trash" },
 ];
+
+const CHIPS: Record<CommentStatus, { word: string; kind: string }> = {
+  pending: { word: "Waiting", kind: "scheduled" },
+  approved: { word: "Approved", kind: "published" },
+  spam: { word: "Spam", kind: "draft" },
+  trash: { word: "Trash", kind: "scheduled" },
+};
 
 interface Listing {
   comments: ListedComment[];
@@ -81,10 +89,15 @@ export function CommentsScreen({
   }
 
   return (
-    <section aria-labelledby="comments-admin-heading">
-      <h2 id="comments-admin-heading">Comments</h2>
+    <section aria-labelledby="comments-admin-heading" className="oks-bare">
+      <h2 id="comments-admin-heading" className="oks-sr-only">
+        Comments
+      </h2>
+      <div className="oks-list-head">
+        <p className="oks-list-summary">Comments that wait for you appear here first.</p>
+      </div>
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
-      <p>
+      <div className="oks-switch-card">
         <label>
           <input
             type="checkbox"
@@ -94,69 +107,81 @@ export function CommentsScreen({
           />{" "}
           Let visitors comment on posts
         </label>
-        <br />
         <small>
           Every comment waits here until you approve it. Visitors give a name and a text; no email
           is asked for and nothing else about them is stored.
         </small>
-      </p>
-      <p style={{ minBlockSize: "1.5rem" }} role="status">
+      </div>
+      <p className="oks-status-line" role="status">
         {note}
       </p>
-      <div role="group" aria-label="Show comments that are">
+      <div className="oks-list-tabs" role="group" aria-label="Show comments that are">
         {TABS.map((t) => (
-          <Button
+          <button
             key={t.status}
-            onPress={() => void show(t.status)}
+            type="button"
+            className="oks-list-tab"
+            onClick={() => void show(t.status)}
             aria-pressed={status === t.status}
           >
-            {`${t.label} (${listing.counts[t.status]})`}
-          </Button>
+            {t.label} <span>{listing.counts[t.status]}</span>
+          </button>
         ))}
       </div>
       {listing.comments.length === 0 ? (
         <p>No comments here.</p>
       ) : (
-        <ul aria-label="Comments">
+        <ul aria-label="Comments" className="oks-comments">
           {listing.comments.map((c) => (
-            <li key={c.id}>
-              <p>
-                <strong>{c.name}</strong> on{" "}
-                <a href={`/admin/posts/${c.entryId}`}>{c.entryTitle}</a> ·{" "}
-                {c.createdAt.slice(0, 10)}
-              </p>
-              <p style={{ whiteSpace: "pre-wrap" }}>{c.content}</p>
-              <p>
-                {c.status !== "approved" && c.status !== "trash" ? (
-                  <Button
-                    onPress={() =>
-                      void act(c.id, "approve", "The comment is approved and shows on the post.")
-                    }
-                  >
-                    Approve
-                  </Button>
-                ) : null}{" "}
-                {c.status === "pending" ? (
-                  <Button onPress={() => void act(c.id, "spam", "Marked as spam.")}>Spam</Button>
-                ) : null}{" "}
-                {c.status === "spam" || c.status === "trash" ? (
-                  <Button onPress={() => void act(c.id, "restore", "Back in the waiting list.")}>
-                    Not spam, restore
-                  </Button>
-                ) : null}{" "}
-                {c.status !== "trash" ? (
-                  <Button onPress={() => void act(c.id, "trash", "Moved to the trash.")}>
-                    Trash
-                  </Button>
-                ) : (
-                  <Button
-                    color="danger"
-                    onPress={() => void act(c.id, "delete", "Deleted for good.")}
-                  >
-                    Delete for good
-                  </Button>
-                )}
-              </p>
+            <li key={c.id} className="oks-comment">
+              <span className="oks-person-mark" aria-hidden="true">
+                {(c.name || "?").charAt(0).toUpperCase()}
+              </span>
+              <div className="oks-comment-body">
+                <p className="oks-comment-head">
+                  <strong>{c.name}</strong>
+                  <span className="oks-list-path">{c.createdAt.slice(0, 10)}</span>
+                  <span className="oks-chip" data-status={CHIPS[c.status].kind}>
+                    {CHIPS[c.status].word}
+                  </span>
+                </p>
+                <p className="oks-list-path">
+                  on <a href={`/admin/posts/${c.entryId}`}>{c.entryTitle}</a>
+                </p>
+                <p className="oks-comment-text">{c.content}</p>
+                <div className="oks-comment-actions">
+                  {c.status !== "approved" && c.status !== "trash" ? (
+                    <Button
+                      color="primary"
+                      onPress={() =>
+                        void act(c.id, "approve", "The comment is approved and shows on the post.")
+                      }
+                    >
+                      Approve
+                    </Button>
+                  ) : null}
+                  {c.status === "pending" ? (
+                    <Button onPress={() => void act(c.id, "spam", "Marked as spam.")}>Spam</Button>
+                  ) : null}
+                  {c.status === "spam" || c.status === "trash" ? (
+                    <Button onPress={() => void act(c.id, "restore", "Back in the waiting list.")}>
+                      Not spam, restore
+                    </Button>
+                  ) : null}
+                  {c.status !== "trash" ? (
+                    <Button onPress={() => void act(c.id, "trash", "Moved to the trash.")}>
+                      Trash
+                    </Button>
+                  ) : (
+                    <Button
+                      color="danger"
+                      onPress={() => void act(c.id, "delete", "Deleted for good.")}
+                    >
+                      Delete for good
+                    </Button>
+                  )}
+                </div>
+              </div>
             </li>
           ))}
         </ul>

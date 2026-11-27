@@ -92,8 +92,13 @@ export function UsersScreen({
   const [note, setNote] = useState("");
   const [removing, setRemoving] = useState<Member | null>(null);
   const [cancelling, setCancelling] = useState<Invitation | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
 
   const when = (ms: number) => formatWhen(new Date(ms).toISOString(), timeZone);
+  const roleCounts = new Map<string, number>();
+  for (const m of members) roleCounts.set(m.roleKey, (roleCounts.get(m.roleKey) ?? 0) + 1);
 
   async function invite(event: FormEvent) {
     event.preventDefault();
@@ -163,12 +168,21 @@ export function UsersScreen({
     setCancelling(null);
   }
 
-  const memberRows: MemberRow[] = members.map((m) => ({
-    id: m.userId,
-    name: m.name,
-    email: m.email,
-    member: m,
-  }));
+  const words = search.trim().toLowerCase();
+  const memberRows: MemberRow[] = members
+    .filter(
+      (m) =>
+        (filter === "all" || m.roleKey === filter) &&
+        (words === "" ||
+          m.name.toLowerCase().includes(words) ||
+          m.email.toLowerCase().includes(words)),
+    )
+    .map((m) => ({
+      id: m.userId,
+      name: m.name,
+      email: m.email,
+      member: m,
+    }));
   const inviteRows: InviteRow[] = waiting.map((i) => ({
     id: i.id,
     name: i.name,
@@ -181,8 +195,60 @@ export function UsersScreen({
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
       <p role="status">{note}</p>
 
-      <section aria-labelledby="people-heading">
-        <h2 id="people-heading">People</h2>
+      <div className="oks-list-head">
+        <p className="oks-list-summary">
+          People who can sign in to this site, and what each of them may do.
+        </p>
+        <div className="oks-list-actions">
+          <Button
+            color="primary"
+            onPress={() => {
+              setMade(null);
+              setInviteProblem(null);
+              setAdding(true);
+            }}
+          >
+            Add a person
+          </Button>
+        </div>
+      </div>
+      <nav className="oks-list-tabs" aria-label="Roles">
+        <button
+          type="button"
+          className="oks-list-tab"
+          aria-pressed={filter === "all"}
+          onClick={() => setFilter("all")}
+        >
+          Everyone <span>{members.length}</span>
+        </button>
+        {roles
+          .filter((r) => roleCounts.has(r.key))
+          .map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              className="oks-list-tab"
+              aria-pressed={filter === r.key}
+              onClick={() => setFilter(r.key)}
+            >
+              {r.label} <span>{roleCounts.get(r.key)}</span>
+            </button>
+          ))}
+      </nav>
+      <div className="oks-list-tools">
+        <input
+          type="search"
+          aria-label="Search people"
+          placeholder="Search by name or email"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </div>
+
+      <section aria-labelledby="people-heading" className="oks-bare">
+        <h2 id="people-heading" className="oks-sr-only">
+          People
+        </h2>
         <ListTable
           label="People of the site"
           rows={memberRows}
@@ -190,11 +256,22 @@ export function UsersScreen({
           columns={[
             {
               key: "name",
-              header: "Name",
+              header: "Person",
               sortable: true,
-              render: (row) => (row.member.userId === you ? `${row.name} (you)` : row.name),
+              render: (row) => (
+                <span className="oks-person">
+                  <span className="oks-person-mark" aria-hidden="true">
+                    {(row.name || "?").charAt(0).toUpperCase()}
+                  </span>
+                  <span>
+                    <span className="oks-list-title">
+                      {row.member.userId === you ? `${row.name} (you)` : row.name}
+                    </span>
+                    <span className="oks-list-path">{row.email}</span>
+                  </span>
+                </span>
+              ),
             },
-            { key: "email", header: "Email", sortable: true },
             {
               key: "role",
               header: "Role",
@@ -216,7 +293,14 @@ export function UsersScreen({
             {
               key: "twoFactor",
               header: "Two-factor",
-              render: (row) => (row.member.twoFactor ? "On" : "Off"),
+              render: (row) => (
+                <span
+                  className="oks-chip"
+                  data-status={row.member.twoFactor ? "published" : "draft"}
+                >
+                  {row.member.twoFactor ? "On" : "Off"}
+                </span>
+              ),
             },
             {
               key: "joined",
@@ -247,8 +331,7 @@ export function UsersScreen({
         />
       </section>
 
-      <section aria-labelledby="invite-heading">
-        <h2 id="invite-heading">Invite someone</h2>
+      <Modal isOpen={adding} onClose={() => setAdding(false)} title="Add a person">
         <p>
           You get a link to send to the person
           {emailWorks ? ", and the site can email it to them" : ""}. They open it and choose their
@@ -342,7 +425,7 @@ export function UsersScreen({
             <p>It stops working on {when(made.invitation.expiresAt)}.</p>
           </div>
         ) : null}
-      </section>
+      </Modal>
 
       <section aria-labelledby="waiting-heading">
         <h2 id="waiting-heading">Invitations waiting</h2>

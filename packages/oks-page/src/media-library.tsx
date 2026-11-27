@@ -31,11 +31,19 @@ export function MediaLibraryScreen({
   return (
     <div className="oks-media">
       <div className="oks-media-main">
-        {canManageSettings ? (
-          <p>
-            <a href="/admin/settings/media">Media settings</a>
+        <div className="oks-list-head">
+          <p className="oks-list-summary">
+            {lib.total === 1 ? "1 file" : `${lib.total} files`}: pictures, videos, sounds and
+            documents for your site.
           </p>
-        ) : null}
+          {canManageSettings ? (
+            <div className="oks-list-actions">
+              <a className="oks-link-button" href="/admin/settings/media">
+                Media settings
+              </a>
+            </div>
+          ) : null}
+        </div>
         {lib.problem ? (
           <Alert color="danger" title="The library could not be loaded" description={lib.problem} />
         ) : null}

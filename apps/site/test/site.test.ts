@@ -5474,6 +5474,7 @@ describe.skipIf(!findBrowser())(
       await page.goto(`${site.base}/admin/users`);
       await page.getByRole("heading", { name: "Users", level: 1 }).waitFor();
       await page.getByRole("cell", { name: "Mira (you)" }).waitFor();
+      await page.getByRole("button", { name: "Add a person" }).click();
       await page.getByLabel(/^Name/).fill("Eli");
       await page.getByLabel("Email").fill("eli@example.com");
       expect(await page.getByLabel("Role", { exact: true }).inputValue()).toBe("editor");
@@ -5481,6 +5482,7 @@ describe.skipIf(!findBrowser())(
       const link = await page.locator("#invite-link").inputValue();
       expect(link).toMatch(new RegExp(`^${site.base}/admin/invite/[A-Za-z0-9_-]{30,}$`));
       await page.getByText("It stops working on").waitFor();
+      await page.keyboard.press("Escape");
       await page.getByRole("cell", { name: "eli@example.com" }).waitFor();
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 800 });
@@ -11782,6 +11784,7 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
 
     // An invitation by email.
     await page.goto(site.base + "/admin/users");
+    await page.getByRole("button", { name: "Add a person" }).click();
     const form = page.getByRole("form", { name: "Invite someone" });
     await form.getByLabel("Name").fill("Ben");
     await form.getByRole("textbox", { name: /^Email/ }).fill("ben@example.com");
