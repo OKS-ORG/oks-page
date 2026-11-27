@@ -27,8 +27,9 @@ export default async function LoginPage({ searchParams }: Props) {
   return (
     <main>
       <h1>Sign in</h1>
-      <LoginForm />
+      <p>Welcome back. Sign in to look after your site.</p>
       {passkeys ? <PasskeySignIn /> : null}
+      <LoginForm />
       {email ? (
         <>
           <p>

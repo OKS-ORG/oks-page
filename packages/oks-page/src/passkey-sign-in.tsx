@@ -43,15 +43,35 @@ export function PasskeySignIn() {
   }
 
   return (
-    <section aria-labelledby="passkey-sign-in">
-      <h2 id="passkey-sign-in">Sign in with a passkey</h2>
+    <section aria-labelledby="passkey-sign-in" className="oks-passkey">
+      <h2 id="passkey-sign-in" className="oks-sr-only">
+        Sign in with a passkey
+      </h2>
       {problem ? <Alert color="danger" title="Not signed in" description={problem} /> : null}
-      <p>Use the fingerprint, face or PIN of this device instead of a password.</p>
-      <p>
-        <Button isDisabled={busy} onPress={() => void signIn()}>
-          Sign in with a passkey
-        </Button>
+      <Button isDisabled={busy} onPress={() => void signIn()}>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M15 7a4 4 0 1 1-3.5 6L4 20.5V17h3v-3h3l1.5-1.5A4 4 0 0 1 15 7z" />
+        </svg>
+        Sign in with a passkey
+      </Button>
+      <p className="oks-passkey-note">
+        Use the fingerprint, face or PIN of this device instead of a password.
       </p>
+      <div className="oks-or" aria-hidden="true">
+        <span />
+        or
+        <span />
+      </div>
     </section>
   );
 }

@@ -968,11 +968,12 @@ main li[data-health][data-level="grey"] {
   margin-top: clamp(48px, 12vh, 110px);
 }
 .oks-admin > main h1 {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-  line-height: 1.25;
-  margin-bottom: 8px;
+  font-family: var(--adm-font-heading);
+  font-size: 28px;
+  font-weight: var(--adm-heading-weight);
+  letter-spacing: -0.01em;
+  line-height: 34px;
+  margin-bottom: 0;
 }
 .oks-admin > main form {
   display: flex;
@@ -1603,4 +1604,94 @@ main .oks-list-tabs > a[aria-current="page"] {
   :root:not([data-theme="light"]) .oks-admin > main::before {
     filter: invert(1) hue-rotate(180deg) brightness(1.1);
   }
+}
+
+/* ---- Sign in and recovery (step 6): the title, a line under it, the fields, one wide button, and links in a centred row. ---- */
+.oks-admin > main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.oks-admin > main > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.oks-admin > main > h1 + p,
+.oks-admin > main > form > p:first-child {
+  max-width: none;
+  color: var(--adm-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.oks-admin > main > h1 + p {
+  margin-top: -14px;
+}
+.oks-admin > main > p:has(> a:only-child:last-child) {
+  max-width: none;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+.oks-admin > main > form > .oksButton[data-color="primary"] {
+  width: 100%;
+  --oks-button-height: 46px;
+  font-size: 15px;
+}
+.oks-passkey {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oks-passkey > .oksButton {
+  width: 100%;
+  gap: 8px;
+  --oks-button-height: 46px;
+}
+.oks-passkey-note {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.oks-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-or > span {
+  flex: 1;
+  height: 1px;
+  background: var(--adm-line);
+}
+.oks-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* A finished step: a round tile with its icon, then the words. */
+.oks-done {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.oks-done-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--adm-radius-card);
+  background: var(--adm-ok-bg);
+  color: var(--adm-ok-fg);
+}
+.oks-done > p {
+  max-width: none;
+  color: var(--adm-muted);
+  font-size: 15px;
+  line-height: 1.5;
 }

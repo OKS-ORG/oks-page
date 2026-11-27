@@ -2,7 +2,30 @@
 // The two forms of a password reset: ask for the link, then choose the new password. They talk to Better Auth's own
 // routes. The first answer is the same whether or not the address has an account, so nobody can find out who does.
 import { Alert, Button, PasswordField, TextField } from "oks-ui";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+
+/** A finished step drawn as the design shows: a round icon tile, then the words. */
+function Done({ d, children }: { d: string; children: ReactNode }) {
+  return (
+    <div className="oks-done">
+      <span className="oks-done-icon" aria-hidden="true">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d={d} />
+        </svg>
+      </span>
+      {children}
+    </div>
+  );
+}
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -31,10 +54,12 @@ export function ForgotPasswordForm() {
 
   if (done)
     return (
-      <p role="status">
-        If an account uses {email}, an email with a link is on its way. The link works for 1 hour.
-        Look in your spam folder too.
-      </p>
+      <Done d="M3 6h18v12H3z M3 7l9 7 9-7">
+        <p role="status">
+          If an account uses {email}, an email with a link is on its way. The link works for 1 hour.
+          Look in your spam folder too.
+        </p>
+      </Done>
     );
   return (
     <form onSubmit={submit} aria-label="Ask for a new password">
@@ -96,10 +121,12 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
   if (done)
     return (
-      <p role="status">
-        Your password is changed, and you are signed out everywhere.{" "}
-        <a href="/admin/login">Sign in</a> with the new password.
-      </p>
+      <Done d="M5 12l5 5 9-10">
+        <p role="status">
+          Your password is changed, and you are signed out everywhere.{" "}
+          <a href="/admin/login">Sign in</a> with the new password.
+        </p>
+      </Done>
     );
   return (
     <form onSubmit={submit} aria-label="Choose a new password">
