@@ -1,6 +1,12 @@
 // The admin shell (spec 07, section 3): sidebar on wide screens, drawer below 1025 px, header with breadcrumbs and search,
 // a "Skip to content" link, and one main area with the screen's single h1.
-import { Sidebar, SidebarMenu, type ShellNavItem } from "./sidebar.js";
+import {
+  Sidebar,
+  SidebarMenu,
+  type ShellNavItem,
+  type SidebarAccount,
+  type SidebarNotice,
+} from "./sidebar.js";
 import { ShellFooter, TabStrip, type FooterInfo, type TabStripProps } from "./tabs.js";
 import {
   Breadcrumbs,
@@ -17,8 +23,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 export interface ShellProps {
   /** The main menu. A count such as "2 new" belongs in the label: oks-ui's `badge` fails axe (work list). */
   nav: ShellNavItem[];
-  /** The sidebar starts as the icon rail. The caller remembers the choice for each user (D110). */
+  /** The sidebar is the icon rail. The caller remembers the choice for each person (D110); a change of this value is followed. */
   collapsed?: boolean;
+  /** Who is signed in, at the bottom of the menu. */
+  account?: SidebarAccount;
+  /** A short note above the account (for example that an update is waiting). */
+  notice?: SidebarNotice;
   onCollapsedChange?: (collapsed: boolean) => void;
   selectedKey: string;
   /** The screen's title: the one h1 of the page. */
@@ -49,6 +59,8 @@ export const SIDEBAR_QUERY = "(min-width: 1025px)";
 export function Shell({
   nav,
   collapsed: collapsedProp = false,
+  account,
+  notice,
   onCollapsedChange,
   selectedKey,
   title,
@@ -96,6 +108,25 @@ export function Shell({
     };
   }, [query, onSearch]);
   const [collapsed, setCollapsed] = useState(collapsedProp);
+  // The caller may learn the remembered choice after the first draw (it lives in the browser): follow it.
+  useEffect(() => setCollapsed(collapsedProp), [collapsedProp]);
+  const toggle = (next: boolean) => {
+    setCollapsed(next);
+    onCollapsedChange?.(next);
+  };
+  // The key [ switches between the menu and the rail, unless the person is typing.
+  useEffect(() => {
+    if (!wide) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "[" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+      e.preventDefault();
+      toggle(!collapsed);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [wide, collapsed]);
   const menu = <SidebarMenu nav={nav} selectedKey={selectedKey} collapsed={false} />;
   return (
     <div className="oks-shell" dir={dir}>
@@ -107,10 +138,10 @@ export function Shell({
           nav={nav}
           selectedKey={selectedKey}
           collapsed={collapsed}
-          onCollapsedChange={(next) => {
-            setCollapsed(next);
-            onCollapsedChange?.(next);
-          }}
+          onCollapsedChange={toggle}
+          onJump={palette.open}
+          {...(account ? { account } : {})}
+          {...(notice ? { notice } : {})}
         />
       ) : null}
       <div className="oks-shell-body">

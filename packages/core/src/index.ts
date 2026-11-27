@@ -40,6 +40,8 @@ export * from "./theme-layouts.js";
 export * from "./theme-edits.js";
 export * from "./theme-switch.js";
 export * from "./theme-contrast.js";
+export * from "./accent.js";
+export * from "./looks.js";
 export * from "./publish-check.js";
 export * from "./owner-fonts.js";
 export * from "./import-pages.js";

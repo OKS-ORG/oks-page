@@ -177,6 +177,59 @@ export const FONT_LIBRARY_LIST: readonly LibraryFont[] = [
     ],
   },
   {
+    key: "figtree",
+    name: "Figtree",
+    kind: "sans",
+    scripts: ["latin"],
+    package: "@fontsource/figtree",
+    version: "5.3.0",
+    integrity:
+      "sha512-/iTcTXL1eRBGhvD7NN9dnKzXzWqDLVZVEUFI9xIxAC1G/hXU8tCyYeXCAuPOuvSYPInFUP7H6KLGgygmDfy1SA==",
+    license: "OFL-1.1",
+    copyright:
+      "Copyright 2022 The Figtree Project Authors (https://github.com/erikdkennedy/figtree)",
+    files: [
+      {
+        script: "latin",
+        weight: 400,
+        sha256: "8f98dd642986f1fa39c45b89665a57372897c235b36028e0e4a136e43dc5f8ab",
+        bytes: 11384,
+      },
+      {
+        script: "latin",
+        weight: 700,
+        sha256: "7ec4f08d09f91d349917dd6592f6aaae66d8fe1bbd58fa24707961e79236616e",
+        bytes: 11376,
+      },
+    ],
+  },
+  {
+    key: "manrope",
+    name: "Manrope",
+    kind: "sans",
+    scripts: ["latin"],
+    package: "@fontsource/manrope",
+    version: "5.3.0",
+    integrity:
+      "sha512-obJ1Dv3+uCA6HlHgW8u4BGYxJR9In2HW7gjJhlflEvkrj1X1iSEwu0fToL+JYGC/FEKFfIz1sBuPduvcL2gIAA==",
+    license: "OFL-1.1",
+    copyright: "Copyright 2019 The Manrope Project Authors (https://github.com/sharanda/manrope)",
+    files: [
+      {
+        script: "latin",
+        weight: 400,
+        sha256: "849290ef12a2eeb9af5c11924120d11aa4ae8b435ed3347d7fc8bc240c293ca3",
+        bytes: 14108,
+      },
+      {
+        script: "latin",
+        weight: 700,
+        sha256: "d2a12c85a831e4b5db341767d0347fa3d1361d22a1fcb3e361a16b6c90080f71",
+        bytes: 14212,
+      },
+    ],
+  },
+  {
     key: "hind",
     name: "Hind",
     kind: "sans",

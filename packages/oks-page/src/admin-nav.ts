@@ -3,7 +3,33 @@ export interface NavItem {
   key: string;
   label: string;
   href: string;
+  /** The heading the item sits under in the menu: "Content" or "Site". Home and Settings have none. */
+  group?: string;
 }
+
+/** Content is what people write and look after; Site is how the site is run (docs/18-new-look.md). */
+const GROUPS: Record<string, string> = {
+  pages: "Content",
+  posts: "Content",
+  content: "Content",
+  comments: "Content",
+  taxonomies: "Content",
+  menus: "Content",
+  media: "Content",
+  users: "Site",
+  tools: "Site",
+  plugins: "Site",
+  publish: "Site",
+  statistics: "Site",
+  handoff: "Site",
+  collect: "Site",
+  backups: "Site",
+  updates: "Site",
+  health: "Site",
+  connector: "Site",
+  agency: "Site",
+  "privacy-requests": "Site",
+};
 
 const ANY = (can: (capability: string) => boolean, capabilities: string[]) =>
   capabilities.some((c) => can(c));
@@ -111,6 +137,11 @@ const ITEMS: (NavItem & { needs: string[] })[] = [
 /** The menu items a person with these capabilities sees. Home is for everyone who is signed in. */
 export function navFor(can: (capability: string) => boolean): NavItem[] {
   return ITEMS.filter((i) => i.needs.length === 0 || ANY(can, i.needs)).map(
-    ({ key, label, href }) => ({ key, label, href }),
+    ({ key, label, href }) => ({
+      key,
+      label,
+      href,
+      ...(GROUPS[key] ? { group: GROUPS[key] } : {}),
+    }),
   );
 }

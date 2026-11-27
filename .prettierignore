@@ -10,3 +10,4 @@ packages/core/src/font-files.ts
 .oks/
 packages/oks-page/src/forms-plugin-file.json
 packages/oks-page/src/business-plugin-file.json
+packages/admin/src/looks.css

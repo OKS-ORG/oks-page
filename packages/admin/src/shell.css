@@ -142,6 +142,75 @@
   font-weight: 700;
 }
 
+/* The top of the sidebar, the search, the update note and the account: plain defaults that read on any ground in light and dark;
+   base.css gives them the look. */
+.oks-sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.oks-jump,
+.oks-notice,
+.oks-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+}
+.oks-jump {
+  width: 100%;
+  border: 1px solid var(--oks-color-border, currentColor);
+  background: transparent;
+  cursor: pointer;
+}
+.oks-jump kbd {
+  margin-inline-start: auto;
+  font: inherit;
+  font-size: 0.75rem;
+}
+.oks-sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+.oks-account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.oks-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+.oks-menu-badge {
+  margin-inline-start: auto;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 0.75rem;
+}
+.oks-tip {
+  z-index: 60;
+  padding: 6px 10px;
+  border-radius: 6px;
+  /* A dark pill with light text on any page (16:1); base.css turns it around in the dark look. */
+  background: #1f1f1f;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 /* The tab strip and the footer (D111, D112). */
 .oks-tabs {
   display: flex;

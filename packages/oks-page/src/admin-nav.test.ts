@@ -63,6 +63,27 @@ describe("the menu for each default role", () => {
   });
 });
 
+describe("the menu groups (docs/18-new-look.md)", () => {
+  test("what people write sits under Content, how the site is run under Site, and Home and Settings stand alone", () => {
+    const caps = DEFAULT_ROLES.find((r) => r.key === "administrator")!.capabilities;
+    const items = navFor((c) => caps.includes(c));
+    const groupOf = (key: string) => items.find((i) => i.key === key)?.group;
+    for (const key of ["pages", "posts", "comments", "media"])
+      expect(groupOf(key), key).toBe("Content");
+    for (const key of ["users", "plugins", "backups", "health"])
+      expect(groupOf(key), key).toBe("Site");
+    expect(groupOf("home")).toBeUndefined();
+    expect(groupOf("settings")).toBeUndefined();
+  });
+  test("the groups are not split: each heading is drawn once, in order", () => {
+    const caps = DEFAULT_ROLES.find((r) => r.key === "administrator")!.capabilities;
+    const seen: string[] = [];
+    for (const i of navFor((c) => caps.includes(c)))
+      if (i.group && seen[seen.length - 1] !== i.group) seen.push(i.group);
+    expect(seen).toEqual(["Content", "Site"]);
+  });
+});
+
 describe("the menu has no repeats", () => {
   test("every entry has its own key and its own address (an administrator sees them all)", () => {
     const caps = DEFAULT_ROLES.find((r) => r.key === "administrator")!.capabilities;

@@ -13,8 +13,8 @@ import { readThemeStyles } from "./theme-settings.js";
 import { DEFAULT_THEME_STYLES, fontStack, stylesToCss } from "./theme.js";
 
 describe("the font library (ADR 0028)", () => {
-  test("the list: 12 fonts, all under the SIL Open Font Licence, each with a notice (FL-11)", () => {
-    expect(FONT_LIBRARY).toHaveLength(12);
+  test("the list: 14 fonts (two of them, Figtree and Manrope, for the admin's looks), all under the SIL Open Font Licence, each with a notice (FL-11)", () => {
+    expect(FONT_LIBRARY).toHaveLength(14);
     for (const font of FONT_LIBRARY) {
       expect(font.license).toBe("OFL-1.1");
       expect(font.key).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
@@ -41,7 +41,7 @@ describe("the font library (ADR 0028)", () => {
         expect(bytes.subarray(0, 4).toString()).toBe("wOF2");
         total += bytes.length;
       }
-    // About 0.9 MB for the whole starter set (ADR 0028 measured 0.8 MB for its list).
+    // About 0.9 MB for the whole starter set (ADR 0028 measured 0.8 MB for its list of 12; the two admin fonts add under 0.1 MB).
     expect(total).toBeLessThan(1_100_000);
   });
 

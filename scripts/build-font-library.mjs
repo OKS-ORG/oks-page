@@ -26,6 +26,8 @@ const FONTS = [
   ["montserrat", "Montserrat", "sans"],
   ["poppins", "Poppins", "sans"],
   ["dm-sans", "DM Sans", "sans"],
+  ["figtree", "Figtree", "sans"],
+  ["manrope", "Manrope", "sans"],
   ["hind", "Hind", "sans"],
   ["noto-sans-devanagari", "Noto Sans Devanagari", "sans"],
   ["source-serif-4", "Source Serif 4", "serif"],
@@ -34,6 +36,13 @@ const FONTS = [
   ["jetbrains-mono", "JetBrains Mono", "mono"],
 ];
 const WEIGHTS = [400, 700];
+// The parts of the alphabet kept: Latin for every font, and Devanagari for the ones that carry Hindi (the Fontsource packages hold more).
+const SCRIPTS = {
+  poppins: ["latin", "devanagari"],
+  hind: ["latin", "devanagari"],
+  "noto-sans-devanagari": ["latin", "devanagari"],
+  "noto-serif-devanagari": ["latin", "devanagari"],
+};
 // The licence file of the Source Serif 4 package names only "Google Inc." as the holder.
 const COPYRIGHT_FIXED = { "source-serif-4": "Google Inc." };
 
@@ -60,7 +69,8 @@ for (const [key, name, kind] of FONTS) {
   const scripts = new Set();
   for (const file of readdirSync(join(dir, "files")).sort()) {
     const m = new RegExp(`^${key}-([a-z]+)-(\\d+)-normal\\.woff2$`).exec(file);
-    if (!m || !WEIGHTS.includes(Number(m[2]))) continue;
+    if (!m || !WEIGHTS.includes(Number(m[2])) || !(SCRIPTS[key] ?? ["latin"]).includes(m[1]))
+      continue;
     const bytes = readFileSync(join(dir, "files", file));
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     entries.push({ script: m[1], weight: Number(m[2]), sha256, bytes: bytes.length });

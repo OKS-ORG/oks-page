@@ -3,8 +3,8 @@
 import { Shell } from "@oks-page/admin";
 import "@oks-page/admin/shell.css";
 import "@oks-page/admin/base.css";
-import { Button, type CommandPaletteItem } from "oks-ui";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { Button, useMediaQuery, type CommandPaletteItem } from "oks-ui";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAdminBrand } from "./admin-brand-context";
 import type { NavItem } from "./admin-nav";
 import { navIcon } from "./nav-icons";
@@ -73,6 +73,34 @@ async function searchEntries(query: string): Promise<CommandPaletteItem[]> {
   }));
 }
 
+/** Where the browser keeps the choice between the menu and the icon rail (for this person on this device). */
+export const MENU_COLLAPSED_KEY = "oks-menu-collapsed";
+
+/**
+ * The remembered choice, or undefined while nothing is chosen. Read after the first draw so the server's page and the
+ * browser's agree; a blocked store (private window) simply means no memory.
+ */
+function useRememberedCollapse(): [boolean | undefined, (next: boolean) => void] {
+  const [value, setValue] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(MENU_COLLAPSED_KEY);
+      if (stored === "true" || stored === "false") setValue(stored === "true");
+    } catch {
+      // Storage may be blocked; the menu then follows the screen width.
+    }
+  }, []);
+  const remember = useCallback((next: boolean) => {
+    setValue(next);
+    try {
+      localStorage.setItem(MENU_COLLAPSED_KEY, String(next));
+    } catch {
+      // The choice then lasts until the page is left.
+    }
+  }, []);
+  return [value, remember];
+}
+
 export interface AdminFrameProps {
   user: { name: string; email: string };
   /** The menu for this person (see `navFor`). */
@@ -99,12 +127,18 @@ export function AdminFrame({
   const items = useMemo(() => paletteItems(nav), [nav]);
   const canSearch = nav.some((n) => n.key === "pages" || n.key === "posts");
   const onSearch = useCallback(searchEntries, []);
+  // The menu starts as the icon rail below 1100 px unless the person chose; a choice is remembered.
+  const narrow = useMediaQuery("(max-width: 1100px)");
+  const [remembered, remember] = useRememberedCollapse();
   return (
     <Shell
       nav={nav.map((n) => {
         const icon = navIcon(n.key);
         return icon ? { ...n, icon } : n;
       })}
+      collapsed={remembered ?? narrow}
+      onCollapsedChange={remember}
+      account={{ name: user.name, detail: user.email, href: "/admin/account" }}
       selectedKey={selectedKey}
       title={title}
       {...(breadcrumbs ? { breadcrumbs } : {})}

@@ -15,12 +15,13 @@ const nav = [
   { key: "home", label: "Home", href: "#home" },
   { key: "pages", label: "Pages", href: "#pages" },
   { key: "posts", label: "Posts", href: "#posts", children: [{ key: "all-posts", label: "All posts", href: "#all" }, { key: "tags", label: "Categories and tags", href: "#tags" }] },
+  { key: "comments", label: "Comments", href: "#comments", badge: "3" },
   { key: "plugins", label: "Plugins", href: "#plugins" },
   ...tools,
 ];
 window.__changes = [];
 createRoot(document.getElementById("root")).render(
-  <Shell dir={dir} nav={nav} selectedKey="pages" title="Pages" onCollapsedChange={(c) => window.__changes.push(c)}>
+  <Shell dir={dir} nav={nav} selectedKey="pages" title="Pages" account={{ name: "Maya Meyer", detail: "maya@example.com", href: "#account" }} notice={{ text: "Update available. Open Updates to see what is new.", href: "#updates" }} onCollapsedChange={(c) => window.__changes.push(c)}>
     <p>Content</p>
   </Shell>);
 `;
@@ -69,7 +70,8 @@ describe.skipIf(!browserPath)("the side menu", () => {
     const after = await page.locator("aside").evaluate((el) => el.getBoundingClientRect().width);
     expect(after).toBeLessThan(before / 2);
     const plugins = page.getByRole("link", { name: "Plugins", exact: true });
-    expect(await plugins.getAttribute("title")).toBe("Plugins");
+    expect(await plugins.getAttribute("aria-label")).toBe("Plugins");
+    expect(await plugins.getAttribute("data-tip")).toBe("Plugins");
     expect(await plugins.innerText()).not.toContain("Plugins");
     expect(await page.getByRole("button", { name: "Expand menu" }).count()).toBe(1);
     expect(
@@ -103,6 +105,70 @@ describe.skipIf(!browserPath)("the side menu", () => {
       return { flyoutRight: flyout.right, asideLeft: button.left };
     });
     expect(rects.flyoutRight).toBeLessThanOrEqual(rects.asideLeft + 2);
+    await page.close();
+  });
+
+  test("a count shows as a pill beside the name, and as a dot in the rail with the count still in the name", async () => {
+    const { page } = await site.open(1280);
+    expect(await page.locator(".oks-menu-badge").innerText()).toBe("3");
+    expect(await page.locator(".oks-menu-dot").count()).toBe(0);
+    await page.getByRole("button", { name: "Collapse menu" }).click();
+    const comments = page.getByRole("link", { name: "Comments (3)" });
+    expect(await comments.count()).toBe(1);
+    expect(await comments.locator(".oks-menu-dot").count()).toBe(1);
+    expect(await page.locator(".oks-menu-badge").count()).toBe(0);
+    await page.close();
+  });
+
+  test("the key [ switches between the menu and the rail, but not while typing", async () => {
+    const { page } = await site.open(1280);
+    const width = () => page.locator("aside").evaluate((el) => el.getBoundingClientRect().width);
+    const open = await width();
+    await page.keyboard.press("[");
+    expect(await width()).toBeLessThan(open / 2);
+    await page.keyboard.press("[");
+    expect(await width()).toBe(open);
+    expect(
+      await page.evaluate(() => (window as unknown as { __changes: boolean[] }).__changes),
+    ).toEqual([true, false]);
+    // In the search box the key is just a character.
+    await page.keyboard.press("Control+k");
+    await page.getByPlaceholder("Search the admin").press("[");
+    expect(await width()).toBe(open);
+    await page.close();
+  });
+
+  test("the sidebar has a Jump to search that opens the palette, and the account and the update note at the bottom", async () => {
+    const { page } = await site.open(1280);
+    expect(await page.getByRole("link", { name: /Maya Meyer/ }).getAttribute("href")).toBe(
+      "#account",
+    );
+    expect(await page.getByText("maya@example.com").count()).toBe(1);
+    expect(await page.getByRole("link", { name: /Update available/ }).getAttribute("href")).toBe(
+      "#updates",
+    );
+    await page.getByRole("button", { name: /Jump to/ }).click();
+    await page.getByPlaceholder("Search the admin").waitFor({ state: "visible" });
+    await page.close();
+  });
+
+  test("in the rail the name of an icon appears as a tip on hover and on focus, outside the scrolling menu", async () => {
+    const { page } = await site.open(1280);
+    await page.getByRole("button", { name: "Collapse menu" }).click();
+    expect(await page.getByRole("tooltip").count()).toBe(0);
+    await page.getByRole("link", { name: "Pages", exact: true }).hover();
+    const tip = page.getByRole("tooltip");
+    expect(await tip.innerText()).toBe("Pages");
+    const rects = await page.evaluate(() => {
+      const t = document.querySelector("[role=tooltip]")!.getBoundingClientRect();
+      const a = document.querySelector("aside")!.getBoundingClientRect();
+      return { tipLeft: t.left, asideRight: a.right };
+    });
+    expect(rects.tipLeft).toBeGreaterThanOrEqual(rects.asideRight);
+    await page.mouse.move(700, 400);
+    expect(await page.getByRole("tooltip").count()).toBe(0);
+    await page.getByRole("link", { name: "Plugins", exact: true }).focus();
+    expect(await page.getByRole("tooltip").innerText()).toBe("Plugins");
     await page.close();
   });
 

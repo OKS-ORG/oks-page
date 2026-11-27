@@ -4,14 +4,17 @@
 import {
   adminBrand,
   agencyActive,
+  DEFAULT_LOOK,
   fontFaceCss,
   listLicences,
   loadWhiteLabel,
+  LOOKS,
   logoOf,
 } from "@oks-page/core";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import "@oks-page/admin/shell.css";
+import "@oks-page/admin/looks.css";
 import "@oks-page/admin/base.css";
 import { AdminBrandProvider, NO_BRAND, type AdminBrandValue } from "./admin-brand-context";
 import { getRunner, getSiteId } from "./db";
@@ -51,10 +54,20 @@ async function loadBrand(): Promise<AdminBrandValue> {
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const brand = await loadBrand();
+  // One look for now (Clear Sky); the person's own choice (look, light or dark, accent) comes with the Appearance settings.
+  const look = LOOKS[DEFAULT_LOOK];
   return (
     <AdminBrandProvider brand={brand}>
-      <style dangerouslySetInnerHTML={{ __html: fontFaceCss(["inter"]) }} />
-      <div className="oks-admin" data-branded={brand.name || brand.logoUrl ? "true" : "false"}>
+      <style
+        dangerouslySetInnerHTML={{
+          __html: fontFaceCss([...new Set([look.fonts.heading, look.fonts.text])]),
+        }}
+      />
+      <div
+        className="oks-admin"
+        data-look={look.key}
+        data-branded={brand.name || brand.logoUrl ? "true" : "false"}
+      >
         <UpdateBanner />
         {children}
       </div>
