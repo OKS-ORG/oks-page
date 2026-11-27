@@ -624,13 +624,28 @@ main
 main select:not([class]),
 main textarea:not([class]) {
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--adm-ink);
   background: var(--adm-card);
   border: 1px solid var(--adm-control);
   border-radius: var(--adm-radius);
-  padding: 0 12px;
-  height: 40px;
+  padding: 0 14px;
+  height: 44px;
+}
+main input:not([class]):disabled,
+main select:not([class]):disabled,
+main textarea:not([class]):disabled {
+  background: var(--adm-ground);
+  border-color: var(--adm-line);
+  color: var(--adm-muted);
+  cursor: not-allowed;
+}
+/* A field that has a problem: a red edge, two pixels wide, and its words next to it (the message itself says what is wrong). */
+main input:not([class])[aria-invalid="true"],
+main select:not([class])[aria-invalid="true"],
+main textarea:not([class])[aria-invalid="true"] {
+  border: 2px solid var(--adm-err-fg);
+  padding-inline: 13px;
 }
 main textarea:not([class]) {
   height: auto;
@@ -670,6 +685,10 @@ main input[type="file"]::file-selector-button {
 main label {
   font-weight: 600;
   font-size: 13px;
+  color: var(--adm-muted);
+}
+main label:focus-within {
+  color: var(--adm-link);
 }
 main fieldset {
   border: 0;
@@ -687,13 +706,14 @@ main fieldset label {
   gap: 0.6rem;
   align-items: center;
   font-weight: 400;
-  font-size: 14px;
+  font-size: 15px;
+  color: var(--adm-ink);
   padding: 0.2rem 0;
 }
 main input[type="radio"],
 main input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   accent-color: var(--adm-a1);
 }
 .oks-shell-body > main .oksTextField,
@@ -702,7 +722,7 @@ main input[type="checkbox"] {
 }
 /* oks-ui: fields and buttons take the design's sizes and edges. */
 .oks-admin {
-  --oks-text-field-height: 40px;
+  --oks-text-field-height: 44px;
   --oks-text-field-radius: var(--adm-radius);
   --oks-text-field-border: var(--adm-control);
   --oks-text-field-bg: var(--adm-card);
@@ -725,17 +745,29 @@ main input[type="checkbox"] {
 .oks-admin .oksButton {
   --oks-button-height: 40px;
   --oks-button-radius: var(--adm-radius);
-  --oks-button-font-size: 13px;
+  --oks-button-font-size: 14px;
   font-weight: 600;
 }
+/* Outline: the card colour, an edge, the accent for the words; the hover is a tint, the pressed one a stronger tint. */
 .oks-admin .oksButton[data-variant="solid"][data-color="default"],
 .oks-admin .oksButton[data-variant="bordered"],
 main button:not([class]) {
   background: var(--adm-card);
-  color: var(--adm-ink);
+  color: var(--adm-link);
   border: 1px solid var(--adm-control);
   box-shadow: none;
 }
+.oks-admin .oksButton[data-variant="solid"][data-color="default"]:hover,
+.oks-admin .oksButton[data-variant="bordered"]:hover,
+main button:not([class]):hover {
+  background: var(--adm-hover);
+}
+.oks-admin .oksButton[data-variant="solid"][data-color="default"]:active,
+.oks-admin .oksButton[data-variant="bordered"]:active,
+main button:not([class]):active {
+  background: var(--adm-soft);
+}
+/* Main: a solid accent; the hover is a shade darker with a soft shadow, the pressed one darker still. */
 .oks-admin .oksButton[data-variant="solid"][data-color="primary"] {
   background-image: none;
   background-color: var(--adm-a1);
@@ -743,57 +775,98 @@ main button:not([class]) {
   color: var(--adm-on-accent);
   box-shadow: none;
 }
+.oks-admin .oksButton[data-variant="solid"][data-color="primary"]:hover {
+  background-color: color-mix(in srgb, var(--adm-a1) 88%, #000);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.oks-admin .oksButton[data-variant="solid"][data-color="primary"]:active {
+  background-color: color-mix(in srgb, var(--adm-a1) 76%, #000);
+  box-shadow: none;
+}
+/* Danger: the message colours, so it reads in light and dark. */
 .oks-admin .oksButton[data-variant="solid"][data-color="danger"] {
   background-image: none;
+  background-color: var(--adm-err-fg);
+  border-color: transparent;
+  color: var(--adm-err-bg);
+  box-shadow: none;
+}
+.oks-admin .oksButton[data-variant="solid"][data-color="danger"]:hover {
+  background-color: color-mix(in srgb, var(--adm-err-fg) 88%, #000);
+}
+.oks-admin .oksButton[data-variant="solid"][data-color="danger"]:active {
+  background-color: color-mix(in srgb, var(--adm-err-fg) 76%, #000);
+}
+.oks-admin .oksButton:focus-visible,
+main button:not([class]):focus-visible {
+  outline: 3px solid var(--adm-ring);
+  outline-offset: 2px;
+}
+/* Disabled: a flat grey, with no hover. */
+.oks-admin .oksButton:disabled,
+.oks-admin .oksButton[aria-disabled="true"],
+main button:not([class]):disabled {
+  background: var(--adm-line);
+  background-color: var(--adm-line);
+  border-color: transparent;
+  color: var(--adm-control);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 1;
 }
 main button:not([class]) {
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   height: 40px;
   padding: 0 16px;
   border-radius: var(--adm-radius);
   cursor: pointer;
 }
-main button:not([class]):hover {
-  background: var(--adm-row-hover);
-}
-main button:not([class]):disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 
 /* ---- tables and lists ---- */
 main table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
+/* A header is 40 px, a row 48 px, every cell padded 16 px; the hovered row is a rounded bar with its text inset from the ends. */
 main thead th {
   text-align: start;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  height: 40px;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--adm-cap);
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--adm-line-2);
-  background: var(--adm-th);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--adm-control);
+  background: transparent;
   white-space: nowrap;
 }
 main th,
 main td {
-  padding: 11px 16px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--adm-line-2);
-  font-size: 13px;
+  font-size: 14px;
   vertical-align: middle;
 }
+main tbody th,
+main tbody td {
+  height: 48px;
+}
 main tbody th {
-  font-size: 14px;
   font-weight: 600;
   text-align: start;
 }
-main tbody tr:hover {
+main tbody tr:hover > * {
   background: var(--adm-row-hover);
+}
+main tbody tr:hover > :first-child {
+  border-start-start-radius: var(--adm-radius);
+  border-end-start-radius: var(--adm-radius);
+}
+main tbody tr:hover > :last-child {
+  border-start-end-radius: var(--adm-radius);
+  border-end-end-radius: var(--adm-radius);
 }
 .oks-shell-body > main > .oks-list-scroll,
 .oks-shell-body > main > table {
@@ -833,8 +906,8 @@ main .oksAlert[data-variant="solid"] {
   --oks-alert-bg: color-mix(in srgb, var(--oks-alert-accent) 9%, var(--adm-card));
   --oks-alert-fg: var(--adm-ink);
   --oks-alert-border: color-mix(in srgb, var(--oks-alert-accent) 30%, transparent);
-  border-inline-start: 4px solid var(--oks-alert-accent);
   border-radius: var(--adm-radius);
+  font-weight: 600;
 }
 main .oksAlert .oksAlertIconWrapper {
   color: color-mix(in srgb, var(--oks-alert-accent) 75%, var(--adm-ink));
@@ -1063,4 +1136,13 @@ main form > div:not([class]):not(:has(> br)) > label {
 .oks-admin .oksBreadcrumbs {
   --oks-breadcrumbs-fg-current: var(--adm-ink);
   --oks-breadcrumbs-fg-hover: var(--adm-ink);
+}
+
+/* oks-ui sets its table colours on the table parts themselves, so they are set here on the same elements: the words, the muted words, the rows and the header follow the look in light and dark. */
+.oks-admin [class*="oksTable"] {
+  --oks-table-fg: var(--adm-ink);
+  --oks-table-fg-muted: var(--adm-muted);
+  --oks-table-border: var(--adm-line);
+  --oks-table-header-bg: var(--adm-card);
+  --oks-table-row-hover: var(--adm-row-hover);
 }
