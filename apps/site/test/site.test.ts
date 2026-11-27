@@ -1226,6 +1226,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     const page = await browser.newPage();
     await signIn(page);
     await page.goto(site.base + "/admin/pages");
+    await page.getByRole("button", { name: "New page", exact: true }).click();
     await page.getByLabel(/^Title of the new page/).fill("My new page");
     await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
@@ -1290,6 +1291,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await signIn(page, cara);
     await page.goto(site.base + "/admin/pages");
     expect(await page.getByRole("link", { name: "About", exact: true }).count()).toBe(0); // only her own
+    await page.getByRole("button", { name: "New page", exact: true }).click();
     await page.getByLabel(/^Title of the new page/).fill("Cara's draft");
     await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
@@ -2194,6 +2196,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
 
   const addPageNamed = async (page: Page, title: string) => {
     await page.goto(site.base + "/admin/pages");
+    await page.getByRole("button", { name: "New page", exact: true }).click();
     await page.getByLabel(/^Title of the new page/).fill(title);
     await page.getByLabel("Start in").selectOption("writing");
     await page.getByRole("button", { name: "Add new" }).click();
@@ -2224,7 +2227,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     expect(await page.getByRole("link", { name: "Trash me" }).count()).toBe(0);
 
     // The Trash view lists it with the days left; Restore brings it back as a draft.
-    await page.getByRole("link", { name: /^Trash \(/ }).click();
+    await page.getByRole("link", { name: /^Trash \d+$/ }).click();
     await page.getByRole("table", { name: "pages in the trash" }).waitFor();
     const row = page.getByRole("row", { name: /Trash me/ });
     expect(await row.textContent()).toContain("30");
@@ -4630,6 +4633,9 @@ describe.skipIf(!findBrowser())(
     /** Opens the editor for a new post or page from its list: the owner types a title and presses "Add new". */
     const startEntry = async (kind: "posts" | "pages", title: string) => {
       await page.goto(`${site.base}/admin/${kind}`);
+      await page
+        .getByRole("button", { name: kind === "posts" ? "New post" : "New page", exact: true })
+        .click();
       await page
         .getByLabel(new RegExp(`^Title of the new ${kind === "posts" ? "post" : "page"}`))
         .fill(title);
@@ -7350,6 +7356,7 @@ describe.skipIf(!findBrowser())(
       const add = async (kind: "pages" | "posts", title: string, start?: string) => {
         await page.goto(`${site.base}/admin/${kind}`);
         const word = kind === "pages" ? "page" : "post";
+        await page.getByRole("button", { name: `New ${word}`, exact: true }).click();
         await page.getByLabel(new RegExp(`^Title of the new ${word}`)).fill(title);
         if (start) await page.getByLabel("Start in").selectOption(start);
         await page.getByRole("button", { name: "Add new", exact: true }).click();
@@ -9991,6 +9998,7 @@ describe.skipIf(!findBrowser())(
     test("importing pages from a CSV file: the screen takes a file and reports row by row; a row that passes the publish check goes live, one that does not is kept as a draft with the reason", async () => {
       const page = await signedIn(owner);
       await page.goto(site.base + "/admin/pages");
+      await page.getByRole("button", { name: "Import", exact: true }).click();
       await page.getByText("Import from a CSV file").click();
       await page.locator("#import-file").setInputFiles({
         name: "pages.csv",
@@ -10034,6 +10042,7 @@ describe.skipIf(!findBrowser())(
     test("importing Markdown files: the screen takes several files and reports each; the published one is public with its list, a picture with no description keeps its page a draft", async () => {
       const page = await signedIn(owner);
       await page.goto(site.base + "/admin/pages");
+      await page.getByRole("button", { name: "Import", exact: true }).click();
       await page.getByText("Import from Markdown files").click();
       await page.locator("#import-md").setInputFiles([
         {
@@ -10498,6 +10507,7 @@ describe.skipIf(!findBrowser())(
     test("TH-58: the default theme's sample pages have no accessibility violation in light and dark mode", async () => {
       const page = await signedIn(owner);
       await page.goto(site.base + "/admin/pages");
+      await page.getByRole("button", { name: "Import", exact: true }).click();
       await page.getByText("Import from Markdown files").click();
       await page.locator("#import-md").setInputFiles({
         name: "sample-th58.md",
@@ -11277,10 +11287,21 @@ describe.skipIf(!findBrowser())(
         .getByText(/Changes here show on every page where "Welcome box" is linked: this changes /)
         .waitFor();
       const preview = page.frameLocator('iframe[title="Preview of your site with your changes"]');
-      await preview.getByText("Plants for every window").click();
-      await tools
-        .getByRole("heading", { name: "Selected: Text: Plants for every window" })
-        .waitFor();
+      // A click that lands before the preview has finished loading is ignored, so click again until the text is selected.
+      await expect
+        .poll(
+          async () => {
+            await preview
+              .getByText("Plants for every window")
+              .click({ timeout: 5_000 })
+              .catch(() => undefined);
+            return tools
+              .getByRole("heading", { name: "Selected: Text: Plants for every window" })
+              .isVisible();
+          },
+          { timeout: 30_000, interval: 500 },
+        )
+        .toBe(true);
       await tools.getByRole("button", { name: "Delete", exact: true }).click();
       await page.getByText("Draft kept").waitFor();
       expect(times(await home(), "Plants for every window")).toBe(2);
@@ -11812,10 +11833,8 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
       .getByText("Your password is changed, and you are signed out everywhere.", { exact: false })
       .waitFor();
     // The notice follows; the old session is gone; the new password works; the link does not work twice.
-    const notice = await mailTo(
-      "anna@example.com",
-      received.filter((m) => m.to.includes("anna@example.com")).length + 1,
-    );
+    // Counted from before the reset mail: the notice can arrive before this line runs, and a count taken here would then wait for one mail too many.
+    const notice = await mailTo("anna@example.com", before + 2);
     expect(notice).toContain("Subject: Your password was changed: Anna's Garden");
     await page.goto(site.base + "/admin");
     await page.waitForURL((url) => url.pathname === "/admin/login");

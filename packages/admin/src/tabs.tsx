@@ -1,6 +1,7 @@
 // The tab strip above the main area (spec 07, section 3a; D111): Dashboard first and never closable, one tab per open
 // entry, a dot for unsaved changes, a "+" menu and an "All tabs" menu. A proper tab list for keyboard and screen readers.
-import { Button, Modal } from "oks-ui";
+import { Button } from "oks-ui";
+import { Modal } from "./modal.js";
 import { useId, useState, type KeyboardEvent } from "react";
 
 export interface ShellTab {

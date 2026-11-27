@@ -1,8 +1,8 @@
 "use client";
 // Categories or Tags: the list, a box to add one, and a window to change or delete one.
-import { ListTable } from "@oks-page/admin";
+import { ListTable, Modal } from "@oks-page/admin";
 import type { TaxonomyView, TermView } from "@oks-page/core";
-import { Alert, Button, Modal, TextField } from "oks-ui";
+import { Alert, Button, TextField } from "oks-ui";
 import { useMemo, useState, type FormEvent } from "react";
 
 const DEFAULT_SLUG = "uncategorised";

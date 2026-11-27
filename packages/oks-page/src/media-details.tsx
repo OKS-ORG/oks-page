@@ -1,6 +1,7 @@
 "use client";
 // The panel next to the library grid: a preview, the description fields, where the file is used, and delete.
-import { Alert, Button, Modal, TextField } from "oks-ui";
+import { Alert, Button, TextField } from "oks-ui";
+import { Modal } from "@oks-page/admin";
 import { useEffect, useState } from "react";
 import {
   deleteFile,

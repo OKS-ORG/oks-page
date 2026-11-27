@@ -1,6 +1,7 @@
 "use client";
 // The saved copies of an entry: who saved when, what changed, a compare with the page as it is now, and a restore.
-import { Alert, Button, Modal } from "oks-ui";
+import { Alert, Button } from "oks-ui";
+import { Modal } from "@oks-page/admin";
 import { useCallback, useEffect, useState } from "react";
 import { formatWhen } from "./time-format";
 

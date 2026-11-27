@@ -1,9 +1,9 @@
 "use client";
 // The edit screen: title, address, status and the editor. Saving sends everything and learns the new revision.
-import { EntryEditor, LayoutEditor } from "@oks-page/admin";
+import { EntryEditor, LayoutEditor, Modal } from "@oks-page/admin";
 import type { FieldDef, InsertableSection } from "@oks-page/core";
 import { utcToZonedLocal, zonedLocalToUtc } from "@oks-page/core/timezone";
-import { Alert, Button, Modal, RadioGroupField, TextField } from "oks-ui";
+import { Alert, Button, RadioGroupField, TextField } from "oks-ui";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import type { Block } from "oks-ui";
 import {

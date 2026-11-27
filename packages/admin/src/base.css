@@ -1146,3 +1146,195 @@ main form > div:not([class]):not(:has(> br)) > label {
   --oks-table-header-bg: var(--adm-card);
   --oks-table-row-hover: var(--adm-row-hover);
 }
+
+/* ---- The Pages and Posts list (step 4): the line under the title with its buttons, the status tabs, the search and sort row, the table card. ---- */
+.oks-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.oks-list-summary {
+  color: var(--adm-muted);
+  font-size: 14px;
+}
+.oks-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.oks-list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--adm-line);
+}
+.oks-list-tabs > button,
+.oks-list-tabs > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--adm-muted);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oks-list-tabs > button:hover,
+.oks-list-tabs > a:hover {
+  color: var(--adm-ink);
+}
+.oks-list-tabs > button:focus-visible,
+.oks-list-tabs > a:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: -2px;
+  border-radius: var(--adm-radius);
+}
+.oks-list-tabs > [aria-pressed="true"],
+.oks-list-tabs > [aria-current="page"] {
+  border-bottom-color: var(--adm-a1);
+  color: var(--adm-on-soft);
+  font-weight: 700;
+}
+.oks-list-tabs > * > span {
+  border-radius: 10px;
+  padding: 1px 8px;
+  background: var(--adm-line);
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.oks-list-tabs > [aria-pressed="true"] > span,
+.oks-list-tabs > [aria-current="page"] > span {
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+}
+.oks-list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.oks-list-tools > input,
+.oks-list-tools > select {
+  box-sizing: border-box;
+  height: 44px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 15px;
+  padding: 0 14px;
+}
+.oks-list-tools > input {
+  width: 280px;
+  max-width: 100%;
+}
+.oks-list-tools > select {
+  width: 200px;
+  max-width: 100%;
+}
+.oks-list-tools > input:focus-visible,
+.oks-list-tools > select:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: 1px;
+}
+/* The table sits in a card with its count and page buttons at the foot. */
+.oks-list {
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+  box-shadow: var(--adm-shadow);
+  padding: 12px;
+}
+.oks-list-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 12px 16px 0;
+  border-top: 1px solid var(--adm-line);
+}
+.oks-list-count {
+  color: var(--adm-muted);
+  font-size: 14px;
+}
+.oks-list-title {
+  display: block;
+  color: var(--adm-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.oks-list-title:hover {
+  text-decoration: underline;
+}
+.oks-list-path {
+  display: block;
+  margin-top: 2px;
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-chip {
+  display: inline-block;
+  border-radius: 12px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--adm-info-bg);
+  color: var(--adm-info-fg);
+}
+.oks-chip[data-status="published"] {
+  background: var(--adm-ok-bg);
+  color: var(--adm-ok-fg);
+}
+.oks-chip[data-status="draft"] {
+  background: var(--adm-warn-bg);
+  color: var(--adm-warn-fg);
+}
+.oks-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.oks-person-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+main .oks-list-tabs > a {
+  color: var(--adm-muted);
+}
+main .oks-list-tabs > a[aria-current="page"] {
+  color: var(--adm-on-soft);
+}
+/* A dialog's choice box is drawn like the other fields. */
+.oks-admin .oksModal select {
+  box-sizing: border-box;
+  height: 44px;
+  max-width: 100%;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 15px;
+  padding: 0 12px;
+}

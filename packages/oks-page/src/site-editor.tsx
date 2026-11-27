@@ -2,7 +2,7 @@
 // The site editor (spec 05, section 17.5). On the left: the layouts and the outline of the open one. In the middle: the
 // real site with the changes, where a click selects a block. On the right: what can be done with the selected block.
 // Every change is kept as a draft on the server a moment after it is made; Publish shows all changed layouts at once.
-import { EntryEditor } from "@oks-page/admin";
+import { EntryEditor, Modal } from "@oks-page/admin";
 import type {
   EntryUse,
   LayoutDetail,
@@ -13,7 +13,7 @@ import type {
   SavedSectionInfo,
   SectionPlace,
 } from "@oks-page/core";
-import { Alert, Button, Modal } from "oks-ui";
+import { Alert, Button } from "oks-ui";
 import type { Block } from "oks-ui";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {

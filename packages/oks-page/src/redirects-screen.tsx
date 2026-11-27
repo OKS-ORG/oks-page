@@ -1,9 +1,9 @@
 "use client";
 // The redirects screen: the list (old address, new address, kind, uses), a box to add one and a Delete button.
 // Redirects made by changing a published address appear here too.
-import { ListTable } from "@oks-page/admin";
+import { ListTable, Modal } from "@oks-page/admin";
 import type { RedirectView } from "@oks-page/core";
-import { Alert, Button, Modal, TextField } from "oks-ui";
+import { Alert, Button, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
 
 const failure = (body: unknown, fallback: string): string =>

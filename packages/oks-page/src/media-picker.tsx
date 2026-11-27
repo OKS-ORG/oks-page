@@ -1,6 +1,7 @@
 "use client";
 // A window with the library to pick an image from, used by the editor's "Insert image from library".
-import { Alert, Button, MediaLibrary, Modal } from "oks-ui";
+import { Alert, Button, MediaLibrary } from "oks-ui";
+import { Modal } from "@oks-page/admin";
 import { useState } from "react";
 import { loadFile, toLibraryItem, type MediaItem } from "./media-client";
 import { ACCEPT } from "./media-library";

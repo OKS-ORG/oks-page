@@ -1,9 +1,9 @@
 "use client";
 // The Users screen: the people of the site with their roles, a form to invite someone (it makes a link to pass on), and the
 // invitations that are waiting. The server decides every change again; the last administrator cannot be demoted or removed.
-import { ListTable } from "@oks-page/admin";
+import { ListTable, Modal } from "@oks-page/admin";
 import type { Invitation, Member, RoleChoice } from "@oks-page/core";
-import { Alert, Button, Modal, TextField } from "oks-ui";
+import { Alert, Button, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
 import { formatWhen } from "./time-format";
 

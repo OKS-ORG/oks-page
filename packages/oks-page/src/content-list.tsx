@@ -1,8 +1,8 @@
 "use client";
 // The list of pages or posts, with a box to add a new one.
-import { ListTable } from "@oks-page/admin";
-import { Alert, Button, Modal, TextField } from "oks-ui";
-import { useState, type FormEvent } from "react";
+import { ListTable, type ListSort, Modal } from "@oks-page/admin";
+import { Alert, Button, TextField } from "oks-ui";
+import { useMemo, useState, type FormEvent } from "react";
 import { formatWhen } from "./time-format";
 import type { ListedEntry, TrashedEntry } from "@oks-page/core";
 
@@ -34,6 +34,34 @@ interface ImportReply {
     note?: string;
   }[];
 }
+
+/** The words for a status, and the tab each one counts in. */
+const STATUS_WORDS: Record<string, string> = {
+  published: "Published",
+  draft: "Draft",
+  scheduled: "Scheduled",
+  pending: "Waiting for review",
+};
+const FILTERS: { key: string; label: string }[] = [
+  { key: "published", label: "Published" },
+  { key: "draft", label: "Drafts" },
+  { key: "scheduled", label: "Scheduled" },
+  { key: "pending", label: "Waiting for review" },
+];
+const SORTS: { key: string; label: string; sort: ListSort }[] = [
+  {
+    key: "changed-desc",
+    label: "Newest changes",
+    sort: { column: "updated", direction: "descending" },
+  },
+  {
+    key: "changed-asc",
+    label: "Oldest changes",
+    sort: { column: "updated", direction: "ascending" },
+  },
+  { key: "title-asc", label: "Title A to Z", sort: { column: "title", direction: "ascending" } },
+  { key: "title-desc", label: "Title Z to A", sort: { column: "title", direction: "descending" } },
+];
 
 /** What an import did: the counts, and a line for each one that needs a word. */
 function ImportOutcome({
@@ -90,6 +118,29 @@ export function ContentList({
   const [importProblem, setImportProblem] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<ImportReply | null>(null);
   const [markdownFiles, setMarkdownFiles] = useState<File[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ListSort | null>(SORTS[0]!.sort);
+  const counts = useMemo(() => {
+    const by: Record<string, number> = {};
+    for (const e of entries) by[e.status] = (by[e.status] ?? 0) + 1;
+    return by;
+  }, [entries]);
+  const shownEntries = useMemo(() => {
+    const words = search.trim().toLowerCase();
+    return entries.filter(
+      (e) =>
+        (filter === "all" || e.status === filter) &&
+        (words === "" ||
+          e.title.toLowerCase().includes(words) ||
+          e.slug.toLowerCase().includes(words)),
+    );
+  }, [entries, filter, search]);
+  const sortKey = SORTS.find(
+    (s) => s.sort.column === sort?.column && s.sort.direction === sort?.direction,
+  )?.key;
 
   async function runImport(data: FormData) {
     setImporting(true);
@@ -178,16 +229,83 @@ export function ContentList({
   const inTrashView = view === "trash";
   return (
     <>
-      <nav aria-label={`${segment} views`}>
-        <a href={`/admin/${segment}`} aria-current={inTrashView ? undefined : "page"}>
-          All ({entries.length})
-        </a>
-        {" | "}
+      <div className="oks-list-head">
+        <p className="oks-list-summary">
+          {entries.length === 0
+            ? `No ${segment} yet.`
+            : `${entries.length} ${entries.length === 1 ? singular : segment}: ${
+                FILTERS.filter((f) => counts[f.key])
+                  .map((f) => `${counts[f.key]} ${f.label.toLowerCase()}`)
+                  .join(", ") || "none shown"
+              }.`}
+        </p>
+        {canAdd && !inTrashView ? (
+          <div className="oks-list-actions">
+            <Button onPress={() => setImportOpen(true)}>Import</Button>
+            <Button color="primary" onPress={() => setAdding(true)}>
+              {`New ${singular}`}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <nav className="oks-list-tabs" aria-label={`${segment} views`}>
+        <button
+          type="button"
+          className="oks-list-tab"
+          aria-pressed={!inTrashView && filter === "all"}
+          onClick={() =>
+            inTrashView ? window.location.assign(`/admin/${segment}`) : setFilter("all")
+          }
+        >
+          All <span>{entries.length}</span>
+        </button>
+        {FILTERS.filter((f) => f.key !== "pending" || counts["pending"]).map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            className="oks-list-tab"
+            aria-pressed={!inTrashView && filter === f.key}
+            onClick={() =>
+              inTrashView ? window.location.assign(`/admin/${segment}`) : setFilter(f.key)
+            }
+          >
+            {f.label} <span>{counts[f.key] ?? 0}</span>
+          </button>
+        ))}
         <a href={`/admin/${segment}?view=trash`} aria-current={inTrashView ? "page" : undefined}>
-          Trash ({trashed.length})
+          Trash <span>{trashed.length}</span>
         </a>
       </nav>
-      {canAdd && !inTrashView ? (
+      {inTrashView ? null : (
+        <div className="oks-list-tools">
+          <input
+            type="search"
+            aria-label={`Search ${segment}`}
+            placeholder={`Search ${segment}`}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select
+            aria-label={`Sort ${segment}`}
+            value={sortKey ?? ""}
+            onChange={(event) =>
+              setSort(SORTS.find((s) => s.key === event.target.value)?.sort ?? null)
+            }
+          >
+            {sortKey ? null : <option value="">Sorted by a column</option>}
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <Modal
+        isOpen={importOpen && canAdd && !inTrashView}
+        onClose={() => setImportOpen(false)}
+        title={`Import ${segment}`}
+      >
         <div className="oks-imports">
           <details>
             <summary style={{ minBlockSize: "24px", lineHeight: "24px" }}>
@@ -247,7 +365,7 @@ export function ContentList({
             <ImportOutcome problem={importProblem} report={importReport} segment={segment} />
           </details>
         </div>
-      ) : null}
+      </Modal>
       {problem && inTrashView ? (
         <Alert color="danger" title="Not done" description={problem} />
       ) : null}
@@ -310,7 +428,11 @@ export function ContentList({
       >
         <p>{deleting?.title} and its earlier copies will be removed. This cannot be undone.</p>
       </Modal>
-      {canAdd && !inTrashView ? (
+      <Modal
+        isOpen={adding && canAdd && !inTrashView}
+        onClose={() => setAdding(false)}
+        title={`New ${singular}`}
+      >
         <form onSubmit={add} aria-label={`Add a ${singular}`}>
           {problem ? <Alert color="danger" title="Not added" description={problem} /> : null}
           <TextField
@@ -335,32 +457,65 @@ export function ContentList({
             Add new
           </Button>
         </form>
-      ) : null}
+      </Modal>
       {inTrashView ? null : entries.length === 0 ? (
         <p>Nothing here yet.</p>
       ) : (
         <ListTable
           label={segment}
-          rows={entries.map((e) => ({ ...e, updated: when(e.updatedAt) }))}
+          rows={shownEntries.map((e) => ({ ...e, updated: when(e.updatedAt) }))}
           getRowKey={(row) => row.id}
+          sort={sort}
+          onSortChange={setSort}
           columns={[
             {
               key: "title",
               header: "Title",
               sortable: true,
-              render: (row) => <a href={`/admin/${segment}/${row.id}`}>{row.title}</a>,
+              render: (row) => (
+                <>
+                  <a className="oks-list-title" href={`/admin/${segment}/${row.id}`}>
+                    {row.title}
+                  </a>
+                  <span className="oks-list-path">{`/${row.slug}`}</span>
+                </>
+              ),
             },
-            { key: "status", header: "Status", sortable: true },
-            { key: "authorName", header: "Author", sortable: true },
+            {
+              key: "status",
+              header: "Status",
+              sortable: true,
+              render: (row) => (
+                <span className="oks-chip" data-status={row.status}>
+                  {STATUS_WORDS[row.status] ?? row.status}
+                </span>
+              ),
+            },
+            {
+              key: "authorName",
+              header: "Author",
+              sortable: true,
+              render: (row) => (
+                <span className="oks-person">
+                  <span className="oks-person-mark" aria-hidden="true">
+                    {(row.authorName || "?").charAt(0).toUpperCase()}
+                  </span>
+                  {row.authorName}
+                </span>
+              ),
+            },
             {
               key: "updated",
-              header: "Updated",
+              header: "Changed",
               sortValue: (row) => row.updatedAt,
               sortable: true,
             },
           ]}
         />
       )}
+      {!inTrashView && entries.length > 0 && shownEntries.length === 0 ? (
+        <p role="status">{`No ${segment} match that.`}</p>
+      ) : null}
     </>
   );
 }
