@@ -22,6 +22,14 @@
       "types": "./dist/font-files.d.ts",
       "default": "./dist/font-files.js"
     },
+    "./looks": {
+      "types": "./dist/looks.d.ts",
+      "default": "./dist/looks.js"
+    },
+    "./appearance": {
+      "types": "./dist/appearance.d.ts",
+      "default": "./dist/appearance.js"
+    },
     "./timezone": {
       "types": "./dist/timezone.d.ts",
       "default": "./dist/timezone.js"

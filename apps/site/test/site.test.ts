@@ -1,4 +1,5 @@
 // The real site, built and started, against SQLite and PostgreSQL. SEO-01 to SEO-09, SEO-50, SEO-55.
+import { newId } from "@oks-page/db";
 import { openers, type TestDb } from "@oks-page/db/testing";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import {
@@ -15317,3 +15318,222 @@ describe.skipIf(!findBrowser())(
     });
   },
 );
+
+// Appearance (docs/18-new-look.md, step 7): the look, light or dark and the accent colour of the admin, kept per person.
+describe.skipIf(!findBrowser())("appearance of the admin", { timeout: 150_000 }, () => {
+  let db: TestDb;
+  let site: Awaited<ReturnType<typeof startSite>>;
+  let browser: Browser;
+  const owner = { email: "anna@example.com", password: "a-long-password" };
+  const cara = { email: "cara@example.com", password: "cara-long-password" };
+
+  beforeAll(async () => {
+    db = await openSqlite(join(mkdtempSync(join(tmpdir(), "oks-look-")), "site.sqlite"));
+    site = await startSite("sqlite", db, { OKS_SECRET: "l".repeat(40) });
+    const made = await fetch(site.base + "/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        siteName: "Anna's Garden",
+        starterContent: true,
+        admin: { name: "Anna", ...owner },
+      }),
+    });
+    expect(made.status).toBe(200);
+    const signUp = await fetch(site.base + "/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: site.base },
+      body: JSON.stringify({ name: "Cara", ...cara }),
+    });
+    const caraId = ((await signUp.json()) as { user: { id: string } }).user.id;
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const role = String((await db.run("select id from roles where key = 'editor'"))[0]!["id"]);
+    await db.run(
+      "insert into site_members (site_id, user_id, role_id, created_at) values (?, ?, ?, ?)",
+      [siteId, caraId, role, new Date()],
+    );
+    browser = await launchBrowser();
+  }, 300_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    site?.server.kill();
+    await db?.close();
+  });
+
+  type Page = Awaited<ReturnType<Browser["newPage"]>>;
+  // The site allows only a few sign-ins from one address in five minutes, so each person signs in once and the page is kept.
+  const kept = new Map<string, Page>();
+  const signInNew = async (who: { email: string; password: string }) => {
+    const page = await browser.newPage();
+    await page.goto(site.base + "/admin/login");
+    await page.getByLabel("Email").fill(who.email);
+    await page.getByLabel(/^Password/).fill(who.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
+    return page;
+  };
+  const signedIn = async (who: { email: string; password: string }) => {
+    const have = kept.get(who.email);
+    if (have) return have;
+    const page = await signInNew(who);
+    kept.set(who.email, page);
+    return page;
+  };
+  const axeViolations = async (page: Page) => {
+    await noMotion(page);
+    await page.addScriptTag({ content: axe.source });
+    const result = await page.evaluate(() =>
+      (window as unknown as { axe: typeof axe }).axe.run(document, {
+        runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+      }),
+    );
+    return result.violations.map(
+      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+    );
+  };
+  /** What the admin wrapper says now: its look and mode, and the accent the page really uses. */
+  const wrapper = (page: Page) =>
+    page.evaluate(() => {
+      const el = document.querySelector(".oks-admin") as HTMLElement;
+      const style = getComputedStyle(el);
+      return {
+        look: el.getAttribute("data-look"),
+        mode: el.getAttribute("data-mode"),
+        accent: style.getPropertyValue("--adm-a1").trim().toLowerCase(),
+        ground: style.getPropertyValue("--adm-ground").trim().toLowerCase(),
+      };
+    });
+  const api = (page: Page, method: string, body?: unknown) =>
+    page.evaluate(
+      async ([m, b]) => {
+        const r = await fetch("/api/admin/appearance", {
+          method: m as string,
+          ...(b ? { headers: { "content-type": "application/json" }, body: b as string } : {}),
+        });
+        return { status: r.status, body: await r.json().catch(() => null) };
+      },
+      [method, body === undefined ? null : JSON.stringify(body)],
+    );
+
+  test("a person chooses a look, dark mode and their own colour; it shows at once, is kept, and is theirs alone", async () => {
+    const page = await signedIn(owner);
+    await page.goto(site.base + "/admin/account/appearance");
+    await page.getByRole("heading", { name: "Appearance", level: 1 }).waitFor();
+    // Nothing chosen: the product's own look, light on a light device.
+    expect(await wrapper(page)).toMatchObject({
+      look: "clear-sky",
+      mode: "system",
+      accent: "#0b57d0",
+    });
+    expect(await axeViolations(page)).toEqual([]);
+
+    // A look: it shows at once, and is still there after a reload.
+    await page.getByLabel("Pine").check({ force: true });
+    await page.getByText("Saved.").waitFor();
+    expect(await wrapper(page)).toMatchObject({ look: "pine", accent: "#0f6b5c" });
+    await page.reload();
+    expect(await wrapper(page)).toMatchObject({ look: "pine", accent: "#0f6b5c" });
+
+    // Dark: the dark ground of the look, in the page and after a reload; the screen is readable in it.
+    await page.getByRole("radio", { name: /^Dark/ }).check({ force: true });
+    await page.getByText("Saved.").waitFor();
+    expect(await wrapper(page)).toMatchObject({ look: "pine", mode: "dark", ground: "#161917" });
+    await page.reload();
+    expect(await wrapper(page)).toMatchObject({
+      mode: "dark",
+      ground: "#161917",
+      accent: "#7fcfbb",
+    });
+    expect(await axeViolations(page)).toEqual([]);
+
+    // A colour of their own: too pale a colour is made darker or lighter, and the screen says so.
+    await page.getByRole("radio", { name: /^Light/ }).check({ force: true });
+    await page.getByLabel("Your own colour").fill("#ffe066");
+    await page.getByText("Made a little darker or lighter so words stay readable.").waitFor();
+    await page.getByText("Saved.").waitFor();
+    const own = await wrapper(page);
+    expect(own.mode).toBe("light");
+    expect(own.accent).not.toBe("#ffe066");
+    expect(await axeViolations(page)).toEqual([]);
+    await page.reload();
+    expect((await wrapper(page)).accent).toBe(own.accent);
+
+    // Cara has her own: nothing of Anna's reaches her.
+    const other = await signedIn(cara);
+    expect(await wrapper(other)).toMatchObject({
+      look: "clear-sky",
+      mode: "system",
+      accent: "#0b57d0",
+    });
+
+    // Reset goes back to the product's default.
+    await page.getByRole("button", { name: "Reset to the site default" }).click();
+    await page.getByText("Back to the site's default.").waitFor();
+    await page.reload();
+    expect(await wrapper(page)).toMatchObject({
+      look: "clear-sky",
+      mode: "system",
+      accent: "#0b57d0",
+    });
+  });
+
+  test("the menu's open or collapsed choice is kept with the person, not with the browser", async () => {
+    const page = await signedIn(owner);
+    await page.goto(site.base + "/admin/pages");
+    await page.getByRole("heading", { name: "Pages", level: 1 }).waitFor();
+    const before = await api(page, "GET");
+    expect(before.body.appearance.menuCollapsed).toBeNull();
+    await page.keyboard.press("[");
+    await expect
+      .poll(async () => (await api(page, "GET")).body.appearance.menuCollapsed, {
+        timeout: 15_000,
+      })
+      .toBe(true);
+    // A fresh browser (no stored data at all) opens the menu as the rail.
+    const fresh = await signInNew(owner);
+    await fresh.goto(site.base + "/admin/pages");
+    await fresh.getByRole("heading", { name: "Pages", level: 1 }).waitFor();
+    expect(await fresh.locator('.oks-sidebar[data-collapsed="true"]').count()).toBe(1);
+    await page.keyboard.press("[");
+    await expect
+      .poll(async () => (await api(page, "GET")).body.appearance.menuCollapsed, {
+        timeout: 15_000,
+      })
+      .toBe(false);
+    await fresh.close();
+  });
+
+  test("the menu shows how many comments wait, to those who may decide on them", async () => {
+    const siteId = String((await db.run("select id from sites"))[0]!["id"]);
+    const entry = String((await db.run("select id from entries limit 1"))[0]!["id"]);
+    const page = await signedIn(owner);
+    await page.goto(site.base + "/admin/pages");
+    await page.getByRole("heading", { name: "Pages", level: 1 }).waitFor();
+    expect(await page.getByRole("link", { name: "Comments", exact: true }).count()).toBe(1);
+    await db.run(
+      "insert into comments (id, site_id, entry_id, author_name, content, status, created_at) values (?, ?, ?, 'Zed', 'Nice', 'pending', ?)",
+      [newId(), siteId, entry, new Date()],
+    );
+    await page.reload();
+    await page.getByRole("link", { name: "Comments (1)" }).waitFor();
+    // An editor may decide on comments too, so the count is there for her as well.
+    const other = await signedIn(cara);
+    await other.goto(site.base + "/admin/pages");
+    await other.getByRole("link", { name: "Comments (1)" }).waitFor();
+  });
+
+  test("a bad choice is refused in plain words, a signed-out visitor gets nothing, and the account page links to the screen", async () => {
+    const page = await signedIn(owner);
+    for (const bad of [{ look: "neon" }, { mode: "dim" }, { accent: "blue" }, { colour: "#fff" }]) {
+      const r = await api(page, "PUT", bad);
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+      expect(r.body.error.message.length).toBeGreaterThan(10);
+    }
+    expect((await api(page, "GET")).body.appearance).toMatchObject({ look: "clear-sky" });
+    expect((await fetch(site.base + "/api/admin/appearance")).status).toBe(401);
+    await page.goto(site.base + "/admin/account");
+    await page.getByRole("link", { name: "Appearance", exact: true }).click();
+    await page.getByRole("heading", { name: "Appearance", level: 1 }).waitFor();
+  });
+});

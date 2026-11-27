@@ -50,6 +50,10 @@ export default async function AccountPage({ searchParams }: Props) {
         result={typeof params.email === "string" ? params.email : null}
         error={typeof params.error === "string" ? params.error : null}
       />
+      <p>
+        <a href="/admin/account/appearance">Appearance</a>: the look of the admin, light or dark,
+        and your colour.
+      </p>
       <AccountScreen initialEnabled={enabled} required={member.mustSetUpTwoFactor} />
       {passkeyOptions(await siteBase()) ? <AccountPasskeys /> : null}
     </AdminFrame>

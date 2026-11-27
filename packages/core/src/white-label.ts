@@ -6,6 +6,8 @@ import type { SqlRunner } from "@oks-page/db";
 import type { Actor } from "./content.js";
 import { bestLicenceState, type LicencePayload } from "./licence.js";
 import { brandCss } from "./theme.js";
+import { isAppearanceMode, type AppearanceMode } from "./appearance.js";
+import { isLook, type LookKey } from "./looks.js";
 
 export const WHITE_LABEL_KEY = "white_label";
 /** The licence item the paid white-label features belong to. */
@@ -22,8 +24,12 @@ export interface WhiteLabel {
   helpUrl: string;
   /** A line in the admin's footer instead of "Developed with …" (up to 120 characters), or empty. Agency tier. */
   footer: string;
-  /** The brand color as "#rrggbb", or empty for the product's own. Agency tier. */
+  /** The brand color as "#rrggbb", or empty for the product's own. Agency tier. It is also the accent people see until they choose their own. */
   color: string;
+  /** The look the admin has for people who have not chosen their own (Clear Sky, Pine or Ember), or empty for the product's own. Agency tier. */
+  look: LookKey | "";
+  /** Light, dark, or the device's, for people who have not chosen their own, or empty for the product's own. Agency tier. */
+  mode: AppearanceMode | "";
 }
 
 export const NO_WHITE_LABEL: WhiteLabel = {
@@ -32,6 +38,8 @@ export const NO_WHITE_LABEL: WhiteLabel = {
   helpUrl: "",
   footer: "",
   color: "",
+  look: "",
+  mode: "",
 };
 
 const ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -74,6 +82,8 @@ export function effectiveWhiteLabel(stored: unknown): WhiteLabel {
     helpUrl: HTTPS.test(help) || MAILTO.test(help) ? help : "",
     footer: footer.length <= FOOTER_MAX ? footer : "",
     color: typeof v["color"] === "string" && COLOR.test(v["color"]) ? v["color"].toLowerCase() : "",
+    look: isLook(v["look"]) ? v["look"] : "",
+    mode: isAppearanceMode(v["mode"]) ? v["mode"] : "",
   };
 }
 
@@ -132,7 +142,7 @@ export async function saveWhiteLabel(
     return { ok: false, code: "invalid", message: "The request was not understood." };
   const given = input as Record<string, unknown>;
   const unknown = Object.keys(given).find(
-    (k) => !["name", "logoId", "helpUrl", "footer", "color"].includes(k),
+    (k) => !["name", "logoId", "helpUrl", "footer", "color", "look", "mode"].includes(k),
   );
   if (unknown)
     return {
@@ -176,6 +186,17 @@ export async function saveWhiteLabel(
     return bad("color", "Brand color: write it like #1a5fb4 (a # and six letters or digits).");
   if (color !== "" && !agency) return need("color");
 
+  const rawLook = given["look"] ?? "";
+  if (rawLook !== "" && !isLook(rawLook))
+    return bad("look", "Default look: choose Clear Sky, Pine or Ember.");
+  const look = rawLook as LookKey | "";
+  if (look !== "" && !agency) return need("look");
+  const rawMode = given["mode"] ?? "";
+  if (rawMode !== "" && !isAppearanceMode(rawMode))
+    return bad("mode", "Default mode: choose light, dark, or the one that matches the device.");
+  const mode = rawMode as AppearanceMode | "";
+  if (mode !== "" && !agency) return need("mode");
+
   const rawLogo = given["logoId"] ?? null;
   let logoId: string | null = null;
   if (rawLogo !== null && rawLogo !== "") {
@@ -190,7 +211,7 @@ export async function saveWhiteLabel(
     logoId = rawLogo;
   }
 
-  const value: WhiteLabel = { name, logoId, helpUrl, footer, color };
+  const value: WhiteLabel = { name, logoId, helpUrl, footer, color, look, mode };
   await runner.all(
     `insert into "settings" ("site_id", "key", "value", "revision", "updated_at") values (?, ?, ?, 1, ?)
      on conflict ("site_id", "key") do update set "value" = excluded."value", "revision" = "settings"."revision" + 1, "updated_at" = excluded."updated_at"`,

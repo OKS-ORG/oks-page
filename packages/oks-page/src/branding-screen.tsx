@@ -26,6 +26,8 @@ export function BrandingScreen({
     helpUrl: initial.helpUrl,
     footer: initial.footer,
     color: initial.color,
+    look: initial.look as string,
+    mode: initial.mode as string,
   });
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -95,6 +97,40 @@ export function BrandingScreen({
             onChange={(e) => setValues({ ...values, color: e.target.value })}
             style={FIELD}
           />
+        </label>
+      </p>
+      <p>
+        <label>
+          Look for people who have not chosen their own (each person can change it under Appearance)
+          <br />
+          <select
+            value={values.look}
+            disabled={!agency}
+            onChange={(e) => setValues({ ...values, look: e.target.value })}
+            style={FIELD}
+          >
+            <option value="">The product&apos;s own (Clear Sky)</option>
+            <option value="clear-sky">Clear Sky</option>
+            <option value="pine">Pine</option>
+            <option value="ember">Ember</option>
+          </select>
+        </label>
+      </p>
+      <p>
+        <label>
+          Light or dark for people who have not chosen their own
+          <br />
+          <select
+            value={values.mode}
+            disabled={!agency}
+            onChange={(e) => setValues({ ...values, mode: e.target.value })}
+            style={FIELD}
+          >
+            <option value="">The product&apos;s own (match the device)</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="system">Match the device</option>
+          </select>
         </label>
       </p>
       <p>

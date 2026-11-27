@@ -3,7 +3,8 @@
 // content, then it signs the owner in. Drawn as the design shows: a bar of steps, a kicker, a title and a line under it, the
 // fields, and Back and Continue at the foot. Language, look, two-factor and backup codes come with their own parts.
 import { Alert, PasswordField, TextField } from "oks-ui";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
+import { ChoiceCard } from "./choice-card";
 
 const PURPOSES: { label: string; note: string; value: string; d: string }[] = [
   { label: "A blog", note: "Posts and news", value: "blog", d: "M6 3h9l4 4v14H6z M14 3v5h5" },
@@ -71,33 +72,7 @@ function Icon({ d }: { d: string }) {
   );
 }
 
-/** One choice drawn as a card; the real radio button inside it is what the keyboard and screen readers use. */
-function Choice({
-  name,
-  value,
-  checked,
-  onChange,
-  children,
-}: {
-  name: string;
-  value: string;
-  checked: boolean;
-  onChange: (value: string) => void;
-  children: ReactNode;
-}) {
-  return (
-    <label className="oks-choice" data-checked={checked}>
-      <input
-        type="radio"
-        name={name}
-        value={value}
-        checked={checked}
-        onChange={() => onChange(value)}
-      />
-      {children}
-    </label>
-  );
-}
+const Choice = ChoiceCard;
 
 export function SetupWizard() {
   const [step, setStep] = useState(0);

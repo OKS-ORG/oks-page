@@ -161,6 +161,43 @@ for (const { kind, open, skip } of openers) {
     });
     afterEach(async () => db.close());
 
+    test("the default look and mode are the Agency tier's: saved with a key, refused without one, bad ones refused in plain words", async () => {
+      const ok = await saveWhiteLabel(
+        db.runner,
+        admin,
+        siteId,
+        { look: "pine", mode: "dark" },
+        true,
+      );
+      expect(ok).toMatchObject({ ok: true, whiteLabel: { look: "pine", mode: "dark" } });
+      expect(await loadWhiteLabel(db.runner, siteId)).toMatchObject({ look: "pine", mode: "dark" });
+      expect(
+        await saveWhiteLabel(db.runner, admin, siteId, { look: "ember" }, false),
+      ).toMatchObject({
+        ok: false,
+        field: "look",
+      });
+      expect(
+        await saveWhiteLabel(db.runner, admin, siteId, { mode: "light" }, false),
+      ).toMatchObject({
+        ok: false,
+        field: "mode",
+      });
+      for (const [input, field] of [
+        [{ look: "neon" }, "look"],
+        [{ mode: "dim" }, "mode"],
+      ] as const)
+        expect(await saveWhiteLabel(db.runner, admin, siteId, input, true)).toMatchObject({
+          ok: false,
+          field,
+        });
+      // Emptying them never needs a key.
+      expect(await saveWhiteLabel(db.runner, admin, siteId, {}, false)).toMatchObject({
+        ok: true,
+        whiteLabel: { look: "", mode: "" },
+      });
+    });
+
     test("the name is free: any site may set it, it is cleaned, and an empty name goes back to the product's own", async () => {
       expect(await loadWhiteLabel(db.runner, siteId)).toEqual(NO_WHITE_LABEL);
       const r = await saveWhiteLabel(
@@ -215,6 +252,8 @@ for (const { kind, open, skip } of openers) {
         helpUrl: "https://weber.example/help",
         footer: "Made by Weber",
         color: "#1a5fb4",
+        look: "",
+        mode: "",
       });
       // The key ends: the owner may clear the extras (the name stays) without a key.
       const cleared = await saveWhiteLabel(

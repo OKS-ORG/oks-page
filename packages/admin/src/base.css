@@ -1695,3 +1695,105 @@ main .oks-list-tabs > a[aria-current="page"] {
   font-size: 15px;
   line-height: 1.5;
 }
+
+/* ---- Appearance (step 7): look cards with their colours, mode cards, accent dots and a colour of your own. ---- */
+.oks-choice-grid[data-columns="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 560px) {
+  .oks-choice-grid[data-columns="3"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.oks-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 760px;
+}
+.oks-look-swatches {
+  display: flex;
+  margin-bottom: 12px;
+}
+.oks-look-swatches > span {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--adm-card);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--adm-line);
+}
+.oks-look-swatches > span + span {
+  margin-inline-start: -8px;
+}
+.oks-accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.oks-accent-dot {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid var(--adm-card);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--adm-control);
+  cursor: pointer;
+}
+.oks-accent-dot[data-own="true"] {
+  background: conic-gradient(var(--adm-a1) 0 50%, var(--adm-soft) 0 100%);
+}
+.oks-accent-dot[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px var(--adm-a1),
+    0 0 0 4px var(--adm-card);
+}
+.oks-accent-dot:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: 4px;
+}
+.oks-accent-type {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-inline-start: 12px;
+  color: var(--adm-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.oks-accent-type > input {
+  box-sizing: border-box;
+  height: 40px;
+  width: 140px;
+  padding: 0 12px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 15px;
+}
+.oks-appearance-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--adm-line);
+}
+.oks-appearance-status {
+  min-height: 20px;
+  margin: 0;
+  color: var(--adm-ok-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* The logo above the entry card follows the person's own mode, not only the device. */
+:root:root .oks-admin[data-mode="light"] > main::before {
+  filter: none;
+}
+:root:root .oks-admin[data-mode="dark"] > main::before {
+  filter: invert(1) hue-rotate(180deg) brightness(1.1);
+}

@@ -113,7 +113,11 @@ function Branch({
         className="oks-menu-link"
         aria-expanded={open}
         aria-controls={id}
-        {...(collapsed ? { "aria-label": nameOf(item), "data-tip": item.label } : {})}
+        {...(collapsed
+          ? { "aria-label": nameOf(item), "data-tip": item.label }
+          : item.badge
+            ? { "aria-label": nameOf(item) }
+            : {})}
         onClick={() => setOpen(!open)}
       >
         <Icon item={item} />
@@ -202,7 +206,11 @@ function MenuRow({
         className="oks-menu-link"
         href={item.href}
         {...(item.key === selectedKey ? { "aria-current": "page" as const } : {})}
-        {...(collapsed ? { "aria-label": nameOf(item), "data-tip": item.label } : {})}
+        {...(collapsed
+          ? { "aria-label": nameOf(item), "data-tip": item.label }
+          : item.badge
+            ? { "aria-label": nameOf(item) }
+            : {})}
       >
         <Icon item={item} />
         {collapsed ? (
