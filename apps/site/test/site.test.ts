@@ -4649,6 +4649,10 @@ describe.skipIf(!findBrowser())(
       await page.keyboard.type(text);
     };
     const publishNow = async () => {
+      // The status choices are in the panel beside the writing; after the page was scrolled they can sit under the header, so bring them to the middle first.
+      await page
+        .getByLabel("Published (everyone sees it)")
+        .evaluate((el) => el.scrollIntoView({ block: "center" }));
       await page.getByLabel("Published (everyone sees it)").check({ force: true });
       await page.getByRole("button", { name: "Save", exact: true }).click();
       // A picture just uploaded has no description yet, so the publish check may list it first: the administrator goes

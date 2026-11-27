@@ -403,136 +403,38 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
         </div>
       ) : null}
       {note ? <p role="status">{note}</p> : null}
-      <TextField name="title" label="Title" required value={title} onChange={setTitle} />
-      <TextField
-        name="slug"
-        label="Address"
-        description={`The address of this page: /${props.prefix}${slugPart}`}
-        required
-        value={slugPart}
-        onChange={setSlugPart}
-      />
-      {props.liveEdit ? (
-        <p>
-          <strong>This page is live.</strong> When you save, your changes go live at once, and the
-          people who look after the site are told. They can put the earlier version back.
-        </p>
-      ) : props.canPublish ? (
-        <RadioGroupField
-          name="status"
-          label="Status"
-          options={[
-            { label: "Draft (only you see it)", value: "draft" },
-            { label: "Waiting for review (an editor looks at it)", value: "pending" },
-            { label: "Scheduled (goes live at the time you choose)", value: "scheduled" },
-            { label: "Published (everyone sees it)", value: "published" },
-          ]}
-          value={status}
-          onChange={(value: string) => setStatus(value)}
-        />
-      ) : (
-        <RadioGroupField
-          name="status"
-          label="Status"
-          options={[
-            { label: "Draft (only you see it)", value: "draft" },
-            {
-              label: "Waiting for review (an editor looks at it, and publishes it)",
-              value: "pending",
-            },
-          ]}
-          value={status === "pending" ? "pending" : "draft"}
-          onChange={(value: string) => setStatus(value)}
-        />
-      )}
-      {props.canPublish && status === "scheduled" ? (
-        <div>
-          <label htmlFor="scheduled-at">Publish at</label>
-          <input
-            id="scheduled-at"
-            name="scheduledAt"
-            type="datetime-local"
-            required
-            value={scheduledAt}
-            onChange={(event) => setScheduledAt(event.target.value)}
-            aria-describedby="scheduled-at-help"
-          />
-          <p id="scheduled-at-help">
-            {props.timeZone
-              ? `The time in ${props.timeZone.replace(/_/g, " ")}.`
-              : "The time on your own clock."}{" "}
-            The page goes live then, with your permission.
-          </p>
-        </div>
-      ) : null}
-      {props.editor === "layout" ? (
-        <LayoutEditor
-          label="Content"
-          initialBlocks={props.blocks as unknown as LayoutBlocks}
-          canLock={props.canLock === true}
-          {...(props.screens ? { screens: props.screens } : {})}
-          {...(props.pluginBlocks ? { pluginBlocks: props.pluginBlocks } : {})}
-          onChange={(next) => {
-            blocksNow.current = next as unknown as Block[];
-            setChanges((n) => n + 1);
-          }}
-          registerReplace={(replace) => {
-            replaceBlocksNow.current = (blocks) => replace(blocks as unknown as LayoutBlocks);
-          }}
-          onSave={(blocks) => send(blocks as unknown as Block[], false)}
-          toolbar={
-            <>
-              <EditorSwitch
-                id={props.id}
-                to="writing"
-                save={() => send(blocksNow.current, false)}
-              />
-              <UnsavedCopyBanner
-                copy={unsaved}
-                timeZone={props.timeZone ?? null}
-                onBringBack={(copy) => {
-                  setTitle(copy.title);
-                  replaceBlocksNow.current?.(copy.blocks);
-                  blocksNow.current = copy.blocks;
-                  forgetUnsaved();
-                }}
-                onThrowAway={() => {
-                  forgetUnsaved();
-                  void fetch(`/api/admin/entries/${props.id}/autosave`, { method: "DELETE" });
-                }}
-              />
-            </>
-          }
-        />
-      ) : (
-        <>
-          <p>
-            <small>Simple page: written in the writing editor. </small>
-            <EditorSwitch id={props.id} to="layout" save={() => send(blocksNow.current, false)} />
-          </p>
-          <EntryEditor
-            label="Content"
-            initialBlocks={props.blocks}
-            onImageUpload={uploadForEditor}
-            onFileUpload={uploadForEditor}
-            onVideoUpload={uploadForEditor}
-            onBlocksChange={(next) => {
-              blocksNow.current = next;
-              setChanges((n) => n + 1);
-            }}
-            savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
-            toolbar={({ insertImage, insertBlocks, replaceBlocks }) => {
-              replaceBlocksNow.current = replaceBlocks;
-              return (
+      <div className="oks-edit">
+        <div className="oks-edit-main">
+          <TextField name="title" label="Title" required value={title} onChange={setTitle} />
+          {props.editor === "layout" ? (
+            <LayoutEditor
+              label="Content"
+              initialBlocks={props.blocks as unknown as LayoutBlocks}
+              canLock={props.canLock === true}
+              {...(props.screens ? { screens: props.screens } : {})}
+              {...(props.pluginBlocks ? { pluginBlocks: props.pluginBlocks } : {})}
+              onChange={(next) => {
+                blocksNow.current = next as unknown as Block[];
+                setChanges((n) => n + 1);
+              }}
+              registerReplace={(replace) => {
+                replaceBlocksNow.current = (blocks) => replace(blocks as unknown as LayoutBlocks);
+              }}
+              onSave={(blocks) => send(blocks as unknown as Block[], false)}
+              toolbar={
                 <>
-                  <InsertFromLibrary insertImage={insertImage} />
-                  <InsertSection sections={props.savedSections ?? []} insertBlocks={insertBlocks} />
+                  <EditorSwitch
+                    id={props.id}
+                    to="writing"
+                    save={() => send(blocksNow.current, false)}
+                  />
                   <UnsavedCopyBanner
                     copy={unsaved}
                     timeZone={props.timeZone ?? null}
                     onBringBack={(copy) => {
                       setTitle(copy.title);
-                      replaceBlocks(copy.blocks);
+                      replaceBlocksNow.current?.(copy.blocks);
+                      blocksNow.current = copy.blocks;
                       forgetUnsaved();
                     }}
                     onThrowAway={() => {
@@ -541,102 +443,229 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
                     }}
                   />
                 </>
-              );
-            }}
-            onSave={(blocks) => send(blocks, false)}
-          />
-        </>
-      )}
-      {defs.length > 0 ? (
-        <fieldset aria-label="Details" style={{ margin: "1rem 0" }}>
-          <legend>
-            <strong>Details</strong>
-          </legend>
-          {defs.map((d) => (
-            <p key={d.key}>
-              {d.type === "true / false" ? (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={values[d.key] === true}
-                    onChange={(event) => setValues({ ...values, [d.key]: event.target.checked })}
-                  />{" "}
-                  {d.label}
-                </label>
-              ) : d.type === "relation" ? (
-                <span role="group" aria-label={d.label}>
-                  {d.label}
-                  {d.required ? " (required)" : ""}
-                  <br />
-                  <RelationField
-                    label={d.label}
-                    target={d.target ?? ""}
-                    value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
-                    onChange={(id) => setValues({ ...values, [d.key]: id })}
-                  />
-                </span>
-              ) : d.type === "picture" ? (
-                <span role="group" aria-label={d.label}>
-                  {d.label}
-                  {d.required ? " (required)" : ""}
-                  <br />
-                  <PictureField
-                    label={d.label}
-                    value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
-                    onChange={(id) => setValues({ ...values, [d.key]: id })}
-                  />
-                </span>
-              ) : (
-                <label>
-                  {d.label}
-                  {d.required ? " (required)" : ""}
-                  <br />
-                  {d.type === "long text" ? (
-                    <textarea
-                      rows={4}
-                      style={{ inlineSize: "100%", maxInlineSize: "40rem" }}
-                      value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
-                      onChange={(event) => setValues({ ...values, [d.key]: event.target.value })}
-                    />
+              }
+            />
+          ) : (
+            <>
+              <p>
+                <small>Simple page: written in the writing editor. </small>
+                <EditorSwitch
+                  id={props.id}
+                  to="layout"
+                  save={() => send(blocksNow.current, false)}
+                />
+              </p>
+              <EntryEditor
+                label="Content"
+                initialBlocks={props.blocks}
+                onImageUpload={uploadForEditor}
+                onFileUpload={uploadForEditor}
+                onVideoUpload={uploadForEditor}
+                onBlocksChange={(next) => {
+                  blocksNow.current = next;
+                  setChanges((n) => n + 1);
+                }}
+                savedSections={(props.savedSections ?? []).map(({ id, name }) => ({ id, name }))}
+                toolbar={({ insertImage, insertBlocks, replaceBlocks }) => {
+                  replaceBlocksNow.current = replaceBlocks;
+                  return (
+                    <>
+                      <InsertFromLibrary insertImage={insertImage} />
+                      <InsertSection
+                        sections={props.savedSections ?? []}
+                        insertBlocks={insertBlocks}
+                      />
+                      <UnsavedCopyBanner
+                        copy={unsaved}
+                        timeZone={props.timeZone ?? null}
+                        onBringBack={(copy) => {
+                          setTitle(copy.title);
+                          replaceBlocks(copy.blocks);
+                          forgetUnsaved();
+                        }}
+                        onThrowAway={() => {
+                          forgetUnsaved();
+                          void fetch(`/api/admin/entries/${props.id}/autosave`, {
+                            method: "DELETE",
+                          });
+                        }}
+                      />
+                    </>
+                  );
+                }}
+                onSave={(blocks) => send(blocks, false)}
+              />
+            </>
+          )}
+          {defs.length > 0 ? (
+            <fieldset aria-label="Details" style={{ margin: "1rem 0" }}>
+              <legend>
+                <strong>Details</strong>
+              </legend>
+              {defs.map((d) => (
+                <p key={d.key}>
+                  {d.type === "true / false" ? (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={values[d.key] === true}
+                        onChange={(event) =>
+                          setValues({ ...values, [d.key]: event.target.checked })
+                        }
+                      />{" "}
+                      {d.label}
+                    </label>
+                  ) : d.type === "relation" ? (
+                    <span role="group" aria-label={d.label}>
+                      {d.label}
+                      {d.required ? " (required)" : ""}
+                      <br />
+                      <RelationField
+                        label={d.label}
+                        target={d.target ?? ""}
+                        value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
+                        onChange={(id) => setValues({ ...values, [d.key]: id })}
+                      />
+                    </span>
+                  ) : d.type === "picture" ? (
+                    <span role="group" aria-label={d.label}>
+                      {d.label}
+                      {d.required ? " (required)" : ""}
+                      <br />
+                      <PictureField
+                        label={d.label}
+                        value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
+                        onChange={(id) => setValues({ ...values, [d.key]: id })}
+                      />
+                    </span>
                   ) : (
-                    <input
-                      type={d.type === "number" ? "number" : d.type === "date" ? "date" : "text"}
-                      step={d.type === "number" ? "any" : undefined}
-                      value={
-                        typeof values[d.key] === "string" || typeof values[d.key] === "number"
-                          ? String(values[d.key])
-                          : ""
-                      }
-                      onChange={(event) => setValues({ ...values, [d.key]: event.target.value })}
-                    />
+                    <label>
+                      {d.label}
+                      {d.required ? " (required)" : ""}
+                      <br />
+                      {d.type === "long text" ? (
+                        <textarea
+                          rows={4}
+                          style={{ inlineSize: "100%", maxInlineSize: "40rem" }}
+                          value={typeof values[d.key] === "string" ? (values[d.key] as string) : ""}
+                          onChange={(event) =>
+                            setValues({ ...values, [d.key]: event.target.value })
+                          }
+                        />
+                      ) : (
+                        <input
+                          type={
+                            d.type === "number" ? "number" : d.type === "date" ? "date" : "text"
+                          }
+                          step={d.type === "number" ? "any" : undefined}
+                          value={
+                            typeof values[d.key] === "string" || typeof values[d.key] === "number"
+                              ? String(values[d.key])
+                              : ""
+                          }
+                          onChange={(event) =>
+                            setValues({ ...values, [d.key]: event.target.value })
+                          }
+                        />
+                      )}
+                    </label>
                   )}
-                </label>
-              )}
+                </p>
+              ))}
+            </fieldset>
+          ) : null}
+          <EntryAccessibility
+            blocks={blocksNow.current}
+            onMarkDecorative={(blockId) =>
+              replaceBlocksNow.current?.(
+                markDecorative(blocksNow.current as { id: string }[], blockId) as Block[],
+              )
+            }
+          />
+          <EntryPreview id={props.id} />
+        </div>
+        <aside className="oks-edit-side" aria-label="Settings for this page">
+          <section className="oks-side-card">
+            <h2>Status and visibility</h2>
+            {props.liveEdit ? (
+              <p>
+                <strong>This page is live.</strong> When you save, your changes go live at once, and
+                the people who look after the site are told. They can put the earlier version back.
+              </p>
+            ) : props.canPublish ? (
+              <RadioGroupField
+                name="status"
+                label="Status"
+                options={[
+                  { label: "Draft (only you see it)", value: "draft" },
+                  { label: "Waiting for review (an editor looks at it)", value: "pending" },
+                  { label: "Scheduled (goes live at the time you choose)", value: "scheduled" },
+                  { label: "Published (everyone sees it)", value: "published" },
+                ]}
+                value={status}
+                onChange={(value: string) => setStatus(value)}
+              />
+            ) : (
+              <RadioGroupField
+                name="status"
+                label="Status"
+                options={[
+                  { label: "Draft (only you see it)", value: "draft" },
+                  {
+                    label: "Waiting for review (an editor looks at it, and publishes it)",
+                    value: "pending",
+                  },
+                ]}
+                value={status === "pending" ? "pending" : "draft"}
+                onChange={(value: string) => setStatus(value)}
+              />
+            )}
+            {props.canPublish && status === "scheduled" ? (
+              <div>
+                <label htmlFor="scheduled-at">Publish at</label>
+                <input
+                  id="scheduled-at"
+                  name="scheduledAt"
+                  type="datetime-local"
+                  required
+                  value={scheduledAt}
+                  onChange={(event) => setScheduledAt(event.target.value)}
+                  aria-describedby="scheduled-at-help"
+                />
+                <p id="scheduled-at-help">
+                  {props.timeZone
+                    ? `The time in ${props.timeZone.replace(/_/g, " ")}.`
+                    : "The time on your own clock."}{" "}
+                  The page goes live then, with your permission.
+                </p>
+              </div>
+            ) : null}
+          </section>
+          <section className="oks-side-card">
+            <h2>Address</h2>
+            <TextField
+              name="slug"
+              label="Address"
+              description={`The address of this page: /${props.prefix}${slugPart}`}
+              required
+              value={slugPart}
+              onChange={setSlugPart}
+            />
+          </section>
+          {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
+          <EntryLayoutPanel id={props.id} />
+          <EntrySeoPanel id={props.id} />
+          <AutosaveStatus savedAt={keptAt} timeZone={props.timeZone ?? null} />
+          <EntryRevisions id={props.id} revision={revisionNo} timeZone={props.timeZone ?? null} />
+          {props.canTrash ? (
+            <p>
+              <Button color="danger" onPress={() => setTrashing(true)}>
+                Move to trash
+              </Button>
             </p>
-          ))}
-        </fieldset>
-      ) : null}
-      <EntryAccessibility
-        blocks={blocksNow.current}
-        onMarkDecorative={(blockId) =>
-          replaceBlocksNow.current?.(
-            markDecorative(blocksNow.current as { id: string }[], blockId) as Block[],
-          )
-        }
-      />
-      {props.showTerms ? <EntryTermsPanel id={props.id} /> : null}
-      <EntryLayoutPanel id={props.id} />
-      <EntrySeoPanel id={props.id} />
-      <EntryPreview id={props.id} />
-      <AutosaveStatus savedAt={keptAt} timeZone={props.timeZone ?? null} />
-      <EntryRevisions id={props.id} revision={revisionNo} timeZone={props.timeZone ?? null} />
-      {props.canTrash ? (
-        <p>
-          <Button color="danger" onPress={() => setTrashing(true)}>
-            Move to trash
-          </Button>
-        </p>
-      ) : null}
+          ) : null}
+        </aside>
+      </div>
       <Modal
         isOpen={trashing}
         onClose={() => setTrashing(false)}
