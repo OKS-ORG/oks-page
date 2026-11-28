@@ -3,6 +3,7 @@
 import type { BlockedStyle, SecuritySettings } from "@oks-page/core";
 import { Alert, Button, RadioGroupField } from "oks-ui";
 import { useState, type FormEvent } from "react";
+import { SaveBar, SettingRow, SettingsCard } from "./settings-rows";
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
@@ -78,24 +79,34 @@ export function SecuritySettingsFormScreen({
   }
 
   return (
-    <form className="oks-security-settings" onSubmit={(event) => void save(event)}>
-      <RadioGroupField
-        name="requireTwoFactorForAdmins"
-        label="Two-factor sign-in for administrators"
-        options={[
-          { label: "Recommended, not required", value: "off" },
-          {
-            label: "Required: an administrator without it must set it up before using the admin",
-            value: "on",
-          },
-        ]}
-        value={rule}
-        onChange={(value: string) => setRule(value)}
-      />
-      <p>
-        You need two-factor on for your own account first. Set it up on{" "}
-        <a href="/admin/account">Your account</a>.
-      </p>
+    <form className="oks-security-settings oks-set-form" onSubmit={(event) => void save(event)}>
+      {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
+      <SettingsCard title="Signing in">
+        <SettingRow
+          label="Two-factor sign-in"
+          help={
+            <>
+              You need two-factor on for your own account first. Set it up on{" "}
+              <a href="/admin/account">Your account</a>.
+            </>
+          }
+        >
+          <RadioGroupField
+            name="requireTwoFactorForAdmins"
+            label="Two-factor sign-in for administrators"
+            options={[
+              { label: "Recommended, not required", value: "off" },
+              {
+                label:
+                  "Required: an administrator without it must set it up before using the admin",
+                value: "on",
+              },
+            ]}
+            value={rule}
+            onChange={(value: string) => setRule(value)}
+          />
+        </SettingRow>
+      </SettingsCard>
       {blocked.length > 0 ? (
         <section aria-labelledby="blocked-styles-title">
           <h2 id="blocked-styles-title">Stylesheets that were blocked</h2>
@@ -120,33 +131,38 @@ export function SecuritySettingsFormScreen({
           </ul>
         </section>
       ) : null}
-      <p>
-        <label htmlFor="style-hosts">Other hosts that may serve stylesheets</label>
-        <br />
-        <textarea
-          id="style-hosts"
-          name="styleHosts"
-          rows={4}
-          cols={48}
-          spellCheck={false}
-          aria-describedby="style-hosts-hint"
-          value={hosts}
-          onChange={(event) => setHosts(event.target.value)}
-        />
-      </p>
-      <p id="style-hosts-hint">
-        Public pages load stylesheets only from this site. If you keep files on a CDN or another
-        host you trust, write its name here, one per line (for example{" "}
-        <code>assets.example.com</code>). Only https and exact host names work: no <code>*</code>,
-        no <code>http://</code>, no port. Themes and plug-ins cannot add a host.
-      </p>
-      <p>
+      <SettingsCard title="Stylesheets from other hosts">
+        <SettingRow
+          label="Other hosts that may serve stylesheets"
+          htmlFor="style-hosts"
+          helpId="style-hosts-hint"
+          help={
+            <>
+              Public pages load stylesheets only from this site. If you keep files on a CDN or
+              another host you trust, write its name here, one per line (for example{" "}
+              <code>assets.example.com</code>). Only https and exact host names work: no{" "}
+              <code>*</code>, no <code>http://</code>, no port. Themes and plug-ins cannot add a
+              host.
+            </>
+          }
+        >
+          <textarea
+            id="style-hosts"
+            name="styleHosts"
+            rows={4}
+            cols={48}
+            spellCheck={false}
+            aria-describedby="style-hosts-hint"
+            value={hosts}
+            onChange={(event) => setHosts(event.target.value)}
+          />
+        </SettingRow>
+      </SettingsCard>
+      <SaveBar note={note}>
         <Button color="primary" type="submit">
           Save settings
         </Button>
-      </p>
-      {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
-      <p role="status">{note}</p>
+      </SaveBar>
     </form>
   );
 }

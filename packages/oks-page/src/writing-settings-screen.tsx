@@ -4,12 +4,7 @@
 import type { LayoutChoice, WritingSettings } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useState, type FormEvent } from "react";
-
-const FIELD: React.CSSProperties = {
-  minBlockSize: "32px",
-  maxInlineSize: "28rem",
-  inlineSize: "100%",
-};
+import { SaveBar, SettingRow, SettingsCard } from "./settings-rows";
 
 export function WritingSettingsScreen({
   initial,
@@ -50,58 +45,62 @@ export function WritingSettingsScreen({
   }
 
   return (
-    <form aria-labelledby="writing-heading" onSubmit={(event) => void save(event)}>
-      <h2 id="writing-heading">New posts</h2>
-      <p>Defaults for new posts. A post can always be changed on its own edit screen.</p>
+    <form
+      className="oks-set-form"
+      aria-labelledby="writing-heading"
+      onSubmit={(event) => void save(event)}
+    >
       {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
-      <p>
-        <label htmlFor="writing-category">Default category</label>
-        <br />
-        <select
-          id="writing-category"
-          value={form.defaultCategoryId ?? ""}
-          onChange={(e) => setForm({ ...form, defaultCategoryId: e.target.value || null })}
-          style={FIELD}
+      <SettingsCard
+        title="New posts"
+        titleId="writing-heading"
+        line="Defaults for new posts. A post can always be changed on its own edit screen."
+      >
+        <SettingRow label="Default category" htmlFor="writing-category">
+          <select
+            id="writing-category"
+            value={form.defaultCategoryId ?? ""}
+            onChange={(e) => setForm({ ...form, defaultCategoryId: e.target.value || null })}
+          >
+            <option value="">None</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow
+          label="Default layout"
+          htmlFor="writing-layout"
+          helpId="writing-layout-help"
+          help={
+            layouts.length === 0
+              ? "Layouts you make for pages to choose show here too (Settings, Site editor, New layout)."
+              : "Layouts you made in the site editor can be chosen here."
+          }
         >
-          <option value="">None</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </p>
-      <p>
-        <label htmlFor="writing-layout">Default layout</label>
-        <br />
-        <select
-          id="writing-layout"
-          value={form.defaultLayout}
-          onChange={(e) => setForm({ ...form, defaultLayout: e.target.value })}
-          aria-describedby="writing-layout-help"
-          style={FIELD}
-        >
-          <option value="">Post (the usual layout)</option>
-          {layouts.map((l) => (
-            <option key={l.name} value={l.name}>
-              {l.title}
-            </option>
-          ))}
-        </select>
-      </p>
-      <p id="writing-layout-help">
-        {layouts.length === 0
-          ? "Layouts you make for pages to choose show here too (Settings, Site editor, New layout)."
-          : "Layouts you made in the site editor can be chosen here."}
-      </p>
+          <select
+            id="writing-layout"
+            value={form.defaultLayout}
+            onChange={(e) => setForm({ ...form, defaultLayout: e.target.value })}
+            aria-describedby="writing-layout-help"
+          >
+            <option value="">Post (the usual layout)</option>
+            {layouts.map((l) => (
+              <option key={l.name} value={l.name}>
+                {l.title}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+      </SettingsCard>
       <p>Comments come in a later release; their settings will be on this page.</p>
-      <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
-        <span>{changed ? "You have unsaved changes." : "No changes."}</span>
+      <SaveBar note={changed ? "You have unsaved changes." : note || "No changes."}>
         <Button type="submit" color="primary" isDisabled={!changed}>
           Save changes
         </Button>
-      </p>
-      <p role="status">{note}</p>
+      </SaveBar>
     </form>
   );
 }

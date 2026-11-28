@@ -2577,3 +2577,112 @@ button.oks-type-row:focus-visible {
     justify-self: start;
   }
 }
+
+/* ---- Settings rows (step 8): cards with a title, a row for each setting (name and help left, control right), a save bar. ---- */
+.oks-shell-body > main > form.oks-set-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.oks-shell-body > main > form.oks-set-form > * {
+  margin: 0;
+}
+.oks-set-card {
+  container: setcard / inline-size;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-set-head {
+  padding: 16px 24px;
+}
+.oks-set-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.oks-set-head p {
+  margin: 4px 0 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-set-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px 32px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--adm-line);
+}
+@container setcard (max-width: 640px) {
+  .oks-set-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.oks-set-label > label,
+.oks-set-label > span {
+  color: var(--adm-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.oks-set-label > p {
+  margin: 4px 0 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.oks-set-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.oks-set-control > p {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-admin .oks-set-control :is(input[type="text"], select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 420px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 15px;
+}
+/* The row already shows the name of a group of choices; its own label stays for screen readers. */
+.oks-set-control .oksRadioGroupFieldLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.oks-set-control .oksRadioGroupFieldControl {
+  flex-direction: column;
+  gap: 10px;
+}
+.oks-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-save-bar > p {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 14px;
+}
