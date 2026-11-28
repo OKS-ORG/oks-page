@@ -62,6 +62,20 @@ async function interactive(page: Awaited<ReturnType<Browser["newPage"]>>): Promi
 
 type TestPage = Awaited<ReturnType<Browser["newPage"]>>;
 
+/** Waits until the scripts of an admin page have taken it over (a click before that can be lost, or land where something moves to). */
+async function hydrated(page: TestPage): Promise<void> {
+  await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll("button, input, a, [role=option]")].some((el) =>
+          Object.keys(el).some((k) => k.startsWith("__reactProps$")),
+        ),
+      undefined,
+      { timeout: 10_000 },
+    )
+    .catch(() => undefined);
+}
+
 /**
  * After a page goes to an admin address it waits, up to 10 seconds and without failing, until React has taken over the page: a click
  * made before that is lost on a slow machine (the page is only HTML until then). Public pages are not touched.
@@ -70,17 +84,7 @@ function settleAfterGoto(page: TestPage): TestPage {
   const goto = page.goto.bind(page);
   page.goto = (async (url: string, options?: Parameters<TestPage["goto"]>[1]) => {
     const response = await goto(url, options);
-    if (new URL(page.url()).pathname.startsWith("/admin"))
-      await page
-        .waitForFunction(
-          () =>
-            [...document.querySelectorAll("button, input, a, [role=option]")].some((el) =>
-              Object.keys(el).some((k) => k.startsWith("__reactProps$")),
-            ),
-          undefined,
-          { timeout: 10_000 },
-        )
-        .catch(() => undefined);
+    if (new URL(page.url()).pathname.startsWith("/admin")) await hydrated(page);
     return response;
   }) as TestPage["goto"];
   return page;
@@ -2224,6 +2228,7 @@ describe.skipIf(!findBrowser())("pages and posts in the admin", { timeout: 90_00
     await page.getByRole("button", { name: "Move to trash" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Move to trash" }).click();
     await page.waitForURL("**/admin/pages");
+    await hydrated(page);
     await expect.poll(async () => (await text("/trash-me")).status).toBe(404);
     expect(await page.getByRole("link", { name: "Trash me" }).count()).toBe(0);
 
@@ -3359,7 +3364,9 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
       mimeType: "image/png",
       buffer: await png("#444"),
     });
-    await expect.poll(() => page.locator(".oks-entry-editor img").count()).toBeGreaterThan(0);
+    await expect
+      .poll(() => page.locator(".oks-entry-editor img").count(), { timeout: 20_000 })
+      .toBeGreaterThan(0);
     const src = await page.locator(".oks-entry-editor img").first().getAttribute("src");
     expect(src).toMatch(/^\/uploads\/.*From-block\.png$/);
     expect((await fetch(site.base + src!)).status).toBe(200);
@@ -7756,6 +7763,8 @@ describe.skipIf(!findBrowser())(
         // On the Plugins screen it is listed, and there is nothing to add.
         await page.goto(site.base + "/admin/tools/plugins");
         await page.getByRole("row", { name: /Forms/ }).waitFor();
+        await page.getByRole("button", { name: "Add plugin", exact: true }).click();
+        await page.getByLabel("Plugin file").waitFor();
         expect(await page.getByRole("button", { name: "Add Forms" }).count()).toBe(0);
 
         // The owner can switch it off (the form goes from the page) and remove it.
@@ -7767,10 +7776,11 @@ describe.skipIf(!findBrowser())(
 
         // Then "Add Forms" brings it back, through the same approval screen as any plugin.
         await page.goto(site.base + "/admin/tools/plugins");
+        await page.getByRole("button", { name: "Add plugin", exact: true }).click();
         await page.getByRole("button", { name: "Add Forms" }).click();
-        await page.getByRole("heading", { name: /^Add Forms / }).waitFor();
+        await page.getByRole("heading", { name: "Add Forms", exact: true }).waitFor();
         await page.getByLabel(/Add its own web addresses to your site/).waitFor();
-        await page.getByRole("button", { name: "Add plugin" }).click();
+        await page.getByRole("button", { name: /and install$/ }).click();
         await page.getByText("Forms is added and switched on.").waitFor();
         await page.getByRole("row", { name: /Forms/ }).waitFor();
         expect(await page.getByRole("button", { name: "Add Forms" }).count()).toBe(0);
@@ -7802,16 +7812,19 @@ describe.skipIf(!findBrowser())(
           code: c,
           integrity: createHash("sha256").update(integrityOf).digest("hex"),
         });
-      const upload = (text: string) =>
-        page.getByLabel("Plugin file").setInputFiles({
+      const upload = async (text: string) => {
+        if ((await page.getByRole("dialog").count()) === 0)
+          await page.getByRole("button", { name: "Add plugin", exact: true }).click();
+        await page.getByLabel("Plugin file").setInputFiles({
           name: "hello.oksplugin",
           mimeType: "application/json",
           buffer: Buffer.from(text),
         });
+      };
       // Nobody signed in may not see the plugins.
       expect((await fetch(site.base + "/api/admin/plugins")).status).toBe(401);
       await page.goto(site.base + "/admin/tools/plugins");
-      await page.getByRole("heading", { name: "Plugins", level: 2 }).waitFor();
+      await page.getByRole("heading", { name: "Plugins", level: 1 }).waitFor();
       await page.getByText("No plugins are installed.").waitFor();
 
       // A file whose code was changed after it was made is refused in plain words.
@@ -7820,16 +7833,19 @@ describe.skipIf(!findBrowser())(
 
       // A good file shows what it asks for in plain words; the owner approves only the first permission.
       await upload(fileOf(code));
-      await page.getByRole("heading", { name: "Add Hello plugin 1.0.0" }).waitFor();
+      await page.getByRole("heading", { name: "Add Hello plugin", exact: true }).waitFor();
+      await page.getByText(/Version 1\.0\.0, by Ada/).waitFor();
       await page.getByLabel(/Read your published posts and pages/).waitFor();
       await page.getByLabel(/Change posts and pages when they are saved/).uncheck();
-      await page.getByRole("button", { name: "Add plugin" }).click();
+      await page.getByRole("button", { name: /and install$/ }).click();
       await page.getByText("Hello plugin is added and switched on.").waitFor();
+      await page.getByRole("dialog").waitFor({ state: "detached" });
       const row = page.getByRole("row", { name: /Hello plugin/ });
       await row.waitFor();
-      expect(await row.innerText()).toContain("On");
+      await expect.poll(() => row.innerText()).toContain("Limited");
+      expect(await row.innerText()).toContain("1 of 2 approved");
       expect(await row.innerText()).toContain(
-        "Change posts and pages when they are saved (not approved)",
+        "Missing: change posts and pages when they are saved",
       );
 
       // The server kept only the approved permission.
@@ -7850,18 +7866,22 @@ describe.skipIf(!findBrowser())(
       // The same plugin cannot be added twice.
       await upload(fileOf(code));
       await page.getByText("This plugin is already installed.").waitFor();
-      expect(await page.getByRole("button", { name: "Add plugin" }).isDisabled()).toBe(true);
+      expect(await page.getByRole("button", { name: /and install$/ }).isDisabled()).toBe(true);
       await page.getByRole("button", { name: "Cancel" }).click();
+      await page.getByRole("dialog").waitFor({ state: "detached" });
 
       // Off and on again.
-      await row.getByRole("button", { name: "Switch off" }).click();
+      await row.getByRole("switch").click();
       await page.getByText("Hello plugin is off.").waitFor();
-      expect(await row.innerText()).toContain("Off");
-      await row.getByRole("button", { name: "Switch on" }).click();
+      await expect.poll(() => row.innerText()).toContain("Off");
+      expect(await row.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+      await row.getByRole("switch").click();
       await page.getByText("Hello plugin is on.").waitFor();
 
       // Removing asks first, then takes the plugin away.
-      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Details of Hello plugin" }).click();
+      await page.getByText("Change posts and pages when they are saved (not approved)").waitFor();
+      await page.getByRole("button", { name: "Remove", exact: true }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("No plugins are installed.").waitFor();
     });
@@ -7876,6 +7896,7 @@ describe.skipIf(!findBrowser())(
       });
       expect(anonymous.status).toBe(401);
       await page.goto(site.base + "/admin/tools/plugins");
+      await page.getByRole("button", { name: "Add plugin", exact: true }).click();
       const name = page.getByLabel("npm package name");
       const look = page.getByRole("button", { name: "Look up on npm" });
       await name.waitFor();
@@ -7895,14 +7916,16 @@ describe.skipIf(!findBrowser())(
       // The good one shows what it asks for, and is added.
       await name.fill("npm-hello");
       await look.click();
-      await page.getByRole("heading", { name: "Add NPM Hello 1.0.0" }).waitFor();
+      await page.getByRole("heading", { name: "Add NPM Hello", exact: true }).waitFor();
       await page.getByText(/From npm-hello@1\.0\.0\./).waitFor();
       await page.getByLabel(/Read your published posts and pages/).waitFor();
-      await page.getByRole("button", { name: "Add plugin" }).click();
+      await page.getByRole("button", { name: /and install$/ }).click();
       await page.getByText("NPM Hello is added and switched on.").waitFor();
+      await page.getByRole("dialog").waitFor({ state: "detached" });
       const row = page.getByRole("row", { name: /NPM Hello/ });
       await row.waitFor();
-      await row.getByRole("button", { name: "Remove" }).click();
+      await page.getByRole("button", { name: "Details of NPM Hello" }).click();
+      await page.getByRole("button", { name: "Remove", exact: true }).click();
       await page.getByRole("button", { name: "Yes, remove" }).click();
       await page.getByText("No plugins are installed.").waitFor();
     });
@@ -9456,7 +9479,8 @@ describe.skipIf(!findBrowser())(
 
       await page.goto(site.base + "/admin/tools/plugins");
       const row = page.getByRole("row", { name: /Settled/ });
-      await row.getByRole("button", { name: "Settings" }).click();
+      await row.getByRole("button", { name: "Details of Settled" }).click();
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
       await page.getByRole("heading", { name: "Settings of Settled" }).waitFor();
       await page.getByLabel("Greeting").fill("Hi");
       await page.getByLabel("Limit").fill("3");
@@ -15528,6 +15552,28 @@ describe.skipIf(!findBrowser())("appearance of the admin", { timeout: 150_000 },
     const other = await signedIn(cara);
     await other.goto(site.base + "/admin/pages");
     await other.getByRole("link", { name: "Comments (1)" }).waitFor();
+  });
+
+  test("a dialog is readable in dark: it takes the look's card, and the accessibility check passes with it open", async () => {
+    const page = await signedIn(owner);
+    expect((await api(page, "PUT", { mode: "dark" })).status).toBe(200);
+    try {
+      await page.goto(site.base + "/admin/pages");
+      await page.getByRole("button", { name: "New page", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "New page" });
+      await dialog.waitFor();
+      await noMotion(page);
+      // The card of Clear Sky in dark.
+      await expect
+        .poll(() =>
+          page.locator(".oksModal").evaluate((el) => getComputedStyle(el).backgroundColor),
+        )
+        .toBe("rgb(30, 31, 32)");
+      expect(await axeViolations(page)).toEqual([]);
+      await page.keyboard.press("Escape");
+    } finally {
+      await api(page, "DELETE");
+    }
   });
 
   test("a bad choice is refused in plain words, a signed-out visitor gets nothing, and the account page links to the screen", async () => {

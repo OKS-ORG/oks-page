@@ -2065,3 +2065,249 @@ main .oks-list-tabs > a[aria-current="page"] {
   color: var(--adm-muted);
   font-size: 14px;
 }
+
+/* ---- Plugins (step 8): a card with one row for each plugin, a switch, its details underneath, and the two dialogs. ---- */
+.oks-attention {
+  padding: 14px 20px;
+  border-radius: var(--adm-radius);
+  background: var(--adm-warn-bg);
+  color: var(--adm-warn-fg);
+  font-size: 14px;
+}
+.oks-attention ul {
+  margin: 4px 0 0;
+  padding-inline-start: 18px;
+}
+.oks-plugins {
+  width: 100%;
+}
+.oks-list-scroll .oks-plugins th,
+.oks-list-scroll .oks-plugins td {
+  white-space: normal;
+}
+.oks-plugins tbody th {
+  font-weight: 400;
+  text-align: start;
+}
+.oks-plugin-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+}
+.oks-plugin-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--adm-radius);
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+  font-weight: 700;
+}
+.oks-dot-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.oks-dot-state::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--adm-muted);
+}
+.oks-dot-state[data-kind="on"]::before {
+  background: var(--adm-ok-fg);
+}
+.oks-dot-state[data-kind="warn"]::before {
+  background: var(--adm-warn-fg);
+}
+.oks-missing {
+  display: block;
+  color: var(--adm-warn-fg);
+  font-size: 12px;
+}
+/* A switch: a pill with a round knob; the state is in aria-checked. */
+.oks-switch {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--adm-control);
+  border-radius: 14px;
+  background: var(--adm-card);
+  cursor: pointer;
+}
+.oks-switch::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  inset-inline-start: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--adm-control);
+}
+.oks-switch[aria-checked="true"] {
+  border-color: var(--adm-a1);
+  background: var(--adm-a1);
+}
+.oks-switch[aria-checked="true"]::after {
+  inset-inline-start: auto;
+  inset-inline-end: 3px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  background: var(--adm-on-accent);
+}
+.oks-row-more {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--adm-radius);
+  background: transparent;
+  color: var(--adm-muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+.oks-row-more:hover {
+  background: var(--adm-row-hover);
+}
+.oks-switch:focus-visible,
+.oks-row-more:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: 2px;
+}
+.oks-detail-row ul {
+  margin: 0;
+  padding-inline-start: 18px;
+}
+.oks-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.oks-approve,
+.oks-add-plugin,
+.oks-npm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.oks-approve fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.oks-approve legend {
+  margin-bottom: 12px;
+  padding: 0;
+  font-size: 14px;
+}
+.oks-permission {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0;
+}
+.oks-permission label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 24px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.oks-permission code {
+  grid-column: 1;
+  padding-inline-start: 36px;
+  color: var(--adm-muted);
+  font-size: 11px;
+}
+.oks-permission .oks-chip {
+  grid-column: 2;
+  grid-row: 1;
+}
+.oks-chip[data-status="danger"] {
+  background: var(--adm-err-bg);
+  color: var(--adm-err-fg);
+}
+.oks-info-box {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: var(--adm-radius);
+  background: var(--adm-info-bg);
+  color: var(--adm-info-fg);
+  font-size: 13px;
+}
+.oks-dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oks-dialog-foot > div {
+  display: flex;
+  gap: 12px;
+}
+.oks-bundled {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+}
+.oks-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--adm-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.oks-admin .oks-field-block input:not([type="file"]) {
+  box-sizing: border-box;
+  height: 44px;
+  width: 100%;
+  padding: 0 14px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 15px;
+}
+/* Dialogs take the look's card and ink in light and in dark (oks-ui's own dialog stays white on its own). */
+.oks-admin .oksModal {
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-admin .oksModalHeader {
+  border-color: var(--adm-line);
+}
+.oks-admin .oksModalHeaderTitle {
+  color: var(--adm-ink);
+}
+.oks-admin .oksModalClose {
+  color: var(--adm-muted);
+}
+.oks-admin .oksModalBody {
+  color: var(--adm-ink);
+}
+/* The headings of the plugin table stay on one line. */
+.oks-list-scroll .oks-plugins thead th {
+  white-space: nowrap;
+}
