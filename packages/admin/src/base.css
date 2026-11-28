@@ -1978,3 +1978,90 @@ main .oks-list-tabs > a[aria-current="page"] {
 .oks-edit-side :is(input[type="text"], input[type="datetime-local"], textarea, select) {
   max-width: 100%;
 }
+
+/* ---- The dashboard (step 8): the quick buttons, four count tiles, cards side by side, the recent edits as rows. ---- */
+.oks-link-main {
+  border-color: transparent;
+  background: var(--adm-a1);
+  color: var(--adm-on-accent);
+}
+.oks-link-main:hover {
+  background: var(--adm-a1);
+  filter: brightness(1.08);
+}
+.oks-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .oks-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.oks-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+}
+.oks-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--adm-radius);
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+}
+.oks-stat dt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-stat dd {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.oks-dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.oks-dash-grid > * {
+  margin: 0;
+}
+.oks-recent {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.oks-recent > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+.oks-recent > li + li {
+  border-top: 1px solid var(--adm-line);
+}
+.oks-recent > li > a {
+  flex: 1 1 200px;
+}
+.oks-recent-when {
+  color: var(--adm-muted);
+  font-size: 14px;
+}
