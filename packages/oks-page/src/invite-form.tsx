@@ -2,6 +2,7 @@
 // The form on the invitation page: the invited person's name (they may change it) and the password they choose.
 import { Alert, Button, PasswordField, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
+import { PasswordStrength } from "./password-strength";
 
 const MIN = 10;
 
@@ -45,22 +46,27 @@ export function InviteForm({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} aria-label="Join the site">
+    <form method="post" onSubmit={(event) => void submit(event)} aria-label="Join the site">
       {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
-      <p>
-        Your email: <strong>{email}</strong>
-      </p>
       <TextField name="name" label="Your name" required value={name} onChange={setName} />
-      <PasswordField
-        name="password"
-        label={`Password (at least ${MIN} characters)`}
-        required
-        value={password}
-        onChange={setPassword}
-      />
+      <TextField name="email" label="Email" type="email" readOnly value={email} />
+      <div>
+        <PasswordField
+          name="password"
+          label="Choose a password"
+          description={`At least ${MIN} characters.`}
+          required
+          value={password}
+          onChange={setPassword}
+        />
+        <PasswordStrength password={password} />
+      </div>
       <Button type="submit" color="primary" isDisabled={busy}>
-        Join
+        Create my account
       </Button>
+      <p className="oks-entry-note">
+        This link works once. Ask for a new one if it stopped working.
+      </p>
     </form>
   );
 }

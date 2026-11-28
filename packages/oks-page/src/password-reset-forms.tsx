@@ -129,7 +129,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
       </Done>
     );
   return (
-    <form onSubmit={submit} aria-label="Choose a new password">
+    <form method="post" onSubmit={submit} aria-label="Choose a new password">
       {problem ? <Alert color="danger" title="Not changed" description={problem} /> : null}
       {problem?.includes("Ask for a new one") ? (
         <p>

@@ -148,7 +148,7 @@ export function AccountPasskeys() {
       {!supported ? (
         <p>This browser cannot use passkeys.</p>
       ) : (
-        <form onSubmit={(event) => void add(event)} aria-label="Add a passkey">
+        <form method="post" onSubmit={(event) => void add(event)} aria-label="Add a passkey">
           <p>
             <label htmlFor="passkey-name">Name for the new passkey (for example “Laptop”)</label>
             <br />

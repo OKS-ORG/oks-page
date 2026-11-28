@@ -133,7 +133,7 @@ export function AccountEmail({
           </p>
         </>
       ) : (
-        <form onSubmit={change} aria-label="Change your email address">
+        <form method="post" onSubmit={change} aria-label="Change your email address">
           <p>
             <label htmlFor="account-new-email">New email address</label>
             <br />

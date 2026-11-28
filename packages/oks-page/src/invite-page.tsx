@@ -22,22 +22,25 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   if (!invitation)
     return (
       <main>
-        <h1>This invitation link does not work</h1>
-        <p>
-          The link may have been used already, cancelled, or it may have expired. Ask the person who
-          invited you for a new one.
-        </p>
-        <p>
-          <a href="/admin/login">Sign in</a> if you already have an account.
-        </p>
+        <h1>This invitation cannot be used</h1>
+        <p>It may have expired, or it was already used to create an account.</p>
+        <div className="oks-entry-warn">
+          <strong>The link is no longer valid.</strong>
+          <span>Ask the person who invited you to send a new one.</span>
+        </div>
+        <div className="oks-entry-go">
+          <a className="oks-link-button oks-link-main" href="/admin/login">
+            Go to sign in
+          </a>
+        </div>
       </main>
     );
   const { siteName } = await loadGeneralSettings(getRunner(), siteId);
   return (
     <main>
-      <h1>Join {siteName}</h1>
+      <h1>You are invited</h1>
       <p>
-        You are invited as <strong>{invitation.roleLabel}</strong>. Choose a password to finish.
+        You are invited to join {siteName} as {invitation.roleLabel}. Choose a password to start.
       </p>
       <InviteForm token={token} name={invitation.name} email={invitation.email} />
     </main>

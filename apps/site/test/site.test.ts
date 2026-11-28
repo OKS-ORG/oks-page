@@ -3061,11 +3061,16 @@ describe.skipIf(!findBrowser())("media: upload and files", { timeout: 120_000 },
     await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
 
     await page.getByRole("searchbox", { name: "Search media" }).fill("report");
-    await expect.poll(() => page.getByRole("option", { name: /^Sunset-beach/ }).count()).toBe(0);
+    // The search asks the server after a short pause, which can take over a second on a busy machine.
+    await expect
+      .poll(() => page.getByRole("option", { name: /^Sunset-beach/ }).count(), { timeout: 15_000 })
+      .toBe(0);
     await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
     await page.getByRole("searchbox", { name: "Search media" }).fill("");
     await page.getByRole("button", { name: "Images", exact: true }).click();
-    await expect.poll(() => page.getByRole("option", { name: /^Report/ }).count()).toBe(0);
+    await expect
+      .poll(() => page.getByRole("option", { name: /^Report/ }).count(), { timeout: 15_000 })
+      .toBe(0);
     await page.getByRole("button", { name: "All", exact: true }).click();
     await page.getByRole("option", { name: /^Report\.pdf/ }).waitFor();
 
@@ -3550,27 +3555,35 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
     const second = await startSignIn();
     await second.getByLabel("Code from your authenticator app").waitFor();
     expect(second.url()).not.toContain("/admin/login#");
+    // The six boxes are drawn from one field, which keeps digits only; a pasted code with a space works.
+    await second.getByLabel("Code from your authenticator app").fill("48 2x7 9 55");
+    expect(await second.getByLabel("Code from your authenticator app").inputValue()).toBe("482795");
+    expect(await second.locator(".oks-code span").allTextContents()).toEqual([..."482795"]);
+    // Sent before the page has taken over, a sign-in form would carry its fields in the request, never in the address.
+    const served = await (await fetch(site.base + "/admin/login")).text();
+    const forms = served.match(/<form[^>]*>/g) ?? [];
+    expect(forms.find((tag) => tag.includes('aria-label="Sign in"'))).toContain('method="post"');
     expect(await violations(second), "code step").toEqual([]);
     await second.getByLabel("Code from your authenticator app").fill("000000");
-    await second.getByRole("button", { name: "Sign in" }).click();
+    await second.getByRole("button", { name: "Verify" }).click();
     await second.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
     await second.getByLabel("Code from your authenticator app").fill(generateSync({ secret }));
-    await second.getByRole("button", { name: "Sign in" }).click();
+    await second.getByRole("button", { name: "Verify" }).click();
     await second.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     await second.close();
 
     // A backup code signs in once.
     await newWindow();
     const third = await startSignIn();
-    await third.getByRole("button", { name: "Use a backup code instead" }).click();
+    await third.getByRole("button", { name: "Lost your phone? Use a backup code" }).click();
     await third.getByLabel("Backup code").fill(codes[0]!);
-    await third.getByRole("button", { name: "Sign in" }).click();
+    await third.getByRole("button", { name: "Verify" }).click();
     await third.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     await third.close();
     const fourth = await startSignIn();
-    await fourth.getByRole("button", { name: "Use a backup code instead" }).click();
+    await fourth.getByRole("button", { name: "Lost your phone? Use a backup code" }).click();
     await fourth.getByLabel("Backup code").fill(codes[0]!);
-    await fourth.getByRole("button", { name: "Sign in" }).click();
+    await fourth.getByRole("button", { name: "Verify" }).click();
     await fourth.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
     expect(fourth.url()).toContain("/admin/login");
     await fourth.close();
@@ -3579,7 +3592,7 @@ describe.skipIf(!findBrowser())("two-factor sign-in", { timeout: 120_000 }, () =
     await newWindow();
     const fifth = await startSignIn();
     await fifth.getByLabel("Code from your authenticator app").fill(generateSync({ secret }));
-    await fifth.getByRole("button", { name: "Sign in" }).click();
+    await fifth.getByRole("button", { name: "Verify" }).click();
     await fifth.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     await fifth.goto(site.base + "/admin/account");
     await fifth.getByRole("button", { name: "Turn off" }).waitFor();
@@ -4672,8 +4685,11 @@ describe.skipIf(!findBrowser())(
       // on anyway (the check itself is tested on its own).
       const check = page.getByRole("alert", { name: "Before this goes live" });
       const status = page.locator(".oks-entry-actions [role=status]");
+      // Saving can take more than the poll's usual second on a busy machine.
       await expect
-        .poll(async () => (await status.textContent()) === "Saved." || (await check.count()) > 0)
+        .poll(async () => (await status.textContent()) === "Saved." || (await check.count()) > 0, {
+          timeout: 15_000,
+        })
         .toBe(true);
       if ((await check.count()) > 0) {
         await check.getByRole("button", { name: "Publish anyway" }).click();
@@ -5549,10 +5565,8 @@ describe.skipIf(!findBrowser())(
       // Eli opens the link on their own computer (a browser with no session), and chooses a password.
       const eli = await (await browser.newContext()).newPage();
       await eli.goto(link);
-      await eli
-        .getByRole("heading", { name: "Join Maple Street Bakery & Café", level: 1 })
-        .waitFor();
-      await eli.getByText("You are invited as").waitFor();
+      await eli.getByRole("heading", { name: "You are invited", level: 1 }).waitFor();
+      await eli.getByText("You are invited to join Maple Street Bakery & Café as").waitFor();
       expect(await eli.getByLabel("Your name").inputValue()).toBe("Eli");
       for (const width of [1280, 390]) {
         await eli.setViewportSize({ width, height: 800 });
@@ -5560,20 +5574,20 @@ describe.skipIf(!findBrowser())(
       }
       // Back to a desktop width: on a phone the menu is folded away.
       await eli.setViewportSize({ width: 1280, height: 800 });
-      await eli.getByLabel(/^Password/).fill("short");
-      await eli.getByRole("button", { name: "Join" }).click();
+      await eli.getByLabel(/^Choose a password/).fill("short");
+      await eli.getByRole("button", { name: "Create my account" }).click();
       await eli
         .getByText(/at least 10 characters/)
         .first()
         .waitFor();
       await eli.getByLabel("Your name").fill("Eli Stone");
-      await eli.getByLabel(/^Password/).fill("eli-has-a-long-password");
-      await eli.getByRole("button", { name: "Join" }).click();
+      await eli.getByLabel(/^Choose a password/).fill("eli-has-a-long-password");
+      await eli.getByRole("button", { name: "Create my account" }).click();
       await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       // The link works once: opened again it says so, in one plain message.
       const again = await (await browser.newContext()).newPage();
       await again.goto(link);
-      await again.getByRole("heading", { name: "This invitation link does not work" }).waitFor();
+      await again.getByRole("heading", { name: "This invitation cannot be used" }).waitFor();
       await again.close();
 
       // Eli has the editor's menu: the content, the categories, the menus and the library. Not users, not settings.
@@ -5684,7 +5698,7 @@ describe.skipIf(!findBrowser())(
       await page.getByText("The invitation for Zed is cancelled").waitFor();
       const dead = await (await browser.newContext()).newPage();
       await dead.goto(zedLink);
-      await dead.getByRole("heading", { name: "This invitation link does not work" }).waitFor();
+      await dead.getByRole("heading", { name: "This invitation cannot be used" }).waitFor();
       await dead.close();
       expect((await call(page, "DELETE", `/api/admin/invitations/${zedId}`)).status).toBe(404);
 
@@ -10187,6 +10201,8 @@ describe.skipIf(!findBrowser())(
       expect(await axeViolations(page)).toEqual([]);
       await hit.click();
       await page.waitForURL(/\/admin\/pages\/[0-9A-Za-z-]+$/);
+      // The address changes before the search window has closed.
+      await page.getByRole("dialog").waitFor({ state: "detached" });
       await page.getByRole("button", { name: "Search" }).click();
       await page.getByPlaceholder("Search the admin").fill("zzzz nothing");
       await page
@@ -11887,7 +11903,7 @@ describe.skipIf(!findBrowser())("email settings (spec 13)", { timeout: 120_000 }
     const inviteLink = linkIn(invitation, "/admin/invite/");
     const ben = await browser.newPage();
     await ben.goto(inviteLink.replace(/^https?:\/\/[^/]+/, site.base));
-    await ben.getByText("Your email:", { exact: false }).waitFor();
+    await expect.poll(() => ben.getByLabel("Email").inputValue()).toBe("ben@example.com");
 
     // A forgotten password: the link on the sign-in page, the same answer for any address, the email, the new password.
     await visitor.goto(site.base + "/admin/login");
@@ -13570,8 +13586,8 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     // The client opens the link in their own browser and chooses a password.
     const cleo = await (await browser.newContext()).newPage();
     await cleo.goto(link);
-    await cleo.getByLabel(/^Password/).fill("cleo-has-a-long-password");
-    await cleo.getByRole("button", { name: "Join" }).click();
+    await cleo.getByLabel(/^Choose a password/).fill("cleo-has-a-long-password");
+    await cleo.getByRole("button", { name: "Create my account" }).click();
     await cleo.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     // The menu is drawn a moment after the heading: wait for each link, then look at what is not there.
     for (const wanted of ["Pages", "Posts", "Media"])
@@ -13661,8 +13677,8 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(invited.status(), await invited.text()).toBe(201);
     const dan = await (await browser.newContext()).newPage();
     await dan.goto(String(((await invited.json()) as { link: string }).link));
-    await dan.getByLabel(/^Password/).fill("dan-has-a-long-password");
-    await dan.getByRole("button", { name: "Join" }).click();
+    await dan.getByLabel(/^Choose a password/).fill("dan-has-a-long-password");
+    await dan.getByRole("button", { name: "Create my account" }).click();
     await dan.getByRole("heading", { name: "Home", level: 1 }).waitFor();
     expect((await dan.request.get(site.base + "/api/admin/bundle")).status()).toBe(403);
     const refused = await dan.request.post(site.base + "/api/admin/bundle?confirm=replace", {
@@ -13836,8 +13852,8 @@ describe.skipIf(!findBrowser())("privacy and domains settings", { timeout: 150_0
     expect(invited.status(), await invited.text()).toBe(201);
     const eli = await (await browser.newContext()).newPage();
     await eli.goto(String(((await invited.json()) as { link: string }).link));
-    await eli.getByLabel(/^Password/).fill("eli-has-a-long-password");
-    await eli.getByRole("button", { name: "Join" }).click();
+    await eli.getByLabel(/^Choose a password/).fill("eli-has-a-long-password");
+    await eli.getByRole("button", { name: "Create my account" }).click();
     await eli.getByRole("heading", { name: "Home", level: 1 }).waitFor();
 
     // The editor tells the client the page is live and has no status to choose.

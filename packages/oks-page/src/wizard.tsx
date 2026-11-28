@@ -2,6 +2,7 @@
 // The setup wizard (installation guide, "First run"): two questions about the site, two about the owner, one about starter
 // content, then it signs the owner in. Drawn as the design shows: a bar of steps, a kicker, a title and a line under it, the
 // fields, and Back and Continue at the foot. Language, look, two-factor and backup codes come with their own parts.
+import { PasswordStrength } from "./password-strength";
 import { Alert, PasswordField, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
 import { ChoiceCard } from "./choice-card";
@@ -43,15 +44,6 @@ interface ApiError {
   code: string;
   field?: string;
   message: string;
-}
-
-/** How strong a password looks to its owner: by length only, and the server still decides (at least 10 characters). */
-function strength(password: string): { level: number; word: string } {
-  if (password.length === 0) return { level: 0, word: "" };
-  if (password.length < 10) return { level: 1, word: "Too short" };
-  if (password.length < 14) return { level: 2, word: "Fine" };
-  if (password.length < 18) return { level: 3, word: "Good" };
-  return { level: 4, word: "Strong password" };
 }
 
 function Icon({ d }: { d: string }) {
@@ -182,7 +174,6 @@ export function SetupWizard() {
 
   const current = STEPS[step]!;
   const last = step === STEPS.length - 1;
-  const pw = strength(answers.password);
   return (
     <div className="oks-wizard">
       <div className="oks-wizard-bar" role="img" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
@@ -194,7 +185,7 @@ export function SetupWizard() {
       <h1>{current.title}</h1>
       <p className="oks-wizard-line">{current.line}</p>
       {problem ? <Alert color="danger" title="Setup did not finish" description={problem} /> : null}
-      <form aria-label="Set up your site" onSubmit={onSubmit}>
+      <form method="post" aria-label="Set up your site" onSubmit={onSubmit}>
         {step === 0 ? (
           <>
             <TextField
@@ -257,15 +248,7 @@ export function SetupWizard() {
                 value={answers.password}
                 onChange={set("password")}
               />
-              <div className="oks-strength" data-level={pw.level}>
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              <p className="oks-strength-word" role="status">
-                {pw.word}
-              </p>
+              <PasswordStrength password={answers.password} />
             </div>
           </>
         ) : null}

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { signedInMember } from "./admin-session";
 import { getRunner, getSiteId } from "./db";
-import { LoginForm } from "./login-form";
+import { LoginScreen } from "./login-form";
 import { PasskeySignIn } from "./passkey-sign-in";
 import { passkeyOptions } from "./passkey-options";
 import { siteBase } from "./site-base";
@@ -26,18 +26,19 @@ export default async function LoginPage({ searchParams }: Props) {
   const passkeys = passkeyOptions(await siteBase()) !== null;
   return (
     <main>
-      <h1>Sign in</h1>
-      <p>Welcome back. Sign in to look after your site.</p>
-      {passkeys ? <PasskeySignIn /> : null}
-      <LoginForm />
-      {email ? (
-        <>
-          <p>
-            <a href="/admin/forgot-password">Forgot your password?</a>
-          </p>
-          <SignInLinkForm failed={failed} />
-        </>
-      ) : null}
+      <LoginScreen
+        before={passkeys ? <PasskeySignIn /> : null}
+        after={
+          email ? (
+            <>
+              <p>
+                <a href="/admin/forgot-password">Forgot your password?</a>
+              </p>
+              <SignInLinkForm failed={failed} />
+            </>
+          ) : null
+        }
+      />
     </main>
   );
 }

@@ -163,7 +163,7 @@ export function AccountScreen({
       <p role="status">{note}</p>
 
       {setup ? (
-        <form onSubmit={finish} aria-label="Finish two-factor set-up">
+        <form method="post" onSubmit={finish} aria-label="Finish two-factor set-up">
           <p>1. Open an authenticator app on your phone and scan this picture.</p>
           <img
             src={qrOf(setup.uri)}
@@ -191,7 +191,7 @@ export function AccountScreen({
           </Button>
         </form>
       ) : enabled ? (
-        <form onSubmit={turnOff} aria-label="Two-factor is on">
+        <form method="post" onSubmit={turnOff} aria-label="Two-factor is on">
           <p>
             Two-factor sign-in is <strong>on</strong>. Signing in asks for a code from your app.
           </p>
@@ -212,7 +212,7 @@ export function AccountScreen({
           {newCodes ? <BackupCodes codes={newCodes} /> : null}
         </form>
       ) : (
-        <form onSubmit={start} aria-label="Turn on two-factor">
+        <form method="post" onSubmit={start} aria-label="Turn on two-factor">
           <p>
             Two-factor sign-in asks for a code from an app on your phone, as well as your password.
             It is strongly advised for administrators.
