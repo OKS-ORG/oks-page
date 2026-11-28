@@ -8,6 +8,7 @@ import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
 import { signedInMember } from "./admin-session";
 import { AccountEmail } from "./account-email";
+import { AccountLayout } from "./account-layout";
 import { AccountPasskeys } from "./account-passkeys";
 import { passkeyOptions } from "./passkey-options";
 import { siteBase } from "./site-base";
@@ -43,19 +44,17 @@ export default async function AccountPage({ searchParams }: Props) {
       title="Your account"
       breadcrumbs={[{ label: "Your account" }]}
     >
-      <AccountEmail
-        email={String(row?.["email"] ?? member.user.email)}
-        verified={verified}
-        emailWorks={await emailWorks(getRunner(), member.siteId)}
-        result={typeof params.email === "string" ? params.email : null}
-        error={typeof params.error === "string" ? params.error : null}
-      />
-      <p>
-        <a href="/admin/account/appearance">Appearance</a>: the look of the admin, light or dark,
-        and your colour.
-      </p>
-      <AccountScreen initialEnabled={enabled} required={member.mustSetUpTwoFactor} />
-      {passkeyOptions(await siteBase()) ? <AccountPasskeys /> : null}
+      <AccountLayout current="account" line="Your email address and how you sign in.">
+        <AccountEmail
+          email={String(row?.["email"] ?? member.user.email)}
+          verified={verified}
+          emailWorks={await emailWorks(getRunner(), member.siteId)}
+          result={typeof params.email === "string" ? params.email : null}
+          error={typeof params.error === "string" ? params.error : null}
+        />
+        <AccountScreen initialEnabled={enabled} required={member.mustSetUpTwoFactor} />
+        {passkeyOptions(await siteBase()) ? <AccountPasskeys /> : null}
+      </AccountLayout>
     </AdminFrame>
   );
 }

@@ -3,6 +3,7 @@ import { isSetupDone, loadAppearance } from "@oks-page/core";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { AccountLayout } from "./account-layout";
 import { actorOf } from "./admin-actor";
 import { AdminFrame } from "./admin-frame";
 import { navFor } from "./admin-nav";
@@ -31,7 +32,9 @@ export default async function AppearancePage() {
       title="Appearance"
       breadcrumbs={[{ label: "Your account", href: "/admin/account" }, { label: "Appearance" }]}
     >
-      <AppearanceScreen initial={mine} siteDefault={site} />
+      <AccountLayout current="appearance" line="How the admin looks for you, on every device.">
+        <AppearanceScreen initial={mine} siteDefault={site} />
+      </AccountLayout>
     </AdminFrame>
   );
 }
