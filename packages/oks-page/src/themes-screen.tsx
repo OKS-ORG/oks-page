@@ -2,6 +2,7 @@
 // The Themes screen: upload a theme file and read the report in plain words, then use the theme, go back to the version
 // before, or remove it. Every step is checked again on the server.
 import type { InstalledTheme, PackageReport, ThemeSwitchPlan } from "@oks-page/core";
+import { Modal } from "@oks-page/admin";
 import { Alert, Button } from "oks-ui";
 import { useRef, useState, type FormEvent } from "react";
 import { SwitchPlan } from "./theme-switch-plan";
@@ -73,6 +74,8 @@ export function ThemesScreen({
   // "Add the sample pages as drafts": off until the owner ticks it, and off again for every new switch.
   const [addStarter, setAddStarter] = useState(false);
   const active = themes.find((t) => t.isActive) ?? null;
+  // The upload sits in a dialog; it stays open while a file is refused, so the report is read where the file was chosen.
+  const [installing, setInstalling] = useState(false);
 
   async function refresh() {
     const response = await fetch("/api/admin/themes");
@@ -116,6 +119,7 @@ export function ThemesScreen({
       } | null;
       if (body?.report) setReport({ title: `Report for ${file.name}`, report: body.report });
       if (!response.ok) throw new Error(failure(body, "The theme could not be installed."));
+      setInstalling(false);
       const theme = body?.theme;
       if (!theme) return "Done.";
       if (body?.change === "same") return `${theme.name} ${theme.version} is already installed.`;
@@ -156,56 +160,42 @@ export function ThemesScreen({
     return body;
   };
 
+  // The theme in use is drawn first and large; the others sit in a grid under it.
+  const ordered = [...themes].sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  const alerts = problem ? <Alert color="danger" title="Not done" description={problem} /> : null;
+
   return (
     <div className="oks-themes">
-      <section aria-labelledby="themes-in-use">
-        <h2 id="themes-in-use">In use</h2>
-        <p>
-          {active
-            ? `${active.name}, version ${active.version}.`
-            : "The built-in design. Your site has no theme in use."}
+      <div className="oks-list-head">
+        <p className="oks-list-summary">
+          A theme sets how your whole site looks. Your pages and posts stay the same when you
+          switch.
         </p>
-        {active ? (
-          <p>
-            <Button onPress={() => void looksAt("default")}>Use the built-in design</Button>
-          </p>
-        ) : null}
-      </section>
+        <div className="oks-list-actions">
+          <Button
+            onPress={() => {
+              setProblem(null);
+              setReport(null);
+              setInstalling(true);
+            }}
+          >
+            Install from a file
+          </Button>
+        </div>
+      </div>
 
-      <section aria-labelledby="themes-upload">
-        <h2 id="themes-upload">Upload a theme file</h2>
-        <form onSubmit={(event) => void upload(event)}>
-          <p>
-            <label htmlFor="theme-file">Theme file (.tgz)</label>
-            <br />
-            <input
-              id="theme-file"
-              type="file"
-              accept=".tgz,.gz,application/gzip"
-              aria-describedby="theme-file-hint"
-              style={{ minBlockSize: "36px" }}
-              ref={fileField}
-            />
-          </p>
-          <p id="theme-file-hint">
-            Every file is checked before anything is stored, and you see a report. A new theme is
-            not used until you choose it. A new version of the theme in use is used at once, and you
-            can go back to the version before.
-          </p>
-          <p>
-            <Button color="primary" type="submit">
-              Upload and check
-            </Button>
-          </p>
-        </form>
-        {report ? <Report title={report.title} report={report.report} /> : null}
-      </section>
-
-      {problem ? <Alert color="danger" title="Not done" description={problem} /> : null}
-      <p role="status">{note}</p>
+      {installing ? null : alerts}
+      <p className="oks-status-line" role="status">
+        {note}
+      </p>
+      {report && !installing ? (
+        <div className="oks-theme-panel">
+          <Report title={report.title} report={report.report} />
+        </div>
+      ) : null}
 
       {review ? (
-        <section aria-labelledby="themes-switch">
+        <section aria-labelledby="themes-switch" className="oks-theme-panel">
           <h2 id="themes-switch">Before you switch</h2>
           <SwitchPlan plan={review.plan} />
           {starterOf(themes, review.id) > 0 ? (
@@ -222,7 +212,7 @@ export function ThemesScreen({
               <small>They are new drafts. None of your pages is changed.</small>
             </p>
           ) : null}
-          <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          <div className="oks-detail-actions">
             <Button
               color="primary"
               onPress={() =>
@@ -251,130 +241,208 @@ export function ThemesScreen({
                 : `Yes, switch to ${review.plan.to.name}`}
             </Button>
             <Button onPress={() => setReview(null)}>Not now</Button>
-          </p>
+          </div>
         </section>
       ) : null}
 
+      {active ? null : (
+        <section aria-labelledby="themes-in-use" className="oks-theme-card oks-theme-active">
+          <div className="oks-theme-shot" aria-hidden="true" />
+          <div className="oks-theme-about">
+            <div className="oks-theme-title">
+              <h2 id="themes-in-use">The built-in design</h2>
+              <span className="oks-chip" data-status="published">
+                Active
+              </span>
+            </div>
+            <p>Your site has no theme in use.</p>
+            <div className="oks-detail-actions">
+              <a className="oks-link-button oks-link-main" href="/admin/settings/look">
+                Customise
+              </a>
+              <a className="oks-link-button" href="/admin/menus">
+                Menus
+              </a>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section aria-labelledby="themes-installed">
-        <h2 id="themes-installed">Installed themes</h2>
+        <h2 id="themes-installed" className="oks-themes-heading">
+          Installed themes
+        </h2>
         {themes.length === 0 ? <p>No themes are installed yet.</p> : null}
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {themes.map((theme) => (
+        <ul className="oks-theme-grid">
+          {ordered.map((theme) => (
             <li
               key={theme.id}
-              style={{ borderBlockStart: "1px solid currentColor", paddingBlock: "0.75rem" }}
+              className={`oks-theme-card${theme.isActive ? " oks-theme-active" : ""}`}
             >
-              <h3 style={{ marginBlock: "0 0.25rem" }}>
-                {theme.name} <span>{theme.version}</span>
-                {theme.isActive ? <strong> (in use)</strong> : null}
-              </h3>
-              {theme.description ? <p>{theme.description}</p> : null}
-              <p>
-                {theme.author ? `By ${theme.author}. ` : ""}
-                {theme.license ? `Licence: ${theme.license}. ` : ""}
-                {theme.rtl === "supported"
-                  ? "Tested for right-to-left languages."
-                  : "Not tested for right-to-left languages."}
-              </p>
-              {rtlSite && theme.rtl !== "supported" ? (
-                <Alert
-                  color="warning"
-                  title="Check this theme first"
-                  description={`Your site is written from right to left, and ${theme.name} was not tested for that. Use "Try ${theme.name} with my content" to look at your pages before you use it.`}
-                />
-              ) : null}
-              <p>{whatIsInside(theme)}.</p>
-              {theme.presets.length > 0 || theme.starterPages > 0 ? (
-                <p>
-                  {theme.presets.length > 0
-                    ? `Looks to start from: ${theme.presets.map((p) => p.name).join(", ")}. `
-                    : ""}
-                  {theme.starterPages > 0
-                    ? `${plural(theme.starterPages, "sample page", "sample pages")} you can add as drafts.`
-                    : ""}
+              <div className="oks-theme-shot" aria-hidden="true">
+                {theme.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="oks-theme-about">
+                <div className="oks-theme-title">
+                  <h3>
+                    {theme.name} <span>{theme.version}</span>
+                  </h3>
+                  {theme.isActive ? (
+                    <span className="oks-chip" data-status="published">
+                      Active
+                    </span>
+                  ) : null}
+                </div>
+                {theme.description ? <p>{theme.description}</p> : null}
+                <p className="oks-theme-small">
+                  {theme.author ? `By ${theme.author}. ` : ""}
+                  {theme.license ? `Licence: ${theme.license}. ` : ""}
+                  {theme.rtl === "supported"
+                    ? "Tested for right-to-left languages."
+                    : "Not tested for right-to-left languages."}
                 </p>
-              ) : null}
-              <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                {theme.isActive ? null : (
-                  <Button color="primary" onPress={() => void looksAt(theme.id)}>
-                    {`Use ${theme.name}`}
-                  </Button>
-                )}
-                <a
-                  href={`/admin/themes/${theme.id}/preview`}
-                  style={{ display: "inline-block", minBlockSize: "24px", paddingBlock: "2px" }}
-                >
-                  {`Try ${theme.name} with my content`}
-                </a>
-                {theme.previousVersion ? (
-                  <Button
-                    onPress={() =>
-                      void run(async () => {
-                        await post(theme.id, "roll-back", "It could not go back.");
-                        return `${theme.name} is back to version ${theme.previousVersion}.`;
-                      })
-                    }
-                  >
-                    {`Go back to version ${theme.previousVersion}`}
-                  </Button>
+                {rtlSite && theme.rtl !== "supported" ? (
+                  <Alert
+                    color="warning"
+                    title="Check this theme first"
+                    description={`Your site is written from right to left, and ${theme.name} was not tested for that. Use "Try ${theme.name} with my content" to look at your pages before you use it.`}
+                  />
                 ) : null}
-                {theme.isActive ? null : removing === theme.id ? (
-                  <>
+                <p className="oks-theme-small">{whatIsInside(theme)}.</p>
+                {theme.presets.length > 0 || theme.starterPages > 0 ? (
+                  <p className="oks-theme-small">
+                    {theme.presets.length > 0
+                      ? `Looks to start from: ${theme.presets.map((p) => p.name).join(", ")}. `
+                      : ""}
+                    {theme.starterPages > 0
+                      ? `${plural(theme.starterPages, "sample page", "sample pages")} you can add as drafts.`
+                      : ""}
+                  </p>
+                ) : null}
+                <div className="oks-detail-actions">
+                  {theme.isActive ? (
+                    <>
+                      <a className="oks-link-button oks-link-main" href="/admin/settings/look">
+                        Customise
+                      </a>
+                      <a className="oks-link-button" href="/admin/settings/site-editor">
+                        Site editor
+                      </a>
+                      <a className="oks-link-button" href="/admin/menus">
+                        Menus
+                      </a>
+                      <Button onPress={() => void looksAt("default")}>
+                        Use the built-in design
+                      </Button>
+                    </>
+                  ) : (
+                    <Button color="primary" onPress={() => void looksAt(theme.id)}>
+                      {`Use ${theme.name}`}
+                    </Button>
+                  )}
+                  <a className="oks-link-button" href={`/admin/themes/${theme.id}/preview`}>
+                    {`Try ${theme.name} with my content`}
+                  </a>
+                  {theme.previousVersion ? (
                     <Button
-                      color="danger"
                       onPress={() =>
                         void run(async () => {
-                          setRemoving(null);
-                          const response = await fetch(
-                            `/api/admin/themes/${encodeURIComponent(theme.id)}`,
-                            { method: "DELETE" },
-                          );
-                          const body: unknown = await response.json().catch(() => null);
-                          if (!response.ok)
-                            throw new Error(failure(body, "The theme could not be removed."));
-                          return `${theme.name} is removed.`;
+                          await post(theme.id, "roll-back", "It could not go back.");
+                          return `${theme.name} is back to version ${theme.previousVersion}.`;
                         })
                       }
                     >
-                      {`Yes, remove ${theme.name}`}
+                      {`Go back to version ${theme.previousVersion}`}
                     </Button>
-                    <Button onPress={() => setRemoving(null)}>Keep it</Button>
-                  </>
-                ) : (
-                  <Button onPress={() => setRemoving(theme.id)}>{`Remove ${theme.name}`}</Button>
-                )}
-              </p>
-              <details>
-                <summary style={SUMMARY}>{`Export ${theme.name} as a theme`}</summary>
-                <p>
-                  A theme file of {theme.name} as your site shows it now: your layout changes, the
-                  layouts you made, your saved sections, your colors, fonts and CSS. Drafts are left
-                  out. It installs on another site; here it would be a new theme.
-                </p>
-                <form
-                  method="get"
-                  action={`/api/admin/themes/${encodeURIComponent(theme.id)}/export`}
-                >
-                  <label htmlFor={`export-name-${theme.id}`}>Name of the new theme</label>
-                  <br />
-                  <input
-                    id={`export-name-${theme.id}`}
-                    name="name"
-                    defaultValue={`${theme.name} (custom)`}
-                    maxLength={60}
-                    style={{ minBlockSize: "32px" }}
-                  />{" "}
-                  <Button type="submit">Download the theme file</Button>
-                </form>
-              </details>
-              <details>
-                <summary style={SUMMARY}>{`Report for ${theme.name} ${theme.version}`}</summary>
-                <Report title={`What was checked in ${theme.name}`} report={theme.report} />
-              </details>
+                  ) : null}
+                  {theme.isActive ? null : removing === theme.id ? (
+                    <>
+                      <Button
+                        color="danger"
+                        onPress={() =>
+                          void run(async () => {
+                            setRemoving(null);
+                            const response = await fetch(
+                              `/api/admin/themes/${encodeURIComponent(theme.id)}`,
+                              { method: "DELETE" },
+                            );
+                            const body: unknown = await response.json().catch(() => null);
+                            if (!response.ok)
+                              throw new Error(failure(body, "The theme could not be removed."));
+                            return `${theme.name} is removed.`;
+                          })
+                        }
+                      >
+                        {`Yes, remove ${theme.name}`}
+                      </Button>
+                      <Button onPress={() => setRemoving(null)}>Keep it</Button>
+                    </>
+                  ) : (
+                    <Button onPress={() => setRemoving(theme.id)}>{`Remove ${theme.name}`}</Button>
+                  )}
+                </div>
+                <details>
+                  <summary style={SUMMARY}>{`Export ${theme.name} as a theme`}</summary>
+                  <p>
+                    A theme file of {theme.name} as your site shows it now: your layout changes, the
+                    layouts you made, your saved sections, your colors, fonts and CSS. Drafts are
+                    left out. It installs on another site; here it would be a new theme.
+                  </p>
+                  <form
+                    method="get"
+                    action={`/api/admin/themes/${encodeURIComponent(theme.id)}/export`}
+                  >
+                    <label htmlFor={`export-name-${theme.id}`}>Name of the new theme</label>
+                    <br />
+                    <input
+                      id={`export-name-${theme.id}`}
+                      name="name"
+                      defaultValue={`${theme.name} (custom)`}
+                      maxLength={60}
+                      style={{ minBlockSize: "32px" }}
+                    />{" "}
+                    <Button type="submit">Download the theme file</Button>
+                  </form>
+                </details>
+                <details>
+                  <summary style={SUMMARY}>{`Report for ${theme.name} ${theme.version}`}</summary>
+                  <Report title={`What was checked in ${theme.name}`} report={theme.report} />
+                </details>
+              </div>
             </li>
           ))}
         </ul>
       </section>
+
+      <Modal
+        isOpen={installing}
+        onClose={() => setInstalling(false)}
+        title="Install a theme from a file"
+      >
+        {installing ? alerts : null}
+        <form onSubmit={(event) => void upload(event)} className="oks-add-plugin">
+          <label className="oks-field-block" htmlFor="theme-file">
+            <span>Theme file (.tgz)</span>
+          </label>
+          <input
+            id="theme-file"
+            type="file"
+            accept=".tgz,.gz,application/gzip"
+            aria-describedby="theme-file-hint"
+            style={{ minBlockSize: "36px" }}
+            ref={fileField}
+          />
+          <p id="theme-file-hint" className="oks-theme-small">
+            Every file is checked before anything is stored, and you see a report. A new theme is
+            not used until you choose it. A new version of the theme in use is used at once, and you
+            can go back to the version before.
+          </p>
+          <Button color="primary" type="submit">
+            Upload and check
+          </Button>
+        </form>
+        {report && installing ? <Report title={report.title} report={report.report} /> : null}
+      </Modal>
     </div>
   );
 }

@@ -2311,3 +2311,97 @@ main .oks-list-tabs > a[aria-current="page"] {
 .oks-list-scroll .oks-plugins thead th {
   white-space: nowrap;
 }
+
+/* ---- Themes (step 8): the theme in use large, the others in a grid, each a card with a picture block. ---- */
+.oks-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.oks-shell-body > main .oks-themes section {
+  margin: 0;
+}
+.oks-theme-panel {
+  padding: 20px 24px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-themes-heading {
+  margin-bottom: 12px;
+}
+.oks-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.oks-theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-theme-active {
+  grid-column: 1 / -1;
+}
+@media (min-width: 900px) {
+  .oks-theme-active {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 24px;
+    align-items: start;
+  }
+}
+.oks-theme-shot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  border-radius: var(--adm-radius);
+  background: var(--adm-soft);
+  color: var(--adm-on-soft);
+  font-family: var(--adm-font-heading);
+  font-size: 32px;
+  font-weight: 700;
+}
+.oks-theme-active .oks-theme-shot {
+  min-height: 200px;
+}
+.oks-theme-about {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.oks-theme-about > p {
+  margin: 0;
+}
+.oks-theme-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.oks-theme-title h2,
+.oks-theme-title h3 {
+  margin: 0;
+  font-family: var(--adm-font-heading);
+  font-size: 20px;
+}
+.oks-theme-title h3 > span {
+  color: var(--adm-muted);
+  font-family: var(--adm-font-text);
+  font-size: 13px;
+  font-weight: 400;
+}
+.oks-theme-small {
+  color: var(--adm-muted);
+  font-size: 13px;
+}

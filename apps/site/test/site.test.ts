@@ -62,6 +62,12 @@ async function interactive(page: Awaited<ReturnType<Browser["newPage"]>>): Promi
 
 type TestPage = Awaited<ReturnType<Browser["newPage"]>>;
 
+/** Opens the dialog of Settings > Themes that takes a theme file, unless it is open (it stays open after a refused file). */
+async function openInstall(page: TestPage): Promise<void> {
+  if ((await page.getByRole("dialog").count()) === 0)
+    await page.getByRole("button", { name: "Install from a file" }).click();
+}
+
 /** Waits until the scripts of an admin page have taken it over (a click before that can be lost, or land where something moves to). */
 async function hydrated(page: TestPage): Promise<void> {
   await page
@@ -6082,6 +6088,7 @@ describe.skipIf(!findBrowser())(
       await page.setViewportSize({ width: 1280, height: 900 });
 
       // A hostile package: the report names the file and why, and nothing is installed.
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "evil.tgz",
         mimeType: "application/gzip",
@@ -6097,6 +6104,7 @@ describe.skipIf(!findBrowser())(
       await page.getByText("No themes are installed yet.").waitFor();
 
       // A good package is installed but not in use: the public pages do not change.
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "maple-1.0.0.tgz",
         mimeType: "application/gzip",
@@ -6162,6 +6170,7 @@ describe.skipIf(!findBrowser())(
 
       // A new version of the theme in use is used at once; going back restores the old one, at once too.
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "maple-1.1.0.tgz",
         mimeType: "application/gzip",
@@ -6230,6 +6239,7 @@ describe.skipIf(!findBrowser())(
       });
       expect(saved.status).toBe(200);
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "maple-try.tgz",
         mimeType: "application/gzip",
@@ -6318,6 +6328,7 @@ describe.skipIf(!findBrowser())(
         }),
       });
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "story-1.0.0.tgz",
         mimeType: "application/gzip",
@@ -6658,6 +6669,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       // A theme must be installed to publish a section (Publish belongs to a theme's design).
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "plain-1.0.0.tgz",
         mimeType: "application/gzip",
@@ -10379,6 +10391,7 @@ describe.skipIf(!findBrowser())(
       expect(await page.getByText("Hard to read").count()).toBe(0);
 
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "dusk-1.0.0.tgz",
         mimeType: "application/gzip",
@@ -10441,6 +10454,7 @@ describe.skipIf(!findBrowser())(
         (await call(page, "PUT", "/api/admin/settings/theme", { mainColor: null })).status,
       ).toBe(200);
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "sun-1.0.0.tgz",
         mimeType: "application/gzip",
@@ -10496,6 +10510,7 @@ describe.skipIf(!findBrowser())(
         ["rtla", "untested"],
         ["rtlb", "supported"],
       ] as const) {
+        await openInstall(page);
         await page.getByLabel("Theme file (.tgz)").setInputFiles({
           name: `${key}.tgz`,
           mimeType: "application/gzip",
@@ -10600,6 +10615,7 @@ describe.skipIf(!findBrowser())(
     test("TH-67: the design screens use plain words: no screen says template, part, pattern, override or token", async () => {
       const page = await signedIn(owner);
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "maple-th67.tgz",
         mimeType: "application/gzip",
@@ -10719,6 +10735,7 @@ describe.skipIf(!findBrowser())(
       expect(before).not.toContain("oks-site-title");
 
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "willow.tgz",
         mimeType: "application/gzip",
@@ -11004,6 +11021,7 @@ describe.skipIf(!findBrowser())(
         ),
       });
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page
         .getByLabel("Theme file (.tgz)")
         .setInputFiles({ name: "willow-1.1.0.tgz", mimeType: "application/gzip", buffer: update });
@@ -11088,6 +11106,7 @@ describe.skipIf(!findBrowser())(
         }),
       });
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page
         .getByLabel("Theme file (.tgz)")
         .setInputFiles({ name: "birch.tgz", mimeType: "application/gzip", buffer: birch });
@@ -11531,6 +11550,7 @@ describe.skipIf(!findBrowser())(
 
       // It installs as a new theme (Birch itself is untouched) and draws the same front page.
       await page.goto(site.base + "/admin/settings/themes");
+      await openInstall(page);
       await page.getByLabel("Theme file (.tgz)").setInputFiles({
         name: "birch-for-anna-1.0.0.tgz",
         mimeType: "application/gzip",
