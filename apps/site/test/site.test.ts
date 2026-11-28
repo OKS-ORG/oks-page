@@ -4987,6 +4987,45 @@ describe.skipIf(!findBrowser())(
       }
       await page.setViewportSize({ width: 1280, height: 900 });
 
+      // Beside the choices is the real home page, which shows a choice before anything is saved.
+      const preview = page.frameLocator('iframe[title="Preview of your home page"]');
+      await preview.getByRole("heading", { level: 1 }).waitFor();
+      const drafted = () =>
+        preview.locator("html").evaluate((root) => ({
+          color: getComputedStyle(root).getPropertyValue("--oks-color-primary-700").trim(),
+          heading: getComputedStyle(root.querySelector("h1")!).fontFamily,
+        }));
+      await hydrated(page);
+      const asSaved = await drafted();
+      await page.getByRole("button", { name: "Green", exact: true }).click();
+      await page.getByLabel("Font for headings").selectOption("source-serif-4");
+      await expect.poll(async () => (await drafted()).color).not.toBe(asSaved.color);
+      await expect.poll(async () => (await drafted()).heading).toContain("Source Serif 4");
+      // The font itself is fetched and used inside the preview.
+      await expect
+        .poll(() =>
+          preview
+            .locator("html")
+            .evaluate(() =>
+              [...document.fonts].some(
+                (face) => face.family.includes("Source Serif 4") && face.status === "loaded",
+              ),
+            ),
+        )
+        .toBe(true);
+      await page.getByText("Not live until you save.").waitFor();
+      expect((await get("/")).body).not.toContain("Source Serif 4");
+      const frame = page.locator('iframe[title="Preview of your home page"]');
+      await page.getByRole("button", { name: "Phone", exact: true }).click();
+      await expect.poll(() => frame.evaluate((e) => (e as HTMLElement).clientWidth)).toBe(390);
+      await page.getByRole("button", { name: "Desktop", exact: true }).click();
+      await expect.poll(() => frame.evaluate((e) => (e as HTMLElement).clientWidth)).toBe(1280);
+      // Discard puts the saved choices back, in the fields and in the preview.
+      await page.getByRole("button", { name: "Discard" }).click();
+      await page.getByText("This is what visitors see now.").waitFor();
+      await expect.poll(drafted).toEqual(asSaved);
+      expect(await page.getByRole("button", { name: "Discard" }).isDisabled()).toBe(true);
+
       // The owner picks a color and fonts, and uploads a logo in the picker's window.
       await page.getByLabel("Pick the color of links and buttons").fill("#2a6f4f");
       await page.getByLabel("Font for text").selectOption("system-serif");
@@ -15608,5 +15647,34 @@ describe.skipIf(!findBrowser())("appearance of the admin", { timeout: 150_000 },
     await page.goto(site.base + "/admin/account");
     await page.getByRole("link", { name: "Appearance", exact: true }).click();
     await page.getByRole("heading", { name: "Appearance", level: 1 }).waitFor();
+  });
+
+  test("the product's logo has light letters in dark, following the person's own mode over the device's", async () => {
+    const page = await signedIn(owner);
+    const logo = () =>
+      page.evaluate(
+        () =>
+          getComputedStyle(document.querySelector(".oks-sidebar-top")!, "::before").backgroundImage,
+      );
+    for (const [mode, device, dark] of [
+      ["system", "light", false],
+      ["system", "dark", true],
+      ["light", "dark", false],
+      ["dark", "light", true],
+    ] as const) {
+      await page.goto(site.base + "/admin");
+      expect((await api(page, "PUT", { mode })).status).toBe(200);
+      await page.emulateMedia({ colorScheme: device });
+      await page.reload();
+      await page.locator(".oks-sidebar-top").waitFor();
+      const said = `${mode} on a ${device} device`;
+      await expect.poll(logo, { message: said }).toContain("logo");
+      expect((await logo()).includes("logo-dark"), said).toBe(dark);
+    }
+    // The file itself is served.
+    const address = /url\("([^"]+)"\)/.exec(await logo())![1]!;
+    expect((await page.request.get(address)).status()).toBe(200);
+    expect((await api(page, "DELETE")).status).toBe(200);
+    await page.emulateMedia({ colorScheme: "light" });
   });
 });

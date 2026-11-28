@@ -1,15 +1,11 @@
 "use client";
-// The Look screen: one main color, a font for the text and one for the headings, and the logo. A small sample on the page
-// shows the choice before it is saved. The server checks every value again.
+// The Look screen: one main color, a font for the text and one for the headings, light and dark, and the logo, in a panel
+// beside a preview of the real home page that shows the choices before they are saved. The server checks every value again.
 import {
-  COLOR_STEPS,
-  colorScale,
   COLOR_MODES,
   FONT_LIBRARY,
   FONT_STACKS,
   fontByKey,
-  fontFaceCss,
-  fontStack,
   LICENSE_NAME,
   LICENSE_URL,
   type ColorMode,
@@ -20,7 +16,8 @@ import {
 import { contrastWarnings } from "@oks-page/core/contrast";
 import type { ThemeTokens } from "@oks-page/core/theme";
 import { Alert, Button } from "oks-ui";
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { LookPreview } from "./look-preview";
 import { MediaPicker } from "./media-picker";
 
 /** What the form shows of a font the owner uploaded. */
@@ -61,6 +58,27 @@ const KIND_LABELS: Record<FontKind, string> = {
 const fontLabel = (font: LibraryFont): string =>
   font.scripts.includes("devanagari") ? `${font.name} (also Hindi)` : font.name;
 const BUILT_IN_COLOR = "#2563eb";
+/** Colors to start from; any other one is picked in the color box beside them. */
+const SWATCHES = [
+  { value: "#0b57d0", label: "Blue" },
+  { value: "#0f6b5c", label: "Green" },
+  { value: "#c8372d", label: "Red" },
+  { value: "#7c3aed", label: "Violet" },
+  { value: "#b45309", label: "Amber" },
+  { value: "#0e7490", label: "Teal" },
+];
+
+/** The choices of the screen as they are sent, so that saved and unsaved can be compared. */
+const choices = (styles: ThemeStyles): ThemeStyles => ({
+  mainColor: styles.mainColor,
+  logoMediaId: styles.logoMediaId,
+  customCss: styles.customCss,
+  customCssOn: styles.customCssOn !== false,
+  bodyFont: styles.bodyFont,
+  headingFont: styles.headingFont,
+  colorMode: styles.colorMode,
+  modeSwitch: styles.modeSwitch,
+});
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
@@ -147,28 +165,56 @@ export function LookForm({
   const [picking, setPicking] = useState(false);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [saved, setSaved] = useState(() => ({ styles: choices(initial), logo }));
+  // Counted up after each save, so that the preview loads the page again (a new logo, the visitors' switch).
+  const [version, setVersion] = useState(0);
+
+  const draft = useMemo<ThemeStyles>(
+    () =>
+      choices({
+        mainColor: color,
+        logoMediaId: logoId,
+        customCss,
+        customCssOn,
+        bodyFont,
+        headingFont,
+        colorMode,
+        modeSwitch,
+      }),
+    [color, logoId, customCss, customCssOn, bodyFont, headingFont, colorMode, modeSwitch],
+  );
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved.styles);
+
+  function discard() {
+    const back = saved.styles;
+    setColor(back.mainColor);
+    setLogoId(back.logoMediaId);
+    setLogoShown(saved.logo);
+    setCustomCss(back.customCss);
+    setCustomCssOn(back.customCssOn !== false);
+    setBodyFont(back.bodyFont);
+    setHeadingFont(back.headingFont);
+    setColorMode(back.colorMode);
+    setModeSwitch(back.modeSwitch);
+    setProblem(null);
+    setNote("Your changes are discarded.");
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault();
     setProblem(null);
     setNote("Saving…");
+    const sent = { styles: draft, logo: logoShown };
     try {
       const response = await fetch("/api/admin/settings/theme", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          mainColor: color,
-          logoMediaId: logoId,
-          customCss,
-          customCssOn,
-          bodyFont,
-          headingFont,
-          colorMode,
-          modeSwitch,
-        }),
+        body: JSON.stringify(sent.styles),
       });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(failure(body, "It could not be saved."));
+      setSaved(sent);
+      setVersion((n) => n + 1);
       setNote("Saved. Your site shows the new look now.");
     } catch (error) {
       setNote("");
@@ -176,20 +222,10 @@ export function LookForm({
     }
   }
 
-  // The sample uses the same scale the site will use, set on the sample only.
-  const scale = colorScale(color ?? BUILT_IN_COLOR);
-  const sample: CSSProperties = {
-    fontFamily: fontStack(bodyFont),
-    border: "1px solid currentColor",
-    padding: "1rem",
-    maxInlineSize: "32rem",
-  };
-  const solid = scale ? scale[700] : "#1d4ed8";
-  // The fonts of the library in use: their notices, and the rules that let this page show them in the sample.
+  // The fonts of the library in use: their notices.
   const usedFonts = [...new Set([bodyFont, headingFont])]
     .map((key) => fontByKey(key))
     .filter((font): font is LibraryFont => font !== undefined);
-  const fontFaces = fontFaceCss([bodyFont, headingFont]);
 
   function applyPreset(preset: NonNullable<typeof presets>[number]) {
     if (preset.values.mainColor) setColor(preset.values.mainColor);
@@ -200,9 +236,12 @@ export function LookForm({
   }
 
   return (
-    <>
-      <form className="oks-look" onSubmit={(event) => void save(event)}>
-        {fontFaces ? <style>{fontFaces}</style> : null}
+    <div className="oks-custom">
+      <form className="oks-look oks-custom-card" onSubmit={(event) => void save(event)}>
+        <div>
+          <h2>{`Customise ${themeName || "your site"}`}</h2>
+          <p>{dirty ? "Not live until you save." : "This is what visitors see now."}</p>
+        </div>
         {presets.length > 0 ? (
           <fieldset style={{ border: 0, padding: 0 }}>
             <legend>{themeName ? `Start from a look of ${themeName}` : "Start from a look"}</legend>
@@ -217,6 +256,18 @@ export function LookForm({
         ) : null}
         <fieldset style={{ border: 0, padding: 0 }}>
           <legend>Main color</legend>
+          <div role="group" aria-label="Colors to start from" className="oks-custom-swatches">
+            {SWATCHES.map((swatch) => (
+              <button
+                key={swatch.value}
+                type="button"
+                aria-label={swatch.label}
+                aria-pressed={color === swatch.value}
+                style={{ background: swatch.value }}
+                onClick={() => setColor(swatch.value)}
+              />
+            ))}
+          </div>
           <p>
             <label htmlFor="look-color">Pick the color of links and buttons</label>
             <br />
@@ -234,6 +285,16 @@ export function LookForm({
             The other shades are made from it. Button text stays easy to read, in light and dark
             mode.
           </p>
+          {contrastWarnings(themeTokens, { mainColor: color, colorMode: "system" })
+            .filter((w) => colorMode === "system" || w.mode === (colorMode as string))
+            .map((w) => (
+              <Alert
+                key={`${w.mode}-${w.part}`}
+                color="warning"
+                title="Hard to read"
+                description={`${w.message} Change the theme's colors, or choose another look. You can still save.`}
+              />
+            ))}
         </fieldset>
 
         <fieldset style={{ border: 0, padding: 0 }}>
@@ -332,16 +393,6 @@ export function LookForm({
               Show visitors a switch to choose light or dark for themselves
             </label>
           </p>
-          {contrastWarnings(themeTokens, { mainColor: color, colorMode: "system" })
-            .filter((w) => colorMode === "system" || w.mode === (colorMode as string))
-            .map((w) => (
-              <Alert
-                key={`${w.mode}-${w.part}`}
-                color="warning"
-                title="Hard to read"
-                description={`${w.message} Change the theme's colors, or choose another look. You can still save.`}
-              />
-            ))}
           <p>
             A visitor's choice is kept only in their own browser and is never sent to anyone. No
             cookie is set.
@@ -436,53 +487,19 @@ export function LookForm({
           </p>
         </details>
 
-        <section aria-label="Sample" style={sample}>
-          <h2 style={{ fontFamily: fontStack(headingFont), marginBlockStart: 0 }}>
-            A heading in your style
-          </h2>
-          <p>
-            Some text in your font, with a{" "}
-            <a href="#sample" style={{ color: solid }} onClick={(event) => event.preventDefault()}>
-              link in your color
-            </a>
-            .
-          </p>
-          <span
-            style={{
-              display: "inline-block",
-              background: solid,
-              color: "#ffffff",
-              padding: "0.4rem 0.9rem",
-              borderRadius: "0.4rem",
-            }}
-          >
-            A button
-          </span>
-          <p style={{ marginBlockEnd: 0 }}>
-            {COLOR_STEPS.map((step) => (
-              <span
-                key={step}
-                aria-hidden="true"
-                style={{
-                  display: "inline-block",
-                  inlineSize: "1.5rem",
-                  blockSize: "1.5rem",
-                  background: scale ? scale[step] : "transparent",
-                }}
-              />
-            ))}
-          </p>
-        </section>
-
-        <p>
+        <div className="oks-custom-actions">
+          <Button isDisabled={!dirty} onPress={discard}>
+            Discard
+          </Button>
           <Button color="primary" type="submit">
             Save the look
           </Button>
-        </p>
+        </div>
         {problem ? <Alert color="danger" title="Not saved" description={problem} /> : null}
         <p role="status">{note}</p>
       </form>
-      <section aria-label="Your own fonts" className="oks-own-fonts">
+      <LookPreview styles={draft} version={version} />
+      <section aria-label="Your own fonts" className="oks-own-fonts oks-custom-card">
         <h2 style={{ fontSize: "1.125rem" }}>Your own fonts</h2>
         <p>
           Add a font file (.woff2) and it is kept on your own site and shown from there, like the
@@ -579,6 +596,6 @@ export function LookForm({
           <Alert color="danger" title="The font was not added" description={fontProblem} />
         ) : null}
       </section>
-    </>
+    </div>
   );
 }

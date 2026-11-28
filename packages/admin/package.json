@@ -33,7 +33,8 @@
     "src/shell.css",
     "src/looks.css",
     "src/base.css",
-    "src/logo.svg"
+    "src/logo.svg",
+    "src/logo-dark.svg"
   ],
   "license": "MIT",
   "repository": {

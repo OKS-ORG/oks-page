@@ -82,9 +82,6 @@ body:has(.oks-admin) {
   height: 28px;
   background: url("./logo.svg") left center / contain no-repeat;
 }
-:root[data-theme="dark"] .oks-admin:not([data-branded="true"]) .oks-sidebar-top::before {
-  filter: invert(1) hue-rotate(180deg) brightness(1.1);
-}
 .oks-sidebar-top .oks-menu-toggle {
   width: 36px;
   height: 36px;
@@ -958,9 +955,6 @@ main li[data-health][data-level="grey"] {
   transform: translateX(-50%);
   background: url("./logo.svg") center / contain no-repeat;
 }
-:root[data-theme="dark"] .oks-admin > main::before {
-  filter: invert(1) hue-rotate(180deg) brightness(1.1);
-}
 .oks-admin[data-branded="true"] > main::before {
   display: none;
 }
@@ -1599,13 +1593,6 @@ main .oks-list-tabs > a[aria-current="page"] {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-/* The logo above the entry card turns light when the system asks for dark and the person has not chosen light. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .oks-admin > main::before {
-    filter: invert(1) hue-rotate(180deg) brightness(1.1);
-  }
-}
-
 /* ---- Sign in and recovery (step 6): the title, a line under it, the fields, one wide button, and links in a centred row. ---- */
 .oks-admin > main {
   display: flex;
@@ -1790,12 +1777,25 @@ main .oks-list-tabs > a[aria-current="page"] {
   font-size: 14px;
   font-weight: 600;
 }
-/* The logo above the entry card follows the person's own mode, not only the device. */
-:root:root .oks-admin[data-mode="light"] > main::before {
-  filter: none;
+/* In dark the product's logo, in the sidebar and above the entry card, is the one with light letters; its red dot stays.
+   The person's own mode wins over the device's. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .oks-admin:not([data-branded="true"]) .oks-sidebar-top::before,
+  :root:not([data-theme="light"]) .oks-admin > main::before {
+    background-image: url("./logo-dark.svg");
+  }
 }
+:root[data-theme="dark"] .oks-admin:not([data-branded="true"]) .oks-sidebar-top::before,
+:root[data-theme="dark"] .oks-admin > main::before {
+  background-image: url("./logo-dark.svg");
+}
+:root:root .oks-admin[data-mode="light"]:not([data-branded="true"]) .oks-sidebar-top::before,
+:root:root .oks-admin[data-mode="light"] > main::before {
+  background-image: url("./logo.svg");
+}
+:root:root .oks-admin[data-mode="dark"]:not([data-branded="true"]) .oks-sidebar-top::before,
 :root:root .oks-admin[data-mode="dark"] > main::before {
-  filter: invert(1) hue-rotate(180deg) brightness(1.1);
+  background-image: url("./logo-dark.svg");
 }
 
 /* ---- Step 8, the lists: Users, Comments and Media take the same line, tabs, search and card as the Pages list. ---- */
@@ -2747,4 +2747,177 @@ button.oks-type-row:focus-visible {
 .oks-me-main > section h2 {
   margin-top: 0;
   font-size: 16px;
+}
+
+/* ---- The look of the site (step 8): the choices in a panel, the real home page beside them. ---- */
+.oks-custom {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "choices preview"
+    "fonts preview";
+  gap: 16px 20px;
+  align-items: start;
+}
+.oks-custom > form {
+  grid-area: choices;
+}
+.oks-custom > .oks-own-fonts {
+  grid-area: fonts;
+}
+.oks-custom > .oks-custom-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0;
+  padding: 20px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-custom-card h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.oks-custom-card p {
+  margin: 0;
+}
+.oks-custom-card fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.oks-custom-card legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 700;
+}
+.oks-custom-card select,
+.oks-custom-card input[type="text"],
+.oks-custom-card input[type="file"],
+.oks-custom-card textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+.oks-custom-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.oks-custom-swatches button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--adm-card);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--adm-line);
+  cursor: pointer;
+}
+.oks-custom-swatches button[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px var(--adm-ink);
+}
+.oks-custom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.oks-custom-preview {
+  grid-area: preview;
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.oks-custom-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+.oks-custom-bar p {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--adm-ink-2);
+  font-size: 13px;
+}
+.oks-custom-widths {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+}
+.oks-custom-widths button {
+  min-height: 30px;
+  padding: 0 12px;
+  color: var(--adm-ink-2);
+  font: inherit;
+  font-size: 13px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--adm-radius);
+  cursor: pointer;
+}
+.oks-custom-widths button[aria-pressed="true"] {
+  color: var(--adm-on-soft);
+  font-weight: 700;
+  background: var(--adm-soft);
+}
+.oks-custom-frame {
+  position: relative;
+  height: calc(100vh - 170px);
+  min-height: 420px;
+  overflow: hidden;
+  direction: ltr;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-custom-frame iframe {
+  position: absolute;
+  top: 0;
+  background: #fff;
+  border: 0;
+  transform-origin: 0 0;
+}
+@media (max-width: 1100px) {
+  .oks-custom {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      "choices"
+      "preview"
+      "fonts";
+  }
+  .oks-custom-preview {
+    position: static;
+  }
+  .oks-custom-frame {
+    height: 520px;
+  }
+}
+/* The Look screen needs the width for its preview: the settings links stay a row above it, not a column beside it. */
+@media (min-width: 901px) {
+  .oks-shell-body > main:has(> .oks-custom) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oks-shell-body > main:has(> .oks-custom) > * {
+    grid-column: 1;
+  }
+  .oks-shell-body > main:has(> .oks-custom) > nav {
+    grid-row: auto;
+  }
+  .oks-shell-body > main:has(> .oks-custom) > nav ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
