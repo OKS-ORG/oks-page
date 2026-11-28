@@ -5,6 +5,7 @@ import { formatInZone } from "@oks-page/core/timezone";
 import { Alert, Button } from "oks-ui";
 import { useState, type FormEvent } from "react";
 import { SaveBar, SettingRow, SettingsCard } from "./settings-rows";
+import { useInBrowser } from "./time-format";
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
@@ -22,6 +23,7 @@ export function GeneralSettingsFormScreen({
   const [zone, setZone] = useState(initial.timeZone ?? "");
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const inBrowser = useInBrowser();
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -89,7 +91,7 @@ export function GeneralSettingsFormScreen({
               </option>
             ))}
           </select>
-          {zone ? (
+          {zone && inBrowser ? (
             <p>{`It is ${formatInZone(Date.now(), zone, { dateStyle: "medium", timeStyle: "short" })} there now.`}</p>
           ) : null}
         </SettingRow>

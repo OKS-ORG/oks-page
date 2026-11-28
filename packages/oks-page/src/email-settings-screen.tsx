@@ -5,7 +5,7 @@
 import type { DomainCheck, EmailHealth, EmailLogRow, EmailSettingsView } from "@oks-page/core";
 import { Alert, Button } from "oks-ui";
 import { useState, type FormEvent } from "react";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 interface Preset {
   key: string;
@@ -58,6 +58,7 @@ export function EmailSettingsScreen({
   const [settings, setSettings] = useState(initial);
   const [log, setLog] = useState(initialLog);
   const [check, setCheck] = useState(initialCheck);
+  const when = useWhen(null);
   const [health, setHealth] = useState(initialHealth);
   const [checking, setChecking] = useState(false);
   const [provider, setProvider] = useState(initial?.provider ?? presets[0]!.key);
@@ -170,7 +171,7 @@ export function EmailSettingsScreen({
       {settings?.working ? (
         <p role="note">
           <strong>Email works.</strong>{" "}
-          {`It was last tested ${formatWhen(new Date(settings.testedAt ?? 0).toISOString(), null)}, sending as ${settings.fromName ? `${settings.fromName} <${settings.fromAddress}>` : settings.fromAddress}.`}
+          {`It was last tested ${when(new Date(settings.testedAt ?? 0).toISOString())}, sending as ${settings.fromName ? `${settings.fromName} <${settings.fromAddress}>` : settings.fromAddress}.`}
         </p>
       ) : (
         <Alert
@@ -323,7 +324,7 @@ export function EmailSettingsScreen({
           {check ? (
             <>
               <p>
-                {`The public records of ${check.domain}, looked up ${formatWhen(new Date(check.checkedAt).toISOString(), null)}. They are checked again every day. A warning never stops sending.`}
+                {`The public records of ${check.domain}, looked up ${when(new Date(check.checkedAt).toISOString())}. They are checked again every day. A warning never stops sending.`}
               </p>
               <ul aria-label="Domain checks">
                 {check.items.map((item) => (
@@ -372,7 +373,7 @@ export function EmailSettingsScreen({
               <tbody>
                 {log.map((row) => (
                   <tr key={row.id}>
-                    <td>{formatWhen(new Date(row.createdAt).toISOString(), null)}</td>
+                    <td>{when(new Date(row.createdAt).toISOString())}</td>
                     <td>{KIND_WORDS[row.emailKey] ?? row.emailKey}</td>
                     <td>{row.to}</td>
                     <td>{row.subject}</td>

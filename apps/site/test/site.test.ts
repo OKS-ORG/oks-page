@@ -4602,6 +4602,46 @@ describe.skipIf(!findBrowser())("general settings and the time zone", { timeout:
     expect(await page.getByLabel("Publish at").inputValue()).toBe(
       zonedBox(Date.parse("2091-03-10T04:00:00Z"), "America/Los_Angeles"),
     );
+
+    // A browser far from the server's zone (14 hours ahead of UTC): no page may disagree with what the server drew.
+    const far = await browser.newContext({
+      timezoneId: "Pacific/Kiritimati",
+      storageState: await page.context().storageState(),
+    });
+    const away = await far.newPage();
+    const errors: string[] = [];
+    away.on("pageerror", (error) => errors.push(error.message.slice(0, 120)));
+    const visit = async (path: string) => {
+      await away.goto(site.base + path, { waitUntil: "load" });
+      await hydrated(away);
+      await away.waitForTimeout(700);
+      expect(errors, path).toEqual([]);
+    };
+    for (const path of [
+      "/admin",
+      "/admin/pages",
+      "/admin/posts",
+      "/admin/users",
+      "/admin/settings/general",
+      "/admin/settings/email",
+      `/admin/posts/${id}`,
+    ])
+      await visit(path);
+    expect(await away.getByLabel("Publish at").inputValue()).toBe(
+      zonedBox(Date.parse("2091-03-10T04:00:00Z"), "Pacific/Kiritimati"),
+    );
+    const latest = Number(
+      (await db.run("select updated_at from entries where id = ?", [id]))[0]!["updated_at"],
+    );
+    await away.goto(site.base + "/admin");
+    await away.getByText(written(latest, "Pacific/Kiritimati"), { exact: false }).first().waitFor();
+    // The same with a zone chosen for the site.
+    expect(
+      (await call(away, "PUT", "/api/admin/settings/general", { timeZone: "Asia/Kolkata" })).status,
+    ).toBe(200);
+    for (const path of ["/admin", "/admin/pages", "/admin/users", `/admin/posts/${id}`])
+      await visit(path);
+    await far.close();
     await page.context().close();
   });
 });

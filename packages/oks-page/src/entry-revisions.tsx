@@ -3,7 +3,7 @@
 import { Alert, Button } from "oks-ui";
 import { Modal } from "@oks-page/admin";
 import { useCallback, useEffect, useState } from "react";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 interface Copy {
   id: string;
@@ -26,7 +26,7 @@ export interface EntryRevisionsProps {
 }
 
 export function EntryRevisions({ id, revision, timeZone = null }: EntryRevisionsProps) {
-  const when = (iso: string) => formatWhen(iso, timeZone);
+  const when = useWhen(timeZone);
   const [copies, setCopies] = useState<Copy[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [open, setOpen] = useState<{ copy: Copy; compare: Compare } | null>(null);

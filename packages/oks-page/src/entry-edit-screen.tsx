@@ -25,6 +25,7 @@ import { uploadForEditor } from "./media-client";
 import { MediaPicker } from "./media-picker";
 import { PictureField } from "./picture-field";
 import { RelationField } from "./relation-field";
+import { useInBrowser } from "./time-format";
 
 export interface EntryEditScreenProps {
   id: string;
@@ -278,9 +279,13 @@ export function EntryEditScreen(props: EntryEditScreenProps) {
       ? props.status
       : "draft",
   );
-  const [scheduledAt, setScheduledAt] = useState(
-    toLocalInput(props.scheduledAt, props.timeZone ?? null),
-  );
+  // What the person typed; until then the box shows the saved time. Without a zone of the site that time is only known in
+  // the browser.
+  const [typedAt, setScheduledAt] = useState<string | null>(null);
+  const inBrowser = useInBrowser();
+  const scheduledAt =
+    typedAt ??
+    (props.timeZone || inBrowser ? toLocalInput(props.scheduledAt, props.timeZone ?? null) : "");
   const defs = props.fieldDefs ?? [];
   const [values, setValues] = useState<Record<string, unknown>>(props.fieldValues ?? {});
   const revision = useRef(props.revision);

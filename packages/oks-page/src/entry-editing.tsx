@@ -4,7 +4,7 @@
 import { Alert, Button } from "oks-ui";
 import { useEffect, useRef, useState } from "react";
 import type { Block } from "oks-ui";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 export const AUTOSAVE_MS = 10_000;
 const RENEW_MS = 30_000;
@@ -15,8 +15,6 @@ export interface UnsavedCopy {
   savedAt: string;
   revision: number;
 }
-
-const clock = (iso: string, timeZone: string | null) => formatWhen(iso, timeZone);
 
 /** Sends the current content to the server 10 seconds after the last change. Returns the time of the last copy kept. */
 export function useAutosave(
@@ -121,12 +119,13 @@ export function UnsavedCopyBanner({
   onBringBack: (copy: UnsavedCopy) => void;
   onThrowAway: () => void;
 }) {
+  const when = useWhen(timeZone);
   if (!copy) return null;
   return (
     <Alert
       color="info"
       title="You have changes that were not saved"
-      description={`We kept a copy from ${clock(copy.savedAt, timeZone)}. The page itself is as you last saved it.`}
+      description={`We kept a copy from ${when(copy.savedAt)}. The page itself is as you last saved it.`}
       actions={
         <>
           <Button color="primary" size="sm" onPress={() => onBringBack(copy)}>
@@ -148,9 +147,10 @@ export function AutosaveStatus({
   savedAt: string | null;
   timeZone?: string | null;
 }) {
+  const when = useWhen(timeZone);
   return (
     <p role="status" id="autosave-status">
-      {savedAt ? `Unsaved changes kept as a copy at ${clock(savedAt, timeZone)}.` : ""}
+      {savedAt ? `Unsaved changes kept as a copy at ${when(savedAt)}.` : ""}
     </p>
   );
 }

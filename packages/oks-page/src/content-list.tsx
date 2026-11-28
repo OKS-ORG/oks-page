@@ -3,7 +3,7 @@
 import { ListTable, type ListSort, Modal } from "@oks-page/admin";
 import { Alert, Button, TextField } from "oks-ui";
 import { useMemo, useState, type FormEvent } from "react";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 import type { ListedEntry, TrashedEntry } from "@oks-page/core";
 
 export interface ContentListProps {
@@ -107,7 +107,7 @@ export function ContentList({
   canAdd,
   timeZone = null,
 }: ContentListProps) {
-  const when = (iso: string) => formatWhen(iso, timeZone);
+  const when = useWhen(timeZone);
   const [title, setTitle] = useState("");
   const [editor, setEditor] = useState("layout");
   const [problem, setProblem] = useState<string | null>(null);

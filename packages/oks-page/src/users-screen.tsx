@@ -5,7 +5,7 @@ import { ListTable, Modal } from "@oks-page/admin";
 import type { Invitation, Member, RoleChoice } from "@oks-page/core";
 import { Alert, Button, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { error?: { message?: string } } | null)?.error?.message ?? fallback;
@@ -96,7 +96,8 @@ export function UsersScreen({
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  const when = (ms: number) => formatWhen(new Date(ms).toISOString(), timeZone);
+  const written = useWhen(timeZone);
+  const when = (ms: number) => written(new Date(ms).toISOString());
   const roleCounts = new Map<string, number>();
   for (const m of members) roleCounts.set(m.roleKey, (roleCounts.get(m.roleKey) ?? 0) + 1);
 

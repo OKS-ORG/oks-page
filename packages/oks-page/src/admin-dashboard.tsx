@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { AdminFrame } from "./admin-frame";
 import type { NavItem } from "./admin-nav";
 import type { DashboardData } from "./dashboard-data";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 export interface AdminDashboardProps {
   user: { name: string; email: string };
@@ -72,6 +72,7 @@ export function AdminDashboard({
   canManageSettings = false,
   healthLine = null,
 }: AdminDashboardProps) {
+  const when = useWhen(data.timeZone);
   const notes: ReactNode[] = [];
   if (canManageSettings && !data.emailWorks)
     notes.push(
@@ -192,9 +193,7 @@ export function AdminDashboard({
                   <span className="oks-chip" data-status={CHIP[entry.status] ?? "scheduled"}>
                     {entry.status}
                   </span>
-                  <span className="oks-recent-when">
-                    {formatWhen(entry.updatedAt, data.timeZone)}
-                  </span>
+                  <span className="oks-recent-when">{when(entry.updatedAt)}</span>
                 </li>
               ))}
             </ul>

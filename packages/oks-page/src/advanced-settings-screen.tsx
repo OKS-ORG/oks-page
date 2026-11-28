@@ -3,7 +3,7 @@
 // not show.
 import { Alert, Button } from "oks-ui";
 import { useState } from "react";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 export function AdvancedSettingsScreen({
   lastCleared,
@@ -14,6 +14,7 @@ export function AdvancedSettingsScreen({
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
 
+  const when = useWhen(null);
   async function clear() {
     setProblem(null);
     setNote("Clearing…");
@@ -50,7 +51,7 @@ export function AdvancedSettingsScreen({
       </p>
       <p>
         {cleared
-          ? `Last cleared by hand ${formatWhen(new Date(cleared.at).toISOString(), null)}${cleared.by ? ` by ${cleared.by}` : ""}.`
+          ? `Last cleared by hand ${when(new Date(cleared.at).toISOString())}${cleared.by ? ` by ${cleared.by}` : ""}.`
           : "Not cleared by hand yet."}
       </p>
       <p role="status">{note}</p>

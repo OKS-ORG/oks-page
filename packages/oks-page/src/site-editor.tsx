@@ -37,7 +37,7 @@ import {
   type LayoutBlock,
 } from "./layout-tree";
 import { uploadForEditor } from "./media-client";
-import { formatWhen } from "./time-format";
+import { useWhen } from "./time-format";
 
 export interface PreviewPage {
   value: string;
@@ -270,6 +270,7 @@ export function SiteEditor({
   sectionGroups,
   initialTypes,
 }: Props) {
+  const when = useWhen(null);
   const [types, setTypes] = useState(initialTypes);
   const [making, setMaking] = useState<Making | null>(null);
   const [layoutPages, setLayoutPages] = useState<LayoutPageRef[]>([]);
@@ -1577,7 +1578,7 @@ export function SiteEditor({
                 <ol>
                   {versions.map((v) => (
                     <li key={v.id}>
-                      {formatWhen(new Date(v.publishedAt).toISOString(), null)}
+                      {when(new Date(v.publishedAt).toISOString())}
                       {v.publishedBy ? ` by ${v.publishedBy}` : ""}{" "}
                       <Button
                         size="sm"
