@@ -2999,3 +2999,79 @@ button.oks-type-row:focus-visible {
   width: 100%;
   min-height: 46px;
 }
+
+/* ---- The setup wizard: two-factor sign-in and the backup codes (step 8). ---- */
+.oks-tfa {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
+}
+@media (max-width: 600px) {
+  .oks-tfa {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.oks-tfa-scan,
+.oks-tfa-do {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.oks-tfa-scan img {
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+}
+.oks-tfa-scan span,
+.oks-tfa-do li span {
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+.oks-tfa-scan code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.oks-admin > main .oks-tfa-do ol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding-inline-start: 20px;
+}
+.oks-tfa-do li strong,
+.oks-tfa-do li span {
+  display: block;
+}
+.oks-admin > main .oks-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 24px;
+  margin: 0;
+  padding: 18px 22px;
+  list-style: none;
+  background: var(--adm-ground);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+}
+.oks-codes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.oks-codes-actions p {
+  margin: 0;
+}
+.oks-codes-saved {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+}
+.oks-codes-saved input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}

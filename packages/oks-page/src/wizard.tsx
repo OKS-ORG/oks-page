@@ -1,11 +1,15 @@
 "use client";
-// The setup wizard (installation guide, "First run"): two questions about the site, two about the owner, one about starter
-// content, then it signs the owner in. Drawn as the design shows: a bar of steps, a kicker, a title and a line under it, the
-// fields, and Back and Continue at the foot. Language, look, two-factor and backup codes come with their own parts.
+// The setup wizard (installation guide, "First run"): two questions about the site, two about the owner and one about starter
+// content; then the site is made and the owner signed in. Two-factor sign-in with its backup codes (which can be skipped) and
+// the look of the admin come after, when there is an account to keep them with. Drawn as the design shows: a bar of steps, a
+// kicker, a title and a line under it, the fields, and the buttons at the foot.
 import { PasswordStrength } from "./password-strength";
+import { DEFAULT_APPEARANCE } from "@oks-page/core/appearance";
 import { Alert, PasswordField, TextField } from "oks-ui";
 import { useState, type FormEvent } from "react";
+import { AppearanceScreen } from "./appearance-screen";
 import { ChoiceCard } from "./choice-card";
+import { BackupStep, TwoFactorStep, WizardFrame } from "./wizard-parts";
 
 const PURPOSES: { label: string; note: string; value: string; d: string }[] = [
   { label: "A blog", note: "Posts and news", value: "blog", d: "M6 3h9l4 4v14H6z M14 3v5h5" },
@@ -40,6 +44,9 @@ const STEPS = [
   },
 ];
 
+/** The steps before the site is made, then two-factor, its backup codes and the look. */
+const TOTAL = STEPS.length + 3;
+
 interface ApiError {
   code: string;
   field?: string;
@@ -71,6 +78,8 @@ export function SetupWizard() {
   const [problem, setProblem] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [after, setAfter] = useState<"two-factor" | "codes" | "look" | "ready">("two-factor");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   // The answers are kept here: only the fields of the step on screen exist, so a field of an earlier step would be lost
   // when the next step is shown.
   const [answers, setAnswers] = useState({
@@ -130,32 +139,94 @@ export function SetupWizard() {
     void submit();
   }
 
+  if (email && after === "two-factor")
+    return (
+      <WizardFrame
+        step={STEPS.length + 1}
+        total={TOTAL}
+        title="Set up two-factor sign-in"
+        line="Recommended: signing in then also asks for a code from an app on your phone. Your site is already made."
+      >
+        <TwoFactorStep
+          password={answers.password}
+          onDone={(codes) => {
+            setBackupCodes(codes);
+            set("password")("");
+            setAfter("codes");
+          }}
+          onSkip={() => {
+            set("password")("");
+            setAfter("look");
+          }}
+        />
+      </WizardFrame>
+    );
+
+  if (email && after === "codes")
+    return (
+      <WizardFrame
+        step={STEPS.length + 2}
+        total={TOTAL}
+        title="Save your backup codes"
+        line="If you lose your phone, each code lets you in once. Keep them somewhere safe; they are not shown again."
+      >
+        <BackupStep codes={backupCodes} onDone={() => setAfter("look")} />
+      </WizardFrame>
+    );
+
+  if (email && after === "look")
+    return (
+      <WizardFrame
+        step={TOTAL}
+        total={TOTAL}
+        title="Choose how the admin looks"
+        line="Your choice shows at once and is yours alone. Change it any time under Your account, Appearance."
+      >
+        <AppearanceScreen initial={DEFAULT_APPEARANCE} siteDefault={DEFAULT_APPEARANCE} />
+        <div className="oks-wizard-foot">
+          <span />
+          <button type="button" className="oks-main-button" onClick={() => setAfter("ready")}>
+            Continue
+          </button>
+        </div>
+      </WizardFrame>
+    );
+
+  const protectedNow = backupCodes.length > 0;
   if (email)
     return (
       <section aria-labelledby="done" className="oks-wizard">
         <div className="oks-wizard-bar" role="img" aria-label="Setup finished">
-          {STEPS.map((s) => (
-            <span key={s.key} data-on="true" />
+          {Array.from({ length: TOTAL }, (_, i) => (
+            <span key={i} data-on="true" />
           ))}
         </div>
         <p className="oks-wizard-kicker">All done</p>
         <h1 id="done">Your site is ready</h1>
         <p className="oks-wizard-line">You are signed in as {email}.</p>
-        <p>
-          <strong>Recommended:</strong> turn on two-factor sign-in for your account. It asks for a
-          code from an app on your phone as well as your password. It takes about a minute, and you
-          can skip it and do it later on Your account.
-        </p>
+        {protectedNow ? (
+          <p>Two-factor sign-in is on.</p>
+        ) : (
+          <p>
+            <strong>Recommended:</strong> turn on two-factor sign-in for your account. It asks for a
+            code from an app on your phone as well as your password. It takes about a minute, and
+            you can do it later on Your account.
+          </p>
+        )}
         <ul className="oks-next-rows">
-          <li>
-            <a href="/admin/account">
-              <span className="oks-next-title">Set up two-factor sign-in</span>
-              <span className="oks-next-note">Recommended. About one minute.</span>
-            </a>
-          </li>
+          {protectedNow ? null : (
+            <li>
+              <a href="/admin/account">
+                <span className="oks-next-title">Set up two-factor sign-in</span>
+                <span className="oks-next-note">Recommended. About one minute.</span>
+              </a>
+            </li>
+          )}
           <li>
             <a href="/admin">
-              <span className="oks-next-title">Skip for now: open the dashboard</span>
+              <span className="oks-next-title">
+                {protectedNow ? "Open the dashboard" : "Skip for now: open the dashboard"}
+              </span>
               <span className="oks-next-note">Write pages, add pictures, change the look.</span>
             </a>
           </li>
@@ -175,15 +246,7 @@ export function SetupWizard() {
   const current = STEPS[step]!;
   const last = step === STEPS.length - 1;
   return (
-    <div className="oks-wizard">
-      <div className="oks-wizard-bar" role="img" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
-        {STEPS.map((s, i) => (
-          <span key={s.key} data-on={i <= step} />
-        ))}
-      </div>
-      <p className="oks-wizard-kicker">{`Step ${step + 1} of ${STEPS.length}`}</p>
-      <h1>{current.title}</h1>
-      <p className="oks-wizard-line">{current.line}</p>
+    <WizardFrame step={step + 1} total={TOTAL} title={current.title} line={current.line}>
       {problem ? <Alert color="danger" title="Setup did not finish" description={problem} /> : null}
       <form method="post" aria-label="Set up your site" onSubmit={onSubmit}>
         {step === 0 ? (
@@ -288,10 +351,10 @@ export function SetupWizard() {
             <span />
           )}
           <button type="submit" className="oks-main-button" disabled={busy}>
-            {last ? "Finish setup" : "Continue"}
+            {last ? "Create my site" : "Continue"}
           </button>
         </div>
       </form>
-    </div>
+    </WizardFrame>
   );
 }

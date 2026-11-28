@@ -910,7 +910,7 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("short");
     await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish setup" }).click();
+    await page.getByRole("button", { name: "Create my site" }).click();
     await page
       .getByText(/at least 10 characters/i)
       .first()
@@ -932,19 +932,83 @@ describe.skipIf(!findBrowser())("the setup wizard", () => {
     await page.getByLabel("Email").fill("anna@example.com");
     await page.getByLabel(/^Password/).fill("a-long-password");
     await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish setup" }).click();
-    await page.getByRole("heading", { name: "Your site is ready" }).waitFor();
+    await page.getByRole("button", { name: "Create my site" }).click();
+    // The site is made; two-factor sign-in comes next, with a picture to scan and the key as text.
+    const heading = (name: string) => page.getByRole("heading", { name, level: 1 }).waitFor();
+    const clean = async (step: string) => {
+      await noMotion(page);
+      await page.addScriptTag({ content: axe.source });
+      const result = await page.evaluate(() =>
+        (window as unknown as { axe: typeof axe }).axe.run(document, {
+          runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+        }),
+      );
+      expect(
+        result.violations.map(
+          (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+        ),
+        step,
+      ).toEqual([]);
+    };
+    await heading("Set up two-factor sign-in");
+    await page.getByRole("img", { name: "QR code for your authenticator app" }).waitFor();
+    const key = (await page.locator(".oks-tfa-scan code").textContent())!.trim();
+    await clean("two-factor");
+    await page.getByLabel("Code from your app").fill("000000");
+    await page.getByRole("button", { name: "Verify and continue" }).click();
+    await page.getByRole("alert").filter({ hasText: "That code is not right" }).waitFor();
+    await page.getByLabel("Code from your app").fill(generateSync({ secret: key }));
+    await page.getByRole("button", { name: "Verify and continue" }).click();
+    // The backup codes: ten of them, to copy or download, and a promise to keep them before going on.
+    await heading("Save your backup codes");
+    const codes = await page
+      .getByRole("list", { name: "Backup codes" })
+      .locator("li")
+      .allTextContents();
+    expect(codes).toHaveLength(10);
+    const onwards = page.getByRole("button", { name: "I saved them" });
+    expect(await onwards.isDisabled()).toBe(true);
+    await clean("backup codes");
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("backup-codes.txt");
+    expect(readFileSync((await download.path())!, "utf8")).toBe(`${codes.join("\n")}\n`);
+    await page.getByLabel("I have saved these codes in a safe place").check();
+    await onwards.click();
+    // The look of the admin: it shows at once and is kept for this person.
+    await heading("Choose how the admin looks");
+    await clean("look");
+    await page.getByRole("radio", { name: /Pine/ }).check({ force: true });
+    await page.getByText("Saved.", { exact: true }).waitFor();
+    expect(await page.locator(".oks-admin").getAttribute("data-look")).toBe("pine");
+    // The font of the look picked here is fetched and used without loading the page again.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            [...document.fonts].some(
+              (face) => face.family.includes("Manrope") && face.status === "loaded",
+            ),
+          ),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await heading("Your site is ready");
     expect(await page.getByText("signed in as anna@example.com").count()).toBe(1);
-    // Two-factor is recommended here, and can be skipped (it never blocks the owner).
-    await page.getByText("Recommended:").waitFor();
+    await page.getByText("Two-factor sign-in is on.").waitFor();
+    expect(await page.getByRole("link", { name: "Set up two-factor sign-in" }).count()).toBe(0);
+    expect(await page.getByRole("link", { name: "Open the dashboard" }).getAttribute("href")).toBe(
+      "/admin",
+    );
+    expect(Number((await db.run("select two_factor_enabled as e from users"))[0]!["e"])).toBe(1);
     expect(
-      await page.getByRole("link", { name: "Set up two-factor sign-in" }).getAttribute("href"),
-    ).toBe("/admin/account");
-    expect(
-      await page
-        .getByRole("link", { name: "Skip for now: open the dashboard" })
-        .getAttribute("href"),
-    ).toBe("/admin");
+      String(
+        (await db.run("select value from settings where key like 'appearance:%'"))[0]!["value"],
+      ),
+    ).toContain("pine");
 
     expect(await count("sites")).toBe(1);
     expect(await count("site_members")).toBe(1);
@@ -4755,8 +4819,16 @@ describe.skipIf(!findBrowser())(
       await page.getByLabel("Email").fill(owner.email);
       await page.getByLabel(/^Password/).fill(owner.password);
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Finish setup" }).click();
+      await page.getByRole("button", { name: "Create my site" }).click();
+      // Two-factor can be skipped (it never blocks the owner), and the look can be left as it is.
+      await page.getByRole("button", { name: "Skip for now" }).click();
+      await page.getByRole("heading", { name: "Choose how the admin looks" }).waitFor();
+      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("heading", { name: "Your site is ready" }).waitFor();
+      await page.getByText("Recommended:").waitFor();
+      expect(
+        await page.getByRole("link", { name: "Set up two-factor sign-in" }).getAttribute("href"),
+      ).toBe("/admin/account");
       await page.getByRole("link", { name: "Skip for now: open the dashboard" }).click();
       await page.getByRole("heading", { name: "Home", level: 1 }).waitFor();
       await page.getByText("Maple Street Bakery").first().waitFor();
@@ -10241,9 +10313,13 @@ describe.skipIf(!findBrowser())(
       expect(await axeViolations(page)).toEqual([]);
       await hit.click();
       await page.waitForURL(/\/admin\/pages\/[0-9A-Za-z-]+$/);
-      // The address changes before the search window has closed.
+      // The address changes before the search window has closed. The page editor has a "Search" button of its own, so
+      // the one of the header is meant.
       await page.getByRole("dialog").waitFor({ state: "detached" });
-      await page.getByRole("button", { name: "Search" }).click();
+      await page
+        .locator(".oks-header")
+        .getByRole("button", { name: "Search", exact: true })
+        .click();
       await page.getByPlaceholder("Search the admin").fill("zzzz nothing");
       await page
         .getByText(/No results|Nothing/i)

@@ -2,7 +2,8 @@
 // The sign-in screen of the admin. It talks to Better Auth's own route; a wrong password gets a plain sentence. When the
 // account uses two-factor, a second step asks for the code from the authenticator app, in six boxes (or a backup code).
 import { Alert, Button, PasswordField, TextField } from "oks-ui";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { CodeBoxes } from "./code-boxes";
 
 const MESSAGES: Record<number, string> = {
   401: "The email or the password is wrong.",
@@ -15,35 +16,6 @@ const CODE_MESSAGES: Record<number, string> = {
   403: "Your sign-in took too long. Start again with your password.",
   429: "Too many tries. Wait a minute and try again.",
 };
-
-/**
- * One real field, so that pasting and the phone's own code suggestion work, with six boxes drawn from what it holds.
- */
-function CodeBoxes({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const field = useRef<HTMLInputElement>(null);
-  useEffect(() => field.current?.focus(), []);
-  return (
-    <div className="oks-code">
-      <input
-        ref={field}
-        name="code"
-        aria-label="Code from your authenticator app"
-        autoComplete="one-time-code"
-        inputMode="numeric"
-        required
-        value={value}
-        onChange={(event) => onChange(event.target.value.replace(/\D/g, "").slice(0, 6))}
-      />
-      <div aria-hidden="true">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <span key={i} data-next={i === Math.min(value.length, 5) ? "" : undefined}>
-            {value[i] ?? ""}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function LoginScreen({
   before,
@@ -140,7 +112,7 @@ export function LoginScreen({
               autoComplete="one-time-code"
             />
           ) : (
-            <CodeBoxes value={code} onChange={setCode} />
+            <CodeBoxes label="Code from your authenticator app" value={code} onChange={setCode} />
           )}
           <Button type="submit" color="primary" isDisabled={busy}>
             Verify

@@ -3,8 +3,8 @@
 // backup codes, and is only finished when the person types a right code. Turning it off or making new backup codes asks
 // for the password again.
 import { Alert, Button, PasswordField, TextField } from "oks-ui";
-import qrcode from "qrcode-generator";
 import { useState, type FormEvent } from "react";
+import { qrOf } from "./qr";
 
 const failure = (body: unknown, fallback: string): string =>
   (body as { message?: string } | null)?.message ?? fallback;
@@ -20,13 +20,6 @@ async function call(path: string, data: Record<string, unknown>) {
 }
 
 const WRONG_PASSWORD = "The password is not right.";
-
-function qrOf(uri: string): string {
-  const code = qrcode(0, "M");
-  code.addData(uri);
-  code.make();
-  return code.createDataURL(5, 8);
-}
 
 function BackupCodes({ codes }: { codes: string[] }) {
   return (

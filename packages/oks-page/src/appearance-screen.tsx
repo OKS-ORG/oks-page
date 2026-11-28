@@ -9,6 +9,7 @@ import {
   type AppearanceMode,
 } from "@oks-page/core/appearance";
 import { LOOK_KEYS, LOOKS, type LookKey } from "@oks-page/core/looks";
+import { fontFaceCss } from "@oks-page/core/theme";
 import { Alert, Button } from "oks-ui";
 import { useEffect, useRef, useState } from "react";
 import { ChoiceCard } from "./choice-card";
@@ -106,6 +107,14 @@ export function AppearanceScreen({
   const adjusted = accentAdjusted(a.look, a.accent);
   return (
     <div className="oks-appearance">
+      {/* The page came with the fonts of the look it had; a look picked here needs its own at once. */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: fontFaceCss([
+            ...new Set([LOOKS[a.look].fonts.heading, LOOKS[a.look].fonts.text]),
+          ]),
+        }}
+      />
       {needsAppearanceCss(a) ? (
         <style dangerouslySetInnerHTML={{ __html: appearanceCss(a) }} />
       ) : null}
