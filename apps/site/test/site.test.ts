@@ -7514,7 +7514,7 @@ describe.skipIf(!findBrowser())(
       const page = await signedIn(owner);
       {
         await page.goto(site.base + "/admin/settings/content-types");
-        await page.getByRole("button", { name: "Add a content type" }).click();
+        await page.getByRole("button", { name: "New content type" }).click();
         await page.getByLabel("Name", { exact: true }).fill("Gadget");
         // The key follows the name until it is set by hand.
         expect(await page.getByLabel(/^Key/).inputValue()).toBe("gadget");

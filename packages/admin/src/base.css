@@ -2405,3 +2405,175 @@ main .oks-list-tabs > a[aria-current="page"] {
   color: var(--adm-muted);
   font-size: 13px;
 }
+
+/* ---- Content types (step 8): the list of types on the left, the chosen type and its fields on the right. ---- */
+.oks-types {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .oks-types {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.oks-shell-body > main .oks-types > * {
+  margin: 0;
+}
+.oks-type-list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-type-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--adm-radius);
+  background: transparent;
+  color: var(--adm-ink);
+  font: inherit;
+  text-align: start;
+}
+button.oks-type-row {
+  cursor: pointer;
+}
+button.oks-type-row:hover {
+  background: var(--adm-row-hover);
+}
+button.oks-type-row:focus-visible {
+  outline: 2px solid var(--adm-ring);
+  outline-offset: -2px;
+}
+.oks-type-row[aria-current="true"] {
+  background: var(--adm-soft);
+}
+.oks-type-form {
+  container: types / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+  padding: 20px 24px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius-card);
+}
+.oks-type-form > * {
+  margin: 0;
+}
+.oks-type-basics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.oks-type-basics > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.oks-type-fields-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--adm-line);
+}
+.oks-type-fields-head h4 {
+  margin: 0;
+  font-size: 16px;
+}
+.oks-field-head,
+.oks-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) repeat(3, 84px) 90px;
+  gap: 12px;
+  align-items: center;
+}
+.oks-field-head {
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.oks-field-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--adm-line);
+}
+.oks-field-names {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.oks-admin .oks-field-row input:not([type="checkbox"]),
+.oks-admin .oks-field-row select {
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--adm-control);
+  border-radius: var(--adm-radius);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+  font: inherit;
+  font-size: 14px;
+}
+/* The words beside a tick are for screen readers here (the column heading shows them); under 900 px they show again. */
+.oks-field-tick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 24px;
+  min-width: 24px;
+}
+.oks-field-tick > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* When the card is narrow (beside the settings menu, or on a small screen) a field takes two lines, and each tick shows its words. */
+@container types (max-width: 760px) {
+  .oks-field-head {
+    display: none;
+  }
+  .oks-field-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .oks-field-row > .oks-field-names:first-child {
+    grid-column: span 2;
+  }
+  .oks-field-row > .oks-field-names:nth-child(2) {
+    align-self: start;
+  }
+  .oks-field-tick {
+    justify-content: flex-start;
+  }
+  .oks-field-tick > span {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    font-size: 13px;
+  }
+  .oks-field-row > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
